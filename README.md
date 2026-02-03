@@ -1,2 +1,1 @@
-# Iron-Abomination
-senior capstone 
+_____________ is an AI-assisted task management system that transforms unstructured inputs like emails, audio notes, and text into structured, actionable tasks. It uses lightweight learning and scheduling heuristics to generate reminders and schedule recommendations while keeping users in control.

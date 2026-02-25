@@ -7,3 +7,15 @@ CREATE TABLE raw_inputs (
     received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+DROP TABLE IF EXISTS tasks;
+
+CREATE TABLE tasks (
+    task_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    raw_id INTEGER,
+    task_text TEXT NOT NULL,
+    deadline TIMESTAMP,
+    confidence INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (raw_id) REFERENCES raw_inputs(raw_id)
+);

@@ -1,9 +1,24 @@
-DROP TABLE IF EXISTS raw_inputs; 
+DROP TABLE IF EXISTS tasks;
+DROP TABLE IF EXISTS raw_inputs;
 
 CREATE TABLE raw_inputs (
     raw_id INTEGER PRIMARY KEY AUTOINCREMENT,
     content TEXT NOT NULL,
-    source_type TEXT,
+    source_type TEXT DEFAULT 'text',
+    source_id TEXT,
     received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE tasks (
+    task_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    raw_id INTEGER,
+    title TEXT NOT NULL,
+    due_date DATE,
+    due_text TEXT,
+    assignee TEXT DEFAULT 'me',
+    priority TEXT DEFAULT 'normal',
+    confidence REAL,
+    status TEXT DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (raw_id) REFERENCES raw_inputs(raw_id)
+);

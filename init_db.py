@@ -1,6 +1,6 @@
 import sqlite3
 def init_db():
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect('clerk.db')
     c = conn.cursor()
     c.execute('''
         CREATE TABLE IF NOT EXISTS raw_inputs (

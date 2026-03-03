@@ -1,8 +1,8 @@
 import sqlite3
 def init_db():
     conn = sqlite3.connect('clerk.db')
-    c = conn.cursor()
-    c.execute('''
+    cursor = conn.cursor()
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS raw_inputs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             content TEXT NOT NULL,
@@ -12,7 +12,7 @@ def init_db():
         )
     ''')
     
-    c.execute('''
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS tasks (
         task_id INTEGER PRIMARY KEY AUTOINCREMENT,
         raw_id INTEGER,

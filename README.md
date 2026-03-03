@@ -8,7 +8,10 @@ The goal of Clerk is simple: **reduce manual task entry and make scheduling effo
 ---
 
 ## Features
-will update as project goes along
+* **Multi-Modal Ingestion:** Support for raw text, `.txt` file uploads, and audio transcriptions.
+* **Intelligent Extraction:** Automated identification of deadlines, durations, and priorities.
+* **Confidence Scoring:** Ambiguous tasks are flagged for review rather than "guessed" by the AI.
+* **Heuristic Scheduling:** An adaptive engine that learns user work-hour preferences and optimizes the daily timeline.
 
 ---
 ## Languages and Software  

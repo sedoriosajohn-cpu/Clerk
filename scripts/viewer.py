@@ -1,33 +1,35 @@
 import sqlite3
+import os
 
-def view_all_tasks():
-    # 1. Connect to the same clerk.db
-    conn = sqlite3.connect('clerk.db')
+def view_database():
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    DB_PATH = os.path.join(BASE_DIR, "data", "clerk.db")
+    
+    print(f"🔍 DEBUG: Absolute path used: {DB_PATH}")
+
+    if not os.path.exists(DB_PATH):
+        print(f"❌ Error: Database NOT FOUND at {DB_PATH}")
+        return
+    
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    try:
-        # 2. Query all tasks with their raw text context
-        print("--- CURRENT TASKS IN DATABASE ---")
-        query = """
-            SELECT t.task_id, t.title, t.due_text, t.status, r.content
-            FROM tasks t
-            JOIN raw_inputs r ON t.raw_id = r.raw_id
-        """
-        cursor.execute(query)
-        rows = cursor.fetchall()
+    print("\n--- RAW INPUTS TABLE ---")
+    cursor.execute("SELECT * FROM raw_inputs")
+    rows = cursor.fetchall()
+    for row in rows:
+        print(row)
 
-        if not rows:
-            print("The database is currently empty.")
-        else:
-            for row in rows:
-                print(f"ID: {row[0]} | Task: {row[1]} | Due: {row[2]} | Status: {row[3]}")
-                print(f"   Source Text: \"{row[4]}\"")
-                print("-" * 30)
+    print("\n--- TASKS TABLE ---")
+    cursor.execute("SELECT * FROM tasks")
+    tasks = cursor.fetchall()
+    if not tasks:
+        print("(No tasks found yet)")
+    for task in tasks:
+        print(task)
 
-    except sqlite3.Error as e:
-        print(f"Error reading database: {e}")
-    finally:
-        conn.close()
+    conn.close()
 
 if __name__ == "__main__":
-    view_all_tasks()
+    view_database()

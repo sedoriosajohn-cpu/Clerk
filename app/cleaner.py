@@ -7,7 +7,7 @@ DB_PATH = os.path.join(BASE_DIR, "..", "data", "clerk.db")
 
 def save_task_to_db(raw_text, task_data):
     if not os.path.exists(os.path.dirname(DB_PATH)):
-        print(f"❌ Error: Data directory not found at {os.path.dirname(DB_PATH)}")
+        print(f"Error: Data directory not found at {os.path.dirname(DB_PATH)}")
         return
 
     conn = sqlite3.connect(DB_PATH)

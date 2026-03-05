@@ -1,9 +1,11 @@
-# --- Database ---
-# We share the init_db.py script, NOT the actual data file
-clerk.db
+# --- Databases ---
+# Ignores the entire data folder and any sqlite files
+data/
+*.db
+*.sqlite3
 
 # --- Python Environment ---
-# Keeps your local libraries and cache out of the repo
+# Keeps local libraries and cache out of the repo
 __pycache__/
 *.py[cod]
 *$py.class
@@ -14,10 +16,10 @@ build/
 dist/
 
 # --- Environment Variables ---
-# IMPORTANT: This keeps your OpenAI API keys secret!
+# For future API keys (like OpenAI or Clerk.dev)
 .env
 
-# --- Editor Specific ---
-# Keeps your personal VS Code settings out of the team repo
+# --- Editor Settings ---
+# Keeps personal VS Code settings out of the team repo
 .vscode/
 .DS_Store

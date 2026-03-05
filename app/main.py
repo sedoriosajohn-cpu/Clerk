@@ -35,3 +35,20 @@ async def get_all_tasks():
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM tasks")
         return {"tasks": [dict(row) for row in cursor.fetchall()]}
+    
+@app.delete("/tasks/{task_id}")
+async def delete_task(task_id: int):
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            #check if it exists first
+            cursor.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="Task not found")
+            
+            #deletes just the task
+            cursor.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
+            conn.commit()
+            return {"message": f"Task {task_id} deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

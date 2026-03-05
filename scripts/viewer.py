@@ -9,7 +9,7 @@ def view_database():
     print(f"🔍 DEBUG: Absolute path used: {DB_PATH}")
 
     if not os.path.exists(DB_PATH):
-        print(f"❌ Error: Database NOT FOUND at {DB_PATH}")
+        print(f"Error: Database NOT FOUND at {DB_PATH}")
         return
     
     conn = sqlite3.connect(DB_PATH)

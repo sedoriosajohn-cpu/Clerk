@@ -324,6 +324,11 @@ button{
   cursor:pointer
 }
 
+button:disabled{
+  opacity:.7;
+  cursor:not-allowed
+}
+
 .ghost{
   background:#f5fbfb;
   color:var(--teal-dark);
@@ -385,11 +390,6 @@ button{
   display:block
 }
 
-@media (max-width:980px){
-  .layout{grid-template-columns:1fr}
-  .agenda-item{grid-template-columns:1fr;gap:10px}
-  .demo-grid{grid-template-columns:1fr}
-}
 .insights-panel{
   padding:26px;
   margin-top:34px;
@@ -513,12 +513,12 @@ button{
     <span>CLERK</span>
   </div>
 
-<nav class="nav">
-  <a href="#">Calendar</a>
-  <a href="#">My Tasks</a>
-  <a href="#" class="active">Agenda</a>
-  <a href="#insightsSection">Clerk Insights</a>
-</nav>
+  <nav class="nav">
+    <a href="#">Calendar</a>
+    <a href="#">My Tasks</a>
+    <a href="#" class="active">Agenda</a>
+    <a href="#insightsSection">Clerk Insights</a>
+  </nav>
 
   <div class="avatar">👤</div>
 </header>
@@ -563,7 +563,6 @@ button{
         <h2>Today's Agenda</h2>
 
         <div class="agenda-list" id="agendaList">
-
           <div class="agenda-item" data-sort="540">
             <div class="time">9:00 AM</div>
             <div>
@@ -614,16 +613,13 @@ button{
               </div>
             </div>
           </div>
-
         </div>
       </section>
 
       <section class="panel">
-  <h2>New Tasks</h2>
-
-  <div class="agenda-list" id="newTasksList">
-  </div>
-</section>
+        <h2>New Tasks</h2>
+        <div class="agenda-list" id="newTasksList"></div>
+      </section>
 
       <section class="composer">
         <h2>Add a Task</h2>
@@ -679,56 +675,57 @@ button{
 
           <div class="status" id="statusMsg">Task added to today’s agenda.</div>
         </div>
+
         <section class="panel insights-panel" id="insightsSection">
-  <div class="insights-header">
-    <div>
-      <div class="insights-kicker">AI Review Layer</div>
-      <h2 style="margin:0;">Clerk Insights</h2>
-      <div class="insights-subtitle">
-        AI-generated feedback based on schedule patterns, active tasks, and recent user behavior.
-      </div>
-    </div>
-    <div class="insights-badge">Updated for Tue, Mar 10</div>
-  </div>
+          <div class="insights-header">
+            <div>
+              <div class="insights-kicker">AI Review Layer</div>
+              <h2 style="margin:0;">Clerk Insights</h2>
+              <div class="insights-subtitle">
+                AI-generated feedback based on schedule patterns, active tasks, and recent user behavior.
+              </div>
+            </div>
+            <div class="insights-badge">Updated for Tue, Mar 10</div>
+          </div>
 
-  <div class="insights-grid">
-    <div class="insight-card">
-      <div class="insight-type">Scheduling Conflict</div>
-      <div class="insight-title">Possible overlap at 5:00 PM</div>
-      <div class="insight-body">
-        Your Quarterly Report deadline is set for 5:00 PM, but travel time from your 4:30 PM vendor call could cause a delay. Clerk recommends moving preparation for the report to an earlier block today.
-      </div>
-      <div class="insight-footer">
-        <span class="insight-chip warn">High Impact</span>
-        <span class="insight-link">Suggest reschedule</span>
-      </div>
-    </div>
+          <div class="insights-grid">
+            <div class="insight-card">
+              <div class="insight-type">Scheduling Conflict</div>
+              <div class="insight-title">Possible overlap at 5:00 PM</div>
+              <div class="insight-body">
+                Your Quarterly Report deadline is set for 5:00 PM, but travel time from your 4:30 PM vendor call could cause a delay. Clerk recommends moving preparation for the report to an earlier block today.
+              </div>
+              <div class="insight-footer">
+                <span class="insight-chip warn">High Impact</span>
+                <span class="insight-link">Suggest reschedule</span>
+              </div>
+            </div>
 
-    <div class="insight-card">
-      <div class="insight-type">History-Based Reminder</div>
-      <div class="insight-title">You usually prep reports by lunch</div>
-      <div class="insight-body">
-        Based on your past three report deadlines, you tend to begin preparation around 12:00 PM. Clerk suggests blocking 12:15 PM to 1:00 PM today so the quarterly report is finished before the deadline window.
-      </div>
-      <div class="insight-footer">
-        <span class="insight-chip info">Pattern Detected</span>
-        <span class="insight-link">Add focus block</span>
-      </div>
-    </div>
+            <div class="insight-card">
+              <div class="insight-type">History-Based Reminder</div>
+              <div class="insight-title">You usually prep reports by lunch</div>
+              <div class="insight-body">
+                Based on your past three report deadlines, you tend to begin preparation around 12:00 PM. Clerk suggests blocking 12:15 PM to 1:00 PM today so the quarterly report is finished before the deadline window.
+              </div>
+              <div class="insight-footer">
+                <span class="insight-chip info">Pattern Detected</span>
+                <span class="insight-link">Add focus block</span>
+              </div>
+            </div>
 
-    <div class="insight-card">
-      <div class="insight-type">Energy Optimization</div>
-      <div class="insight-title">Best time for outreach: late morning</div>
-      <div class="insight-body">
-        Clerk noticed you typically complete short communication tasks faster between 10:30 AM and 11:30 AM. It recommends placing your insurance follow-up and any client emails in that time range for a lighter end-of-day schedule.
-      </div>
-      <div class="insight-footer">
-        <span class="insight-chip success">Efficiency Boost</span>
-        <span class="insight-link">Optimize agenda</span>
-      </div>
-    </div>
-  </div>
-</section>
+            <div class="insight-card">
+              <div class="insight-type">Energy Optimization</div>
+              <div class="insight-title">Best time for outreach: late morning</div>
+              <div class="insight-body">
+                Clerk noticed you typically complete short communication tasks faster between 10:30 AM and 11:30 AM. It recommends placing your insurance follow-up and any client emails in that time range for a lighter end-of-day schedule.
+              </div>
+              <div class="insight-footer">
+                <span class="insight-chip success">Efficiency Boost</span>
+                <span class="insight-link">Optimize agenda</span>
+              </div>
+            </div>
+          </div>
+        </section>
       </section>
 
     </section>
@@ -759,110 +756,51 @@ const today = {
   short: 'Tue, Mar 10, 2026'
 };
 
-const sampleMappings = [
-  {
-    match: 'proposal',
-    title: 'Send Updated Proposal to Client',
-    description: 'Finalize the revised proposal and send it to the client before the afternoon deadline.',
-    due: 'Thursday, March 12, 2026, 3:00 PM',
-    dateLabel: 'Thu, Mar 12, 2026 • 3:00 PM',
-    time: '3:00 PM',
-    priority: 'High',
-    confidence: '95'
-  },
-  {
-    match: 'budget',
-    title: 'Review Project Budget',
-    description: 'Review the updated budget before the Friday meeting and flag any issues.',
-    due: 'Friday, March 13, 2026, 9:00 AM',
-    dateLabel: 'Fri, Mar 13, 2026 • 9:00 AM',
-    time: '9:00 AM',
-    priority: 'Medium',
-    confidence: '87'
-  },
-  {
-    match: 'marketing contract',
-    title: 'Follow Up with Sarah',
-    description: 'Reach out to Sarah next week to discuss the marketing contract and next steps.',
-    due: 'Monday, March 16, 2026, 10:30 AM',
-    dateLabel: 'Mon, Mar 16, 2026 • 10:30 AM',
-    time: '10:30 AM',
-    priority: 'Normal',
-    confidence: '78'
-  }
-];
-
-function fallbackExtraction(text) {
-  const cleaned = text.trim();
-  let priority = 'Normal';
-  let confidence = '82';
-  let due = 'Wednesday, March 11, 2026, 2:00 PM';
-  let dateLabel = 'Wed, Mar 11, 2026 • 2:00 PM';
-  let time = '2:00 PM';
-
-  const timeMatch = cleaned.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
-
-  if (timeMatch) {
-    const hour = timeMatch[1];
-    const minutes = timeMatch[2] ? timeMatch[2] : '00';
-    const meridiem = timeMatch[3].toUpperCase();
-    time = `${hour}:${minutes} ${meridiem}`;
-  }
-
-  if (/urgent|asap|immediately|today/i.test(cleaned)) {
-    priority = 'High';
-    confidence = '93';
-    due = `Tuesday, March 10, 2026, ${time}`;
-    dateLabel = `Tue, Mar 10, 2026 • ${time}`;
-  } else if (/tomorrow/i.test(cleaned)) {
-    due = `Wednesday, March 11, 2026, ${time}`;
-    dateLabel = `Wed, Mar 11, 2026 • ${time}`;
-    confidence = '85';
-  } else if (/next week/i.test(cleaned)) {
-    due = `Monday, March 16, 2026, ${time}`;
-    dateLabel = `Mon, Mar 16, 2026 • ${time}`;
-    confidence = '76';
-  } else if (/friday/i.test(cleaned)) {
-    due = `Friday, March 13, 2026, ${time}`;
-    dateLabel = `Fri, Mar 13, 2026 • ${time}`;
-    confidence = '88';
-  } else if (/thursday/i.test(cleaned)) {
-    due = `Thursday, March 12, 2026, ${time}`;
-    dateLabel = `Thu, Mar 12, 2026 • ${time}`;
-    confidence = '86';
-  } else {
-    due = `Wednesday, March 11, 2026, ${time}`;
-    dateLabel = `Wed, Mar 11, 2026 • ${time}`;
-  }
-
-  return {
-    title: cleaned.length > 42 ? cleaned.slice(0, 42) + '...' : cleaned,
-    description: 'AI extracted this task from natural language input and prepared it for scheduling.',
-    due,
-    dateLabel,
-    time,
-    priority,
-    confidence
-  };
+function capitalizePriority(priority) {
+  if (!priority) return 'Normal';
+  const p = String(priority).toLowerCase().trim();
+  return p.charAt(0).toUpperCase() + p.slice(1);
 }
 
-function extractTask(text) {
-  const lower = text.toLowerCase();
-  const found = sampleMappings.find(item => lower.includes(item.match));
-  return found || fallbackExtraction(text);
+function formatDateLabel(isoString) {
+  const date = new Date(isoString);
+
+  if (Number.isNaN(date.getTime())) {
+    return 'No due date';
+  }
+
+  const datePart = date.toLocaleDateString([], {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+
+  const timePart = date.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+
+  return `${datePart} • ${timePart}`;
 }
 
 function renderOutput(task) {
-  outTitle.textContent = task.title;
-  outPriority.textContent = task.priority;
-  outDue.textContent = task.due;
-  outConfidence.textContent = `${task.confidence}%`;
-  outDescription.textContent = task.description;
+  outTitle.textContent = task.title || '—';
+  outPriority.textContent = task.priority || '—';
+  outDue.textContent = task.due || '—';
+  outConfidence.textContent =
+    task.confidence !== undefined && task.confidence !== null
+      ? `${task.confidence}%`
+      : '—';
+  outDescription.textContent = task.description || '—';
+
   demoPanel.classList.add('show');
   statusMsg.classList.remove('show');
 }
 
 function timeToMinutes(timeStr) {
+  if (!timeStr || !/\d/.test(timeStr)) return 9999;
+
   const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
   if (!match) return 9999;
 
@@ -874,26 +812,6 @@ function timeToMinutes(timeStr) {
   if (meridiem === 'AM' && hour === 12) hour = 0;
 
   return hour * 60 + minute;
-}
-
-function insertTaskChronologically(item, minutes) {
-  item.dataset.sort = minutes;
-  const existingItems = Array.from(agendaList.querySelectorAll('.agenda-item'));
-
-  let inserted = false;
-
-  for (const existing of existingItems) {
-    const existingMinutes = parseInt(existing.dataset.sort || '9999', 10);
-    if (minutes < existingMinutes) {
-      agendaList.insertBefore(item, existing);
-      inserted = true;
-      break;
-    }
-  }
-
-  if (!inserted) {
-    agendaList.appendChild(item);
-  }
 }
 
 function insertTaskIntoList(listElement, item, minutes) {
@@ -923,14 +841,14 @@ let listening = false;
 
 if (!SpeechRecognition) {
   voiceBtn.disabled = true;
-  voiceBtn.textContent = "🎤 Voice Unavailable";
+  voiceBtn.textContent = '🎤 Voice Unavailable';
 } else {
   recognition = new SpeechRecognition();
-  recognition.lang = "en-US";
+  recognition.lang = 'en-US';
   recognition.continuous = false;
   recognition.interimResults = false;
 
-  voiceBtn.addEventListener("click", () => {
+  voiceBtn.addEventListener('click', () => {
     if (listening) {
       recognition.stop();
       return;
@@ -940,7 +858,7 @@ if (!SpeechRecognition) {
 
   recognition.onstart = () => {
     listening = true;
-    voiceBtn.textContent = "🎤 Listening...";
+    voiceBtn.textContent = '🎤 Listening...';
   };
 
   recognition.onresult = (event) => {
@@ -950,16 +868,16 @@ if (!SpeechRecognition) {
 
   recognition.onerror = (event) => {
     console.error(event.error);
-    alert("Voice recognition error. Try again.");
+    alert('Voice recognition error. Try again.');
   };
 
   recognition.onend = () => {
     listening = false;
-    voiceBtn.textContent = "🎤 Voice";
+    voiceBtn.textContent = '🎤 Voice';
   };
 }
 
-processBtn.addEventListener('click', () => {
+processBtn.addEventListener('click', async () => {
   const text = taskInput.value.trim();
 
   if (!text) {
@@ -967,8 +885,50 @@ processBtn.addEventListener('click', () => {
     return;
   }
 
-  currentTask = extractTask(text);
-  renderOutput(currentTask);
+  processBtn.disabled = true;
+  processBtn.textContent = 'Processing...';
+
+  try {
+    const response = await fetch('/extract-task', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ text })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || 'Failed to process task.');
+    }
+
+    if (!result.task) {
+      throw new Error('No task returned from server.');
+    }
+
+    currentTask = {
+      title: result.task.title || 'Untitled Task',
+      description: result.task.description || 'No description provided.',
+      due: result.task.due || 'No due date',
+      dateLabel: result.task.due_date
+        ? formatDateLabel(result.task.due_date)
+        : 'No due date',
+      time: result.task.time || 'No time',
+      priority: capitalizePriority(result.task.priority),
+      confidence: result.task.confidence ?? '—',
+      due_date: result.task.due_date || null,
+      assignee: result.task.assignee || null
+    };
+
+    renderOutput(currentTask);
+  } catch (error) {
+    console.error(error);
+    alert(error.message || 'Something went wrong while extracting the task.');
+  } finally {
+    processBtn.disabled = false;
+    processBtn.textContent = 'Add Task';
+  }
 });
 
 agendaBtn.addEventListener('click', () => {
@@ -978,32 +938,24 @@ agendaBtn.addEventListener('click', () => {
   item.className = 'agenda-item';
 
   const priority = (currentTask.priority || '').toLowerCase();
-  let highlightClass = 'teal';
-  if (priority.includes('high')) highlightClass = 'pink';
-  else if (priority.includes('medium')) highlightClass = 'gold';
 
-  const badge = priority.includes('high')
-    ? `<div class="pill">High Priority</div>`
-    : '';
-
-item.innerHTML = `
-  <div class="time">${currentTask.time || '2:00 PM'}</div>
-  <div>
-    <div class="task-title">✨ ${currentTask.title}</div>
-    ${priority.includes('high') ? '<div class="pill">High Priority</div>' : ''}
-    <div class="task-sub">${currentTask.description}</div>
-    <div class="meta-row">
-      <span class="date-label">${currentTask.dateLabel || `${today.short} • ${currentTask.time || '2:00 PM'}`}</span>
-      <span class="confidence-pill">Confidence: ${currentTask.confidence || '82'}%</span>
+  item.innerHTML = `
+    <div class="time">${currentTask.time || 'No time'}</div>
+    <div>
+      <div class="task-title">✨ ${currentTask.title}</div>
+      ${priority.includes('high') ? '<div class="pill">High Priority</div>' : ''}
+      <div class="task-sub">${currentTask.description}</div>
+      <div class="meta-row">
+        <span class="date-label">${currentTask.dateLabel || 'No due date'}</span>
+        <span class="confidence-pill">Confidence: ${currentTask.confidence || '—'}%</span>
+      </div>
     </div>
-  </div>
-`;
+  `;
 
-  const minutes = timeToMinutes(currentTask.time || '3:00 PM');
+  const minutes = timeToMinutes(currentTask.time || '11:59 PM');
   insertTaskIntoList(newTasksList, item, minutes);
 
   statusMsg.classList.add('show');
-  updateInsights();
 });
 
 clearBtn.addEventListener('click', () => {

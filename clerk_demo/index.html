@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clerk Demo</title>
+
+<style>
+:root{
+  --text:#436172;
+  --muted:#7f98a5;
+  --line:#e3eaee;
+  --teal:#6ad0c7;
+  --teal-dark:#47b9b2;
+  --teal-soft:#dff4f2;
+  --pink:#ef7f93;
+  --yellow:#f1cd74;
+  --shadow:0 10px 28px rgba(79,113,130,.12);
+}
+
+*{box-sizing:border-box}
+
+body{
+  margin:0;
+  font-family:Arial,Helvetica,sans-serif;
+  background:radial-gradient(circle at top left,#dff5f2 0%,#eef3f5 32%,#f7f8fa 100%);
+  color:var(--text)
+}
+
+.topbar{
+  height:86px;
+  background:rgba(255,255,255,.75);
+  border-bottom:1px solid rgba(200,215,222,.7);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 34px
+}
+
+.brand{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  font-weight:700;
+  font-size:34px
+}
+
+.brand img{
+  width:54px;
+  height:54px;
+  border-radius:50%;
+  background:white;
+  object-fit:cover
+}
+
+.nav{
+  display:flex;
+  gap:18px;
+  font-size:17px
+}
+
+.nav a{
+  color:var(--text);
+  text-decoration:none;
+  padding:12px 18px;
+  border-radius:14px
+}
+
+.nav a.active{
+  background:var(--teal-soft)
+}
+
+.avatar{
+  width:54px;
+  height:54px;
+  border-radius:50%;
+  background:linear-gradient(135deg,#d8f2ef,#fff);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:24px
+}
+
+.page{
+  max-width:1240px;
+  margin:auto;
+  padding:28px 24px 60px
+}
+
+.layout{
+  display:grid;
+  grid-template-columns:280px 1fr;
+  gap:26px
+}
+
+.sidebar,.panel,.composer{
+  background:rgba(255,255,255,.82);
+  border:1px solid rgba(221,230,235,.95);
+  border-radius:26px;
+  box-shadow:var(--shadow)
+}
+
+.sidebar{
+  padding:22px
+}
+
+.month-card{
+  background:linear-gradient(180deg,#f4fbfb,#fff);
+  border-radius:20px;
+  padding:20px
+}
+
+.month-row{
+  display:flex;
+  justify-content:space-between;
+  font-size:18px;
+  font-weight:700;
+  margin-bottom:16px
+}
+
+.calendar-grid{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap:8px;
+  text-align:center;
+  font-size:14px;
+  color:var(--muted)
+}
+
+.calendar-grid .dayname{
+  font-weight:700
+}
+
+.calendar-grid div{
+  padding:6px 0;
+  border-radius:50px
+}
+
+.calendar-grid .selected{
+  background:var(--teal);
+  color:white;
+  font-weight:700
+}
+
+.filters{
+  margin-top:26px
+}
+
+.filters h3{
+  margin:0 0 18px;
+  font-size:18px
+}
+
+.filter-item{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin-bottom:16px;
+  font-size:16px
+}
+
+.check{
+  width:22px;
+  height:22px;
+  border-radius:6px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  color:white;
+  font-size:14px;
+  font-weight:700
+}
+
+.red{background:#d98d87}
+.green{background:#68c8bb}
+.blue{background:#58c0e3}
+.gold{background:#e5c269}
+
+.main-stack{
+  display:grid;
+  gap:24px
+}
+
+.today-header{
+  text-align:center
+}
+
+.today-header h1{
+  margin:12px 0 16px;
+  font-size:28px
+}
+
+.today-header .line{
+  height:1px;
+  background:#dce6ea
+}
+
+.panel,.composer{
+  padding:26px
+}
+
+.panel h2,.composer h2{
+  margin:0 0 20px;
+  font-size:24px
+}
+
+.agenda-list{
+  display:grid
+}
+
+.agenda-item{
+  display:grid;
+  grid-template-columns:120px 1fr;
+  gap:18px;
+  padding:22px 4px;
+  border-top:1px solid var(--line)
+}
+
+.agenda-item:first-child{
+  border-top:none
+}
+
+.time{
+  font-size:18px;
+  font-weight:700
+}
+
+.task-main{
+  display:inline-block;
+  padding:14px 18px;
+  border-radius:14px;
+  min-width:260px
+}
+
+.task-main.teal{background:rgba(106,208,199,.18)}
+.task-main.pink{background:rgba(239,127,147,.92);color:white}
+.task-main.gold{background:rgba(241,205,116,.78)}
+
+.task-title{
+  font-size:20px;
+  font-weight:700
+}
+
+.task-sub{
+  font-size:14px;
+  color:var(--muted);
+  margin-top:8px
+}
+
+.meta-row{
+  margin-top:8px;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap
+}
+
+.date-label{
+  font-size:13px;
+  color:var(--muted)
+}
+
+.confidence-pill{
+  font-size:12px;
+  padding:4px 8px;
+  border-radius:12px;
+  background:var(--teal-soft);
+  color:var(--teal-dark);
+  font-weight:700
+}
+
+.pill{
+  display:inline-block;
+  font-size:12px;
+  padding:6px 10px;
+  border-radius:10px;
+  background:rgba(0,0,0,.12);
+  margin-top:4px
+}
+
+.subline{
+  height:1px;
+  background:#dce6ea;
+  margin:14px 0 22px
+}
+
+label{
+  display:block;
+  font-size:18px;
+  font-weight:700;
+  margin-bottom:14px
+}
+
+textarea{
+  width:100%;
+  min-height:92px;
+  border:1px solid #d7e2e7;
+  border-radius:16px;
+  padding:18px;
+  font-size:18px;
+  resize:vertical;
+  outline:none
+}
+
+.composer-actions{
+  display:flex;
+  justify-content:space-between;
+  margin-top:16px;
+  flex-wrap:wrap;
+  gap:14px
+}
+
+.left-buttons,.sample-buttons,.demo-actions{
+  display:flex;
+  gap:12px;
+  flex-wrap:wrap
+}
+
+button{
+  border:none;
+  border-radius:12px;
+  padding:14px 18px;
+  font-size:16px;
+  font-weight:700;
+  cursor:pointer
+}
+
+.ghost{
+  background:#f5fbfb;
+  color:var(--teal-dark);
+  border:1px solid #d8ecea
+}
+
+.primary{
+  background:linear-gradient(135deg,var(--teal),var(--teal-dark));
+  color:white
+}
+
+.demo-panel{
+  margin-top:22px;
+  display:none;
+  border:1px solid #dce9ed;
+  background:#fff;
+  border-radius:18px;
+  padding:20px
+}
+
+.demo-panel.show{
+  display:block
+}
+
+.demo-grid{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:14px
+}
+
+.demo-field{
+  background:white;
+  border:1px solid #e4ecef;
+  border-radius:14px;
+  padding:14px
+}
+
+.demo-label{
+  font-size:12px;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  margin-bottom:6px
+}
+
+.demo-value{
+  font-size:18px;
+  font-weight:700
+}
+
+.status{
+  margin-top:14px;
+  color:var(--teal-dark);
+  font-weight:700;
+  display:none
+}
+
+.status.show{
+  display:block
+}
+
+@media (max-width:980px){
+  .layout{grid-template-columns:1fr}
+  .agenda-item{grid-template-columns:1fr;gap:10px}
+  .demo-grid{grid-template-columns:1fr}
+}
+.insights-panel{
+  padding:26px;
+  margin-top:34px;
+}
+
+.insights-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:16px;
+  flex-wrap:wrap;
+  margin-bottom:18px;
+}
+
+.insights-kicker{
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:var(--teal-dark);
+  font-weight:700;
+}
+
+.insights-subtitle{
+  color:var(--muted);
+  margin-top:6px;
+  font-size:14px;
+}
+
+.insights-badge{
+  background:var(--teal-soft);
+  color:var(--teal-dark);
+  font-weight:700;
+  font-size:13px;
+  padding:8px 12px;
+  border-radius:999px;
+}
+
+.insights-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:16px;
+}
+
+.insight-card{
+  background:white;
+  border:1px solid #e4ecef;
+  border-radius:18px;
+  padding:18px;
+  box-shadow:0 6px 18px rgba(79,113,130,.08);
+}
+
+.insight-type{
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--muted);
+  font-weight:700;
+  margin-bottom:10px;
+}
+
+.insight-title{
+  font-size:19px;
+  font-weight:700;
+  margin-bottom:8px;
+}
+
+.insight-body{
+  font-size:14px;
+  color:var(--muted);
+  line-height:1.5;
+  margin-bottom:14px;
+}
+
+.insight-footer{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.insight-chip{
+  font-size:12px;
+  padding:6px 10px;
+  border-radius:999px;
+  font-weight:700;
+}
+
+.insight-chip.warn{background:#fff0f3;color:#c4556b}
+.insight-chip.info{background:#eef7ff;color:#4a87b7}
+.insight-chip.success{background:#edf8f3;color:#3e8b67}
+
+.insight-link{
+  font-size:13px;
+  font-weight:700;
+  color:var(--teal-dark);
+}
+
+#newTasksList:empty::before{
+  content:"Newly added tasks will appear here.";
+  display:block;
+  color:var(--muted);
+  font-size:15px;
+  padding:8px 0 4px;
+}
+
+@media (max-width:980px){
+  .layout{grid-template-columns:1fr}
+  .agenda-item{grid-template-columns:1fr;gap:10px}
+  .demo-grid{grid-template-columns:1fr}
+  .insights-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <img src="logo.png" alt="Clerk logo">
+    <span>CLERK</span>
+  </div>
+
+<nav class="nav">
+  <a href="#">Calendar</a>
+  <a href="#">My Tasks</a>
+  <a href="#" class="active">Agenda</a>
+  <a href="#insightsSection">Clerk Insights</a>
+</nav>
+
+  <div class="avatar">👤</div>
+</header>
+
+<main class="page">
+  <div class="layout">
+
+    <aside class="sidebar">
+      <div class="month-card">
+        <div class="month-row">
+          <span>March 2026</span>
+          <span>›</span>
+        </div>
+
+        <div class="calendar-grid">
+          <div class="dayname">S</div><div class="dayname">M</div><div class="dayname">T</div><div class="dayname">W</div><div class="dayname">T</div><div class="dayname">F</div><div class="dayname">S</div>
+          <div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div>
+          <div>8</div><div>9</div><div class="selected">10</div><div>11</div><div>12</div><div>13</div><div>14</div>
+          <div>15</div><div>16</div><div>17</div><div>18</div><div>19</div><div>20</div><div>21</div>
+          <div>22</div><div>23</div><div>24</div><div>25</div><div>26</div><div>27</div><div>28</div>
+          <div>29</div><div>30</div><div>31</div><div></div><div></div><div></div><div></div>
+        </div>
+      </div>
+
+      <div class="filters">
+        <h3>Filters</h3>
+        <div class="filter-item"><span class="check red">✓</span> High Priority</div>
+        <div class="filter-item"><span class="check green">✓</span> Meetings</div>
+        <div class="filter-item"><span class="check blue">✓</span> Errands</div>
+        <div class="filter-item"><span class="check gold">✓</span> Calls</div>
+      </div>
+    </aside>
+
+    <section class="main-stack">
+
+      <div class="today-header">
+        <h1>Today: Tuesday, March 10, 2026</h1>
+        <div class="line"></div>
+      </div>
+
+      <section class="panel">
+        <h2>Today's Agenda</h2>
+
+        <div class="agenda-list" id="agendaList">
+
+          <div class="agenda-item" data-sort="540">
+            <div class="time">9:00 AM</div>
+            <div>
+              <div class="task-title">👥 Client Strategy Meeting</div>
+              <div class="task-sub">Conference Room B</div>
+              <div class="meta-row">
+                <span class="date-label">Tue, Mar 10, 2026 • 9:00 AM</span>
+                <span class="confidence-pill">Confidence: 96%</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="agenda-item" data-sort="660">
+            <div class="time">11:00 AM</div>
+            <div>
+              <div class="task-title">📊 Review Vendor Quote</div>
+              <div class="task-sub">Finalize cost comparison.</div>
+              <div class="meta-row">
+                <span class="date-label">Tue, Mar 10, 2026 • 11:00 AM</span>
+                <span class="confidence-pill">Confidence: 89%</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="agenda-item" data-sort="1020">
+            <div class="time">5:00 PM</div>
+            <div>
+              <div class="task-main pink">
+                <div class="task-title">💼 Submit Quarterly Report</div>
+                <div class="pill">High Priority</div>
+              </div>
+              <div class="task-sub">Due by 5:00 PM</div>
+              <div class="meta-row">
+                <span class="date-label">Tue, Mar 10, 2026 • 5:00 PM</span>
+                <span class="confidence-pill">Confidence: 98%</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="agenda-item" data-sort="1110">
+            <div class="time">6:30 PM</div>
+            <div>
+              <div class="task-title">📞 Call Insurance Provider</div>
+              <div class="task-sub">Confirm updated policy details.</div>
+              <div class="meta-row">
+                <span class="date-label">Tue, Mar 10, 2026 • 6:30 PM</span>
+                <span class="confidence-pill">Confidence: 84%</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <section class="panel">
+  <h2>New Tasks</h2>
+
+  <div class="agenda-list" id="newTasksList">
+  </div>
+</section>
+
+      <section class="composer">
+        <h2>Add a Task</h2>
+        <div class="subline"></div>
+
+        <label for="taskInput">What would you like to add?</label>
+        <textarea id="taskInput" placeholder="Enter a task or reminder..."></textarea>
+
+        <div class="composer-actions">
+          <div class="left-buttons">
+            <button class="ghost" type="button" id="voiceBtn">🎤 Voice</button>
+            <button class="ghost" type="button">✉️ Email</button>
+            <button class="ghost" type="button">💬 Text</button>
+          </div>
+
+          <button class="primary" id="processBtn" type="button">Add Task</button>
+        </div>
+
+        <div class="sample-buttons" style="margin-top:16px;">
+          <button class="ghost sample" type="button" data-text="Send the updated proposal to the client by Thursday afternoon.">Sample 1</button>
+          <button class="ghost sample" type="button" data-text="Can you review the budget before our Friday meeting?">Sample 2</button>
+          <button class="ghost sample" type="button" data-text="Follow up with Sarah next week about the marketing contract.">Sample 3</button>
+        </div>
+
+        <div class="demo-panel" id="demoPanel">
+          <div class="demo-grid">
+            <div class="demo-field">
+              <div class="demo-label">Task Title</div>
+              <div class="demo-value" id="outTitle">—</div>
+            </div>
+            <div class="demo-field">
+              <div class="demo-label">Priority</div>
+              <div class="demo-value" id="outPriority">—</div>
+            </div>
+            <div class="demo-field">
+              <div class="demo-label">Due Date</div>
+              <div class="demo-value" id="outDue">—</div>
+            </div>
+            <div class="demo-field">
+              <div class="demo-label">Confidence</div>
+              <div class="demo-value" id="outConfidence">—</div>
+            </div>
+            <div class="demo-field" style="grid-column: 1 / -1;">
+              <div class="demo-label">Description</div>
+              <div class="demo-value" id="outDescription">—</div>
+            </div>
+          </div>
+
+          <div class="demo-actions" style="margin-top:18px;">
+            <button class="primary" id="agendaBtn" type="button">Add to Agenda</button>
+            <button class="ghost" id="clearBtn" type="button">Clear</button>
+          </div>
+
+          <div class="status" id="statusMsg">Task added to today’s agenda.</div>
+        </div>
+        <section class="panel insights-panel" id="insightsSection">
+  <div class="insights-header">
+    <div>
+      <div class="insights-kicker">AI Review Layer</div>
+      <h2 style="margin:0;">Clerk Insights</h2>
+      <div class="insights-subtitle">
+        AI-generated feedback based on schedule patterns, active tasks, and recent user behavior.
+      </div>
+    </div>
+    <div class="insights-badge">Updated for Tue, Mar 10</div>
+  </div>
+
+  <div class="insights-grid">
+    <div class="insight-card">
+      <div class="insight-type">Scheduling Conflict</div>
+      <div class="insight-title">Possible overlap at 5:00 PM</div>
+      <div class="insight-body">
+        Your Quarterly Report deadline is set for 5:00 PM, but travel time from your 4:30 PM vendor call could cause a delay. Clerk recommends moving preparation for the report to an earlier block today.
+      </div>
+      <div class="insight-footer">
+        <span class="insight-chip warn">High Impact</span>
+        <span class="insight-link">Suggest reschedule</span>
+      </div>
+    </div>
+
+    <div class="insight-card">
+      <div class="insight-type">History-Based Reminder</div>
+      <div class="insight-title">You usually prep reports by lunch</div>
+      <div class="insight-body">
+        Based on your past three report deadlines, you tend to begin preparation around 12:00 PM. Clerk suggests blocking 12:15 PM to 1:00 PM today so the quarterly report is finished before the deadline window.
+      </div>
+      <div class="insight-footer">
+        <span class="insight-chip info">Pattern Detected</span>
+        <span class="insight-link">Add focus block</span>
+      </div>
+    </div>
+
+    <div class="insight-card">
+      <div class="insight-type">Energy Optimization</div>
+      <div class="insight-title">Best time for outreach: late morning</div>
+      <div class="insight-body">
+        Clerk noticed you typically complete short communication tasks faster between 10:30 AM and 11:30 AM. It recommends placing your insurance follow-up and any client emails in that time range for a lighter end-of-day schedule.
+      </div>
+      <div class="insight-footer">
+        <span class="insight-chip success">Efficiency Boost</span>
+        <span class="insight-link">Optimize agenda</span>
+      </div>
+    </div>
+  </div>
+</section>
+      </section>
+
+    </section>
+  </div>
+</main>
+
+<script>
+const taskInput = document.getElementById('taskInput');
+const processBtn = document.getElementById('processBtn');
+const voiceBtn = document.getElementById('voiceBtn');
+const agendaBtn = document.getElementById('agendaBtn');
+const clearBtn = document.getElementById('clearBtn');
+const demoPanel = document.getElementById('demoPanel');
+const statusMsg = document.getElementById('statusMsg');
+const agendaList = document.getElementById('agendaList');
+const newTasksList = document.getElementById('newTasksList');
+
+const outTitle = document.getElementById('outTitle');
+const outPriority = document.getElementById('outPriority');
+const outDue = document.getElementById('outDue');
+const outConfidence = document.getElementById('outConfidence');
+const outDescription = document.getElementById('outDescription');
+
+let currentTask = null;
+
+const today = {
+  full: 'Tuesday, March 10, 2026',
+  short: 'Tue, Mar 10, 2026'
+};
+
+const sampleMappings = [
+  {
+    match: 'proposal',
+    title: 'Send Updated Proposal to Client',
+    description: 'Finalize the revised proposal and send it to the client before the afternoon deadline.',
+    due: 'Thursday, March 12, 2026, 3:00 PM',
+    dateLabel: 'Thu, Mar 12, 2026 • 3:00 PM',
+    time: '3:00 PM',
+    priority: 'High',
+    confidence: '95'
+  },
+  {
+    match: 'budget',
+    title: 'Review Project Budget',
+    description: 'Review the updated budget before the Friday meeting and flag any issues.',
+    due: 'Friday, March 13, 2026, 9:00 AM',
+    dateLabel: 'Fri, Mar 13, 2026 • 9:00 AM',
+    time: '9:00 AM',
+    priority: 'Medium',
+    confidence: '87'
+  },
+  {
+    match: 'marketing contract',
+    title: 'Follow Up with Sarah',
+    description: 'Reach out to Sarah next week to discuss the marketing contract and next steps.',
+    due: 'Monday, March 16, 2026, 10:30 AM',
+    dateLabel: 'Mon, Mar 16, 2026 • 10:30 AM',
+    time: '10:30 AM',
+    priority: 'Normal',
+    confidence: '78'
+  }
+];
+
+function fallbackExtraction(text) {
+  const cleaned = text.trim();
+  let priority = 'Normal';
+  let confidence = '82';
+  let due = 'Wednesday, March 11, 2026, 2:00 PM';
+  let dateLabel = 'Wed, Mar 11, 2026 • 2:00 PM';
+  let time = '2:00 PM';
+
+  const timeMatch = cleaned.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
+
+  if (timeMatch) {
+    const hour = timeMatch[1];
+    const minutes = timeMatch[2] ? timeMatch[2] : '00';
+    const meridiem = timeMatch[3].toUpperCase();
+    time = `${hour}:${minutes} ${meridiem}`;
+  }
+
+  if (/urgent|asap|immediately|today/i.test(cleaned)) {
+    priority = 'High';
+    confidence = '93';
+    due = `Tuesday, March 10, 2026, ${time}`;
+    dateLabel = `Tue, Mar 10, 2026 • ${time}`;
+  } else if (/tomorrow/i.test(cleaned)) {
+    due = `Wednesday, March 11, 2026, ${time}`;
+    dateLabel = `Wed, Mar 11, 2026 • ${time}`;
+    confidence = '85';
+  } else if (/next week/i.test(cleaned)) {
+    due = `Monday, March 16, 2026, ${time}`;
+    dateLabel = `Mon, Mar 16, 2026 • ${time}`;
+    confidence = '76';
+  } else if (/friday/i.test(cleaned)) {
+    due = `Friday, March 13, 2026, ${time}`;
+    dateLabel = `Fri, Mar 13, 2026 • ${time}`;
+    confidence = '88';
+  } else if (/thursday/i.test(cleaned)) {
+    due = `Thursday, March 12, 2026, ${time}`;
+    dateLabel = `Thu, Mar 12, 2026 • ${time}`;
+    confidence = '86';
+  } else {
+    due = `Wednesday, March 11, 2026, ${time}`;
+    dateLabel = `Wed, Mar 11, 2026 • ${time}`;
+  }
+
+  return {
+    title: cleaned.length > 42 ? cleaned.slice(0, 42) + '...' : cleaned,
+    description: 'AI extracted this task from natural language input and prepared it for scheduling.',
+    due,
+    dateLabel,
+    time,
+    priority,
+    confidence
+  };
+}
+
+function extractTask(text) {
+  const lower = text.toLowerCase();
+  const found = sampleMappings.find(item => lower.includes(item.match));
+  return found || fallbackExtraction(text);
+}
+
+function renderOutput(task) {
+  outTitle.textContent = task.title;
+  outPriority.textContent = task.priority;
+  outDue.textContent = task.due;
+  outConfidence.textContent = `${task.confidence}%`;
+  outDescription.textContent = task.description;
+  demoPanel.classList.add('show');
+  statusMsg.classList.remove('show');
+}
+
+function timeToMinutes(timeStr) {
+  const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!match) return 9999;
+
+  let hour = parseInt(match[1], 10);
+  const minute = parseInt(match[2], 10);
+  const meridiem = match[3].toUpperCase();
+
+  if (meridiem === 'PM' && hour !== 12) hour += 12;
+  if (meridiem === 'AM' && hour === 12) hour = 0;
+
+  return hour * 60 + minute;
+}
+
+function insertTaskChronologically(item, minutes) {
+  item.dataset.sort = minutes;
+  const existingItems = Array.from(agendaList.querySelectorAll('.agenda-item'));
+
+  let inserted = false;
+
+  for (const existing of existingItems) {
+    const existingMinutes = parseInt(existing.dataset.sort || '9999', 10);
+    if (minutes < existingMinutes) {
+      agendaList.insertBefore(item, existing);
+      inserted = true;
+      break;
+    }
+  }
+
+  if (!inserted) {
+    agendaList.appendChild(item);
+  }
+}
+
+function insertTaskIntoList(listElement, item, minutes) {
+  item.dataset.sort = minutes;
+  const existingItems = Array.from(listElement.querySelectorAll('.agenda-item'));
+
+  let inserted = false;
+
+  for (const existing of existingItems) {
+    const existingMinutes = parseInt(existing.dataset.sort || '9999', 10);
+    if (minutes < existingMinutes) {
+      listElement.insertBefore(item, existing);
+      inserted = true;
+      break;
+    }
+  }
+
+  if (!inserted) {
+    listElement.appendChild(item);
+  }
+}
+
+// Voice recognition setup
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let listening = false;
+
+if (!SpeechRecognition) {
+  voiceBtn.disabled = true;
+  voiceBtn.textContent = "🎤 Voice Unavailable";
+} else {
+  recognition = new SpeechRecognition();
+  recognition.lang = "en-US";
+  recognition.continuous = false;
+  recognition.interimResults = false;
+
+  voiceBtn.addEventListener("click", () => {
+    if (listening) {
+      recognition.stop();
+      return;
+    }
+    recognition.start();
+  });
+
+  recognition.onstart = () => {
+    listening = true;
+    voiceBtn.textContent = "🎤 Listening...";
+  };
+
+  recognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    taskInput.value = transcript;
+  };
+
+  recognition.onerror = (event) => {
+    console.error(event.error);
+    alert("Voice recognition error. Try again.");
+  };
+
+  recognition.onend = () => {
+    listening = false;
+    voiceBtn.textContent = "🎤 Voice";
+  };
+}
+
+processBtn.addEventListener('click', () => {
+  const text = taskInput.value.trim();
+
+  if (!text) {
+    alert('Enter a task first.');
+    return;
+  }
+
+  currentTask = extractTask(text);
+  renderOutput(currentTask);
+});
+
+agendaBtn.addEventListener('click', () => {
+  if (!currentTask) return;
+
+  const item = document.createElement('div');
+  item.className = 'agenda-item';
+
+  const priority = (currentTask.priority || '').toLowerCase();
+  let highlightClass = 'teal';
+  if (priority.includes('high')) highlightClass = 'pink';
+  else if (priority.includes('medium')) highlightClass = 'gold';
+
+  const badge = priority.includes('high')
+    ? `<div class="pill">High Priority</div>`
+    : '';
+
+item.innerHTML = `
+  <div class="time">${currentTask.time || '2:00 PM'}</div>
+  <div>
+    <div class="task-title">✨ ${currentTask.title}</div>
+    ${priority.includes('high') ? '<div class="pill">High Priority</div>' : ''}
+    <div class="task-sub">${currentTask.description}</div>
+    <div class="meta-row">
+      <span class="date-label">${currentTask.dateLabel || `${today.short} • ${currentTask.time || '2:00 PM'}`}</span>
+      <span class="confidence-pill">Confidence: ${currentTask.confidence || '82'}%</span>
+    </div>
+  </div>
+`;
+
+  const minutes = timeToMinutes(currentTask.time || '3:00 PM');
+  insertTaskIntoList(newTasksList, item, minutes);
+
+  statusMsg.classList.add('show');
+  updateInsights();
+});
+
+clearBtn.addEventListener('click', () => {
+  taskInput.value = '';
+  currentTask = null;
+  demoPanel.classList.remove('show');
+  statusMsg.classList.remove('show');
+});
+
+document.querySelectorAll('.sample').forEach(btn => {
+  btn.addEventListener('click', () => {
+    taskInput.value = btn.dataset.text;
+  });
+});
+</script>
+
+</body>
+</html>

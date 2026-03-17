@@ -31,5 +31,6 @@ def view_database():
 
     conn.close()
 
+# This allows us to run this script directly to view the database contents
 if __name__ == "__main__":
     view_database()

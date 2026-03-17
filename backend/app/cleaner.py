@@ -12,7 +12,9 @@ def save_task_to_db(raw_text, task_data):
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-
+    #Inserts the raw input into the raw_inputs table and retrieves the generated raw_id. 
+    #Then it uses that raw_id to link and insert the structured task data into the tasks table. 
+    #Finally, it commits the transaction and closes the connection.
     try:
         cursor.execute(
             "INSERT INTO raw_inputs (content, source_type) VALUES (?, ?)",
@@ -39,11 +41,11 @@ def save_task_to_db(raw_text, task_data):
         print(f"Successfully linked and saved task: {task_data['title']} (Raw ID: {raw_id})")
 
     except sqlite3.Error as e:
-        print(f"❌ Database error: {e}")
+        print(f" Database error: {e}")
     finally:
         conn.close()
 
-# --- TEST DATA ---
+
 example_raw = "Can you send the permission slips by Friday?"
 example_task = {
     "title": "Send permission slips",

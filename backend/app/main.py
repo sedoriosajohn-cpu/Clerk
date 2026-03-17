@@ -1,3 +1,4 @@
+from .extractor import extract_task_from_text
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -9,23 +10,56 @@ app = FastAPI()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "..", "data", "clerk.db")
 
-class RawInputRequest(BaseModel):
+class UserInput(BaseModel):
     content: str
     source_type: Optional[str] = "text"
     source_id: Optional[str] = None
 
 @app.post("/ingest")
-async def ingest_data(data: RawInputRequest):
+async def ingest_task(data: UserInput):
+    # 1. Get the AI to extract the task
+    structured_data = extract_task_from_text(data.content)
+    
+    # Debugging: If structured_data is None, the AI extraction failed
+    if not structured_data:
+        print("AI extraction returned None. Check your API key and network.")
+        raise HTTPException(status_code=500, detail="AI Extraction failed. Is your .env set up?")
+
     try:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
+            
+            # 2. Save the RAW input
             cursor.execute(
                 "INSERT INTO raw_inputs (content, source_type, source_id) VALUES (?, ?, ?)",
                 (data.content, data.source_type, data.source_id)
             )
-            new_id = cursor.lastrowid
-            return {"message": "Success", "raw_id": new_id}
+            new_raw_id = cursor.lastrowid
+
+            # 3. Save to the TASKS table using your specific columns
+            cursor.execute(
+                """INSERT INTO tasks (raw_id, title, due_date, due_text, priority, confidence) 
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    new_raw_id,
+                    structured_data.get("title"),
+                    structured_data.get("due_date"),     
+                    structured_data.get("due_text"),     
+                    structured_data.get("priority", "normal").lower(),
+                    structured_data.get("confidence")
+                )
+            )
+            
+            conn.commit()
+
+            return {
+                "message": "Success", 
+                "raw_id": new_raw_id, 
+                "extracted": structured_data 
+            }
+            
     except Exception as e:
+        print(f"Database Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/tasks")

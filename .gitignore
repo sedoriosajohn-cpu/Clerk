@@ -1,10 +1,8 @@
-# --- Databases ---
 # Ignores the entire data folder and any sqlite files
 data/
 *.db
 *.sqlite3
 
-# --- Python Environment ---
 # Keeps local libraries and cache out of the repo
 __pycache__/
 *.py[cod]
@@ -15,11 +13,9 @@ env/
 build/
 dist/
 
-# --- Environment Variables ---
 # For future API keys (like OpenAI or Clerk.dev)
 .env
 
-# --- Editor Settings ---
 # Keeps personal VS Code settings out of the team repo
 .vscode/
 .DS_Store

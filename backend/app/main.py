@@ -17,50 +17,51 @@ class UserInput(BaseModel):
 
 @app.post("/ingest")
 async def ingest_task(data: UserInput):
-    # 1. Get the AI to extract the task
     structured_data = extract_task_from_text(data.content)
     
-    # Debugging: If structured_data is None, the AI extraction failed
     if not structured_data:
-        print("AI extraction returned None. Check your API key and network.")
-        raise HTTPException(status_code=500, detail="AI Extraction failed. Is your .env set up?")
+        raise HTTPException(status_code=500, detail="AI Extraction failed. Check terminal for errors.")
 
     try:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             
-            # 2. Save the RAW input
+            #Save the RAW input first
             cursor.execute(
                 "INSERT INTO raw_inputs (content, source_type, source_id) VALUES (?, ?, ?)",
                 (data.content, data.source_type, data.source_id)
             )
             new_raw_id = cursor.lastrowid
 
-            # 3. Save to the TASKS table using your specific columns
+            #Save the AI's results into the TASKS table
             cursor.execute(
-                """INSERT INTO tasks (raw_id, title, due_date, due_text, priority, confidence) 
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO tasks (
+                    raw_id, title, due_date, due_text, 
+                    assignee, priority, confidence, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     new_raw_id,
                     structured_data.get("title"),
-                    structured_data.get("due_date"),     
-                    structured_data.get("due_text"),     
-                    structured_data.get("priority", "normal").lower(),
-                    structured_data.get("confidence")
+                    structured_data.get("due_date"), # ISO format for sorting
+                    structured_data.get("due"),      # Human format for display
+                    structured_data.get("assignee", "me"),
+                    structured_data.get("priority", "normal"),
+                    structured_data.get("confidence", 0),
+                    "pending"
                 )
             )
             
             conn.commit()
 
             return {
-                "message": "Success", 
-                "raw_id": new_raw_id, 
-                "extracted": structured_data 
+                "message": "Task ingested successfully",
+                "task_id": cursor.lastrowid,
+                "extracted": structured_data
             }
             
     except Exception as e:
         print(f"Database Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Database insertion failed.")
 
 @app.get("/tasks")
 async def get_all_tasks():

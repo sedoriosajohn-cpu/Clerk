@@ -31,6 +31,6 @@ The goal of Clerk is simple: **reduce manual task entry and make scheduling effo
 
 * **Michael Thomas:** mt49932820@gmail.com
 * **John Sedoriosa:** sedoriosajohn@gmail.com
-* **Chris Nolan:** 
+* **Chris Nolan:** chrisjnolan30@gmail.com
 
 ---

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clerk</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body id="body" class="min-h-screen">
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel">
+
+// ---------- UI ----------
+const Card = ({children}) => (
+<div className="bg-white dark:bg-gray-800 text-black dark:text-white rounded-2xl shadow-lg p-5">
+{children}
+</div>
+)
+
+const Button = ({children,onClick,type="button"}) => (
+<button type={type} onClick={onClick}
+className="bg-gradient-to-r from-indigo-500 to-purple-500 text-white px-4 py-2 rounded-xl hover:scale-105 transition">
+{children}
+</button>
+)
+
+// ---------- SIDEBAR ----------
+function Sidebar({setPage}){
+return(
+<div className="w-60 bg-white dark:bg-gray-900 text-black dark:text-white shadow-lg p-4 flex flex-col gap-3">
+<h1 className="text-xl font-bold">Clerk</h1>
+<Button onClick={()=>setPage('dashboard')}>Dashboard</Button>
+<Button onClick={()=>setPage('input')}>Add Task</Button>
+<Button onClick={()=>setPage('calendar')}>Calendar</Button>
+<Button onClick={()=>setPage('audio')}>Audio</Button>
+<Button onClick={()=>setPage('settings')}>Settings</Button>
+</div>
+)
+}
+
+// ---------- AUTH ----------
+function SignIn({users,setUser,setPage}){
+const[email,setEmail]=React.useState("")
+const[pw,setPw]=React.useState("")
+
+function login(e){
+ e.preventDefault()
+ const found=users.find(u=>u.email===email && u.password===pw)
+ if(!found) return alert("Invalid login")
+ setUser(found)
+ setPage('dashboard')
+}
+
+return(
+<div className="flex justify-center items-center h-screen">
+<Card>
+<h2 className="text-2xl font-bold mb-4">Sign In</h2>
+<form onSubmit={login} className="flex flex-col gap-3">
+<input className="border p-2 rounded" placeholder="Email" onChange={e=>setEmail(e.target.value)}/>
+<input className="border p-2 rounded" type="password" placeholder="Password" onChange={e=>setPw(e.target.value)}/>
+<Button type="submit">Login</Button>
+<button type="button" onClick={()=>setPage('signup')} className="text-sm mt-2">Create account</button>
+</form>
+</Card>
+</div>
+)
+}
+
+function SignUp({users,setUsers,setPage}){
+const[email,setEmail]=React.useState("")
+const[pw,setPw]=React.useState("")
+
+function submit(e){
+ e.preventDefault()
+ if(users.find(u=>u.email===email)) return alert("User exists")
+ setUsers([...users,{email,password:pw}])
+ alert("Account created (email simulated)")
+ setPage('signin')
+}
+
+return(
+<div className="flex justify-center items-center h-screen">
+<Card>
+<h2 className="text-2xl font-bold mb-4">Sign Up</h2>
+<form onSubmit={submit} className="flex flex-col gap-3">
+<input className="border p-2 rounded" placeholder="Email" onChange={e=>setEmail(e.target.value)}/>
+<input className="border p-2 rounded" type="password" placeholder="Password" onChange={e=>setPw(e.target.value)}/>
+<Button type="submit">Create Account</Button>
+</form>
+</Card>
+</div>
+)
+}
+
+// ---------- DASHBOARD ----------
+function Dashboard({tasks,setPage}){
+function onDragStart(e,id){e.dataTransfer.setData('id',id)}
+
+return(
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+{tasks.map(t=>(
+<div key={t.id} draggable onDragStart={(e)=>onDragStart(e,t.id)}>
+<Card>
+<h3 className="font-bold">{t.title}</h3>
+<p>{t.day} @ {t.time}</p>
+<div className="bg-gray-200 h-2 mt-2 rounded">
+<div className="bg-purple-500 h-2 rounded" style={{width:(t.confidence*100)+'%'}}></div>
+</div>
+<Button onClick={()=>setPage('task-'+t.id)}>Open</Button>
+</Card>
+</div>
+))}
+</div>
+)
+}
+
+// ---------- TASK DETAIL ----------
+function TaskDetail({task,setTasks,tasks,setPage}){
+return(
+<div className="flex justify-center mt-10">
+<Card>
+<h2 className="text-xl font-bold">{task.title}</h2>
+<p>{task.day} @ {task.time}</p>
+<div className="flex gap-2 mt-4">
+<Button onClick={()=>{alert('Approved');setPage('dashboard')}}>Approve</Button>
+<Button onClick={()=>{setTasks(tasks.filter(t=>t.id!==task.id));setPage('dashboard')}}>Delete</Button>
+</div>
+</Card>
+</div>
+)
+}
+
+// ---------- INPUT ----------
+function Input({tasks,setTasks}){
+const[text,setText]=React.useState("")
+
+function add(){
+ if(!text) return
+ setTasks([...tasks,{id:Date.now(),title:text,day:'Friday',time:'2PM',confidence:0.8}])
+ setText("")
+}
+
+return(
+<Card>
+<h2 className="font-bold">New Task</h2>
+<textarea className="border w-full mt-2 p-2" value={text} onChange={e=>setText(e.target.value)} />
+<Button onClick={add}>Add</Button>
+</Card>
+)
+}
+
+// ---------- CALENDAR ----------
+function Calendar({tasks,setTasks}){
+const days=['Monday','Tuesday','Wednesday','Thursday','Friday']
+
+function onDrop(e,day){
+ const id=e.dataTransfer.getData('id')
+ setTasks(tasks.map(t=>t.id==id?{...t,day}:t))
+}
+
+return(
+<div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+{days.map(day=>(
+<div key={day} onDragOver={(e)=>e.preventDefault()} onDrop={(e)=>onDrop(e,day)}>
+<Card>
+<h3 className="font-bold">{day}</h3>
+{tasks.filter(t=>t.day===day).map(t=>(
+<div key={t.id} className="bg-purple-200 dark:bg-purple-700 p-2 mt-1 rounded">
+{t.title}
+</div>
+))}
+</Card>
+</div>
+))}
+</div>
+)
+}
+
+// ---------- AUDIO ----------
+function Audio(){
+const[rec,setRec]=React.useState(null)
+const[url,setUrl]=React.useState(null)
+
+async function start(){
+ const stream=await navigator.mediaDevices.getUserMedia({audio:true})
+ const r=new MediaRecorder(stream)
+ let chunks=[]
+ r.ondataavailable=e=>chunks.push(e.data)
+ r.onstop=()=>setUrl(URL.createObjectURL(new Blob(chunks)))
+ r.start(); setRec(r)
+}
+
+return(
+<Card>
+<h2 className="font-bold">Audio</h2>
+<Button onClick={start}>Record</Button>
+<Button onClick={()=>rec&&rec.stop()}>Stop</Button>
+{url && <audio controls src={url}/>}
+</Card>
+)
+}
+
+// ---------- SETTINGS ----------
+function Settings({dark,setDark}){
+return(
+<Card>
+<h2 className="font-bold">Settings</h2>
+<input className="border p-2 mt-2 w-full" placeholder="Work Hours"/>
+<input className="border p-2 mt-2 w-full" placeholder="Timezone"/>
+<button className="mt-4 underline" onClick={()=>setDark(!dark)}>
+Toggle {dark?'Light':'Dark'} Mode
+</button>
+</Card>
+)
+}
+
+// ---------- APP ----------
+function App(){
+const[user,setUser]=React.useState(null)
+const[users,setUsers]=React.useState([])
+const[page,setPage]=React.useState('signin')
+const[dark,setDark]=React.useState(false)
+
+React.useEffect(()=>{
+ document.body.className = dark ? 'bg-gray-900 text-white' : 'bg-gradient-to-br from-indigo-100 via-white to-purple-100'
+},[dark])
+
+const[tasks,setTasks]=React.useState([
+{id:1,title:'Finish report',day:'Monday',time:'10AM',confidence:0.9},
+{id:2,title:'Email client',day:'Tuesday',time:'1PM',confidence:0.8},
+{id:3,title:'Meeting',day:'Wednesday',time:'3PM',confidence:0.85}
+])
+
+let view
+if(page==='signin') view=<SignIn users={users} setUser={setUser} setPage={setPage}/>
+else if(page==='signup') view=<SignUp users={users} setUsers={setUsers} setPage={setPage}/>
+else if(page==='dashboard') view=<Dashboard tasks={tasks} setPage={setPage}/>
+else if(page==='input') view=<Input tasks={tasks} setTasks={setTasks}/>
+else if(page==='calendar') view=<Calendar tasks={tasks} setTasks={setTasks}/>
+else if(page==='audio') view=<Audio/>
+else if(page==='settings') view=<Settings dark={dark} setDark={setDark}/>
+else if(page.startsWith('task-')){
+ const id=page.split('-')[1]
+ const task=tasks.find(t=>t.id==id)
+ view=<TaskDetail task={task} tasks={tasks} setTasks={setTasks} setPage={setPage}/>
+}
+
+if(!user && !['signin','signup'].includes(page)) view=<SignIn users={users} setUser={setUser} setPage={setPage}/>
+
+return(
+<div className="flex">
+{user && <Sidebar setPage={setPage}/>} 
+<div className="flex-1 p-6">{view}</div>
+</div>
+)
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>)
+
+</script>
+
+</body>
+</html>

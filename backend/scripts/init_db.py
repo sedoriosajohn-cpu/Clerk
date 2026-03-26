@@ -6,13 +6,15 @@ def initialize_database():
     #This makes it more robust across different environments and setups
 
     ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    DB_PATH = os.path.join(ROOT_DIR, "data", "clerk.db")
+    DATA_DIR = os.path.join(ROOT_DIR, "data")
+    DB_PATH = os.path.join(DATA_DIR, "clerk.db")
 
     print(f"DEBUG: Looking for database at: {DB_PATH}")
 
-    if not os.path.exists(DB_PATH):
+    if not os.path.exists(DATA_DIR):
         #Creates the data directory if it doesn't exist
-        print(f"Error: No database found at {DB_PATH}")
+        os.makedirs(DATA_DIR, exist_ok=True)
+        print(f"Error: No database found at {DATA_DIR}")
         return
     #Connects to the SQLite database and creates the necessary tables if they don't already exist
     conn = sqlite3.connect(DB_PATH)

@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clerk</title>
+
+<style>
+:root{
+  --text:#436172;
+  --muted:#7f98a5;
+  --line:#e3eaee;
+  --teal:#6ad0c7;
+  --teal-dark:#47b9b2;
+  --teal-soft:#dff4f2;
+  --pink:#ef7f93;
+  --yellow:#f1cd74;
+  --shadow:0 10px 28px rgba(79,113,130,.12);
+}
+
+*{box-sizing:border-box}
+
+body{
+  margin:0;
+  font-family:Arial,Helvetica,sans-serif;
+  background:radial-gradient(circle at top left,#dff5f2 0%,#eef3f5 32%,#f7f8fa 100%);
+  color:var(--text)
+}
+
+.topbar{
+  height:86px;
+  background:rgba(255,255,255,.75);
+  border-bottom:1px solid rgba(200,215,222,.7);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 34px
+}
+
+.brand{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  font-weight:700;
+  font-size:34px
+}
+
+.brand img{
+  width:54px;
+  height:54px;
+  border-radius:50%;
+  background:white;
+  object-fit:cover
+}
+
+.nav{
+  display:flex;
+  gap:18px;
+  font-size:17px
+}
+
+.nav a{
+  color:var(--text);
+  text-decoration:none;
+  padding:12px 18px;
+  border-radius:14px
+}
+
+.nav a.active{
+  background:var(--teal-soft)
+}
+
+.avatar{
+  width:54px;
+  height:54px;
+  border-radius:50%;
+  background:linear-gradient(135deg,#d8f2ef,#fff);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:24px
+}
+
+.page{
+  max-width:1240px;
+  margin:auto;
+  padding:28px 24px 60px
+}
+
+.layout{
+  display:grid;
+  grid-template-columns:280px 1fr;
+  gap:26px
+}
+
+.sidebar,.panel,.composer{
+  background:rgba(255,255,255,.82);
+  border:1px solid rgba(221,230,235,.95);
+  border-radius:26px;
+  box-shadow:var(--shadow)
+}
+
+.sidebar{
+  padding:22px
+}
+
+.month-card{
+  background:linear-gradient(180deg,#f4fbfb,#fff);
+  border-radius:20px;
+  padding:20px
+}
+
+.month-row{
+  display:flex;
+  justify-content:space-between;
+  font-size:18px;
+  font-weight:700;
+  margin-bottom:16px
+}
+
+.calendar-grid{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap:8px;
+  text-align:center;
+  font-size:14px;
+  color:var(--muted)
+}
+
+.calendar-grid .dayname{
+  font-weight:700
+}
+
+.calendar-grid div{
+  padding:6px 0;
+  border-radius:50px
+}
+
+.calendar-grid .selected{
+  background:var(--teal);
+  color:white;
+  font-weight:700
+}
+
+
+.filters h3{
+  margin:0 0 18px;
+  font-size:18px
+}
+
+.main-stack{
+  display:grid;
+  gap:24px
+}
+
+.today-header{
+  text-align:center
+}
+
+.today-header h1{
+  margin:12px 0 16px;
+  font-size:28px
+}
+
+.today-header .line{
+  height:1px;
+  background:#dce6ea
+}
+
+.panel,.composer{
+  padding:26px
+}
+
+.panel h2,.composer h2{
+  margin:0 0 20px;
+  font-size:24px
+}
+
+.agenda-list{
+  display:grid
+}
+
+.agenda-item{
+  display:grid;
+  grid-template-columns:120px 1fr;
+  gap:18px;
+  padding:22px 4px;
+  border-top:1px solid var(--line)
+}
+
+.agenda-item:first-child{
+  border-top:none
+}
+
+.time{
+  font-size:18px;
+  font-weight:700
+}
+
+.task-main{
+  display:inline-block;
+  padding:14px 18px;
+  border-radius:14px;
+  min-width:260px
+}
+
+.task-main.teal{background:rgba(106,208,199,.18)}
+.task-main.pink{background:rgba(239,127,147,.92);color:white}
+.task-main.gold{background:rgba(241,205,116,.78)}
+
+.task-title{
+  font-size:20px;
+  font-weight:700
+}
+
+.task-sub{
+  font-size:14px;
+  color:var(--muted);
+  margin-top:8px
+}
+
+.meta-row{
+  margin-top:8px;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap
+}
+
+.date-label{
+  font-size:13px;
+  color:var(--muted)
+}
+
+.confidence-pill{
+  font-size:12px;
+  padding:4px 8px;
+  border-radius:12px;
+  background:var(--teal-soft);
+  color:var(--teal-dark);
+  font-weight:700
+}
+
+.pill{
+  display:inline-block;
+  font-size:12px;
+  padding:6px 10px;
+  border-radius:10px;
+  background:rgba(0,0,0,.12);
+  margin-top:4px
+}
+
+.subline{
+  height:1px;
+  background:#dce6ea;
+  margin:14px 0 22px
+}
+
+label{
+  display:block;
+  font-size:18px;
+  font-weight:700;
+  margin-bottom:14px
+}
+
+textarea{
+  width:100%;
+  min-height:92px;
+  border:1px solid #d7e2e7;
+  border-radius:16px;
+  padding:18px;
+  font-size:18px;
+  resize:vertical;
+  outline:none
+}
+
+.composer-actions{
+  display:flex;
+  justify-content:space-between;
+  margin-top:16px;
+  flex-wrap:wrap;
+  gap:14px
+}
+
+.left-buttons{
+  display:flex;
+  gap:12px;
+  flex-wrap:wrap
+}
+
+button{
+  border:none;
+  border-radius:12px;
+  padding:14px 18px;
+  font-size:16px;
+  font-weight:700;
+  cursor:pointer
+}
+
+button:disabled{
+  opacity:.7;
+  cursor:not-allowed
+}
+
+.ghost{
+  background:#f5fbfb;
+  color:var(--teal-dark);
+  border:1px solid #d8ecea
+}
+
+.primary{
+  background:linear-gradient(135deg,var(--teal),var(--teal-dark));
+  color:white
+}
+
+.insights-panel{
+  padding:26px;
+  margin-top:34px;
+}
+
+.insights-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:16px;
+  flex-wrap:wrap;
+  margin-bottom:18px;
+}
+
+.insights-kicker{
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:var(--teal-dark);
+  font-weight:700;
+}
+
+.insights-subtitle{
+  color:var(--muted);
+  margin-top:6px;
+  font-size:14px;
+}
+
+.insights-badge{
+  background:var(--teal-soft);
+  color:var(--teal-dark);
+  font-weight:700;
+  font-size:13px;
+  padding:8px 12px;
+  border-radius:999px;
+}
+
+.insights-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:16px;
+}
+
+.insight-card{
+  background:white;
+  border:1px solid #e4ecef;
+  border-radius:18px;
+  padding:18px;
+  box-shadow:0 6px 18px rgba(79,113,130,.08);
+}
+
+.insight-type{
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--muted);
+  font-weight:700;
+  margin-bottom:10px;
+}
+
+.insight-title{
+  font-size:19px;
+  font-weight:700;
+  margin-bottom:8px;
+}
+
+.insight-body{
+  font-size:14px;
+  color:var(--muted);
+  line-height:1.5;
+  margin-bottom:14px;
+}
+
+.insight-footer{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.insight-chip{
+  font-size:12px;
+  padding:6px 10px;
+  border-radius:999px;
+  font-weight:700;
+}
+
+.insight-chip.warn{background:#fff0f3;color:#c4556b}
+.insight-chip.info{background:#eef7ff;color:#4a87b7}
+.insight-chip.success{background:#edf8f3;color:#3e8b67}
+
+.insight-link{
+  font-size:13px;
+  font-weight:700;
+  color:var(--teal-dark);
+}
+
+#newTasksList:empty::before{
+  content:"Newly added tasks will appear here.";
+  display:block;
+  color:var(--muted);
+  font-size:15px;
+  padding:8px 0 4px;
+}
+
+@media (max-width:980px){
+  .layout{grid-template-columns:1fr}
+  .agenda-item{grid-template-columns:1fr;gap:10px}
+  .insights-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <img src="logo.png" alt="Clerk logo">
+    <span>CLERK</span>
+  </div>
+
+  <nav class="nav">
+    <a href="#">Calendar</a>
+    <a href="#">My Tasks</a>
+    <a href="#" class="active">Agenda</a>
+    <a href="#insightsSection">Clerk Insights</a>
+  </nav>
+
+  <div class="avatar">👤</div>
+</header>
+
+<main class="page">
+  <div class="layout">
+
+    <aside class="sidebar">
+      <div class="month-card">
+        <div class="month-row">
+          <span>March 2026</span>
+          <span>›</span>
+        </div>
+
+        <div class="calendar-grid">
+          <div class="dayname">S</div><div class="dayname">M</div><div class="dayname">T</div><div class="dayname">W</div><div class="dayname">T</div><div class="dayname">F</div><div class="dayname">S</div>
+          <div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div>
+          <div>8</div><div>9</div><div class="selected">10</div><div>11</div><div>12</div><div>13</div><div>14</div>
+          <div>15</div><div>16</div><div>17</div><div>18</div><div>19</div><div>20</div><div>21</div>
+          <div>22</div><div>23</div><div>24</div><div>25</div><div>26</div><div>27</div><div>28</div>
+          <div>29</div><div>30</div><div>31</div><div></div><div></div><div></div><div></div>
+        </div>
+      </div>
+
+    </aside>
+
+    <section class="main-stack">
+
+      <div class="today-header">
+        <h1>Today: Tuesday, March 10, 2026</h1>
+        <div class="line"></div>
+      </div>
+
+      <section class="panel">
+        <h2>Today's Agenda</h2>
+
+        <div class="agenda-list" id="agendaList"></div>
+      </section>
+
+      <section class="panel">
+        <h2>New Tasks</h2>
+        <div class="agenda-list" id="newTasksList"></div>
+      </section>
+
+      <section class="composer">
+  <h2>Add a Task</h2>
+  <div class="subline"></div>
+
+  <label for="taskInput">What would you like to add?</label>
+  <textarea id="taskInput" placeholder="Enter a task or reminder..."></textarea>
+
+  <div class="composer-actions">
+    <div class="left-buttons">
+      <button class="ghost" type="button" id="voiceBtn">🎤 Voice</button>
+      <button class="ghost" type="button">✉️ Email</button>
+      <button class="ghost" type="button">💬 Text</button>
+    </div>
+
+    <button class="primary" id="processBtn" type="button">Add Task</button>
+  </div>
+</section>
+
+    </section>
+  </div>
+</main>
+
+<script>
+const taskInput = document.getElementById('taskInput');
+const processBtn = document.getElementById('processBtn');
+const voiceBtn = document.getElementById('voiceBtn');
+const agendaBtn = document.getElementById('agendaBtn');
+const clearBtn = document.getElementById('clearBtn');
+const demoPanel = document.getElementById('demoPanel');
+const statusMsg = document.getElementById('statusMsg');
+const agendaList = document.getElementById('agendaList');
+const newTasksList = document.getElementById('newTasksList');
+
+const outTitle = document.getElementById('outTitle');
+const outPriority = document.getElementById('outPriority');
+const outDue = document.getElementById('outDue');
+const outConfidence = document.getElementById('outConfidence');
+const outDescription = document.getElementById('outDescription');
+
+let currentTask = null; // This will hold the result from your FastAPI /ingest
+
+// --- HELPER FUNCTIONS (KEEP THESE) ---
+function capitalizePriority(priority) {
+  if (!priority) return 'Normal';
+  const p = String(priority).toLowerCase().trim();
+  return p.charAt(0).toUpperCase() + p.slice(1);
+}
+
+function renderOutput(task) {
+  outTitle.textContent = task.title || '—';
+  outPriority.textContent = capitalizePriority(task.priority);
+  outDue.textContent = task.due_date || 'No date';
+  outConfidence.textContent = task.confidence ? `${(task.confidence * 100).toFixed(0)}%` : '—';
+  outDescription.textContent = task.description || '—';
+
+  demoPanel.classList.add('show');
+  statusMsg.classList.remove('show');
+}
+
+// --- VOICE RECOGNITION (KEEP THIS) ---
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let listening = false;
+
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
+  recognition.onstart = () => { listening = true; voiceBtn.textContent = 'Listening...'; };
+  recognition.onresult = (event) => { taskInput.value = event.results[0][0].transcript; };
+  recognition.onend = () => { listening = false; voiceBtn.textContent = '🎤 Voice'; };
+  voiceBtn.addEventListener('click', () => listening ? recognition.stop() : recognition.start());
+}
+
+
+// runs the AI extraction 
+processBtn.addEventListener('click', async () => {
+  const text = taskInput.value.trim();
+  if (!text) return alert("Please enter text or use voice.");
+
+  processBtn.disabled = true;
+  processBtn.textContent = "Processing...";
+
+  try {
+    // calls to the backend endpoint 
+    const response = await fetch('http://127.0.0.1:8000/ingest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        content: text,
+        source_type: "text" 
+      })
+    });
+
+    const result = await response.json();
+
+    if (response.ok) {
+      // result is from process_and_store function
+      currentTask = result; 
+      renderOutput(currentTask);
+    } else {
+      alert("Error: " + result.detail);
+    }
+  } catch (err) {
+    console.error(err);
+    alert("Make sure your FastAPI server is running!");
+  } finally {
+    processBtn.disabled = false;
+    processBtn.textContent = "Add Task";
+  }
+});
+
+// finializes the UI update 
+agendaBtn.addEventListener('click', () => {
+  if (!currentTask) return;
+
+  const item = document.createElement('div');
+  item.className = 'agenda-item';
+  
+  const isHigh = currentTask.priority.toLowerCase() === 'high';
+
+  item.innerHTML = `
+    <div class="time">TBD</div>
+    <div>
+      <div class="task-title">✨ ${currentTask.title}</div>
+      ${isHigh ? '<div class="pill" style="background:#ef7f93;color:white">High Priority</div>' : ''}
+      <div class="task-sub">${currentTask.description || ''}</div>
+      <div class="meta-row">
+        <span class="date-label">${currentTask.due_date || 'No Date'}</span>
+        <span class="confidence-pill">Match: ${(currentTask.confidence * 100).toFixed(0)}%</span>
+      </div>
+    </div>
+  `;
+
+  newTasksList.appendChild(item);
+  statusMsg.classList.add('show');
+  
+  // maybe keep: auto-clear after success
+  setTimeout(() => {
+     demoPanel.classList.remove('show');
+     taskInput.value = '';
+  }, 2000);
+});
+
+clearBtn.addEventListener('click', () => {
+  taskInput.value = '';
+  demoPanel.classList.remove('show');
+  statusMsg.classList.remove('show');
+});
+
+document.querySelectorAll('.sample').forEach(btn => {
+  btn.addEventListener('click', () => { taskInput.value = btn.dataset.text; });
+});
+</script>
+
+</body>
+</html>

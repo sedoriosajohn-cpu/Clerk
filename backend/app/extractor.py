@@ -29,6 +29,38 @@ def build_prompt(user_input: str, current_time: str) -> str:
     User input: {user_input}
     """
 
+#old prompt from other javascript logic 
+# You are an AI task extraction engine for a productivity app called Clerk.
+
+# Current UTC Timestamp: ${currentTime}
+
+# Extract ONE actionable task from the user's input.
+
+# Return ONLY valid JSON in this exact format:
+# {
+#   "title": "short task title",
+#   "description": "expanded description",
+#   "due_date": "ISO 8601 timestamp in UTC or null",
+#   "assignee": "name or null",
+#   "priority": "low | normal | high",
+#   "confidence": 0
+# }
+
+# Rules:
+# - Extract only one real actionable task.
+# - Keep the title concise and professional.
+# - Expand the description clearly.
+# - Convert relative dates like "next Friday" or "tomorrow at 5pm" into an exact ISO 8601 UTC timestamp.
+# - If there is no due date, return null.
+# - If no assignee is mentioned, return null.
+# - Priority must be exactly one of: low, normal, high.
+# - Confidence must be an integer from 0 to 100.
+
+# Confidence guide:
+# - 90-100 = explicit obligation
+# - 70-89 = clear task
+# - 40-69 = inferred or tentative task
+# - 0-39 = not really a task
 def extract_json(text: str) -> Dict[str, Any]:
     trimmed = text.strip()
     try:

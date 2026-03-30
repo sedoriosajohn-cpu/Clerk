@@ -524,6 +524,36 @@ const outConfidence = document.getElementById('outConfidence');
 const outDescription = document.getElementById('outDescription');
 
 let currentTask = null; // This will hold the result from your FastAPI /ingest
+let currentView = 'agenda';
+
+
+document.querySelectorAll('.nav a').forEach(link => {
+    link.addEventListener('click', (e) => {
+        e.preventDefault();
+        
+        // 1. Remove 'active' class from all, add to the clicked one
+        document.querySelectorAll('.nav a').forEach(l => l.classList.remove('active'));
+        link.classList.add('active');
+        
+        // 2. Change the view
+        const viewName = link.textContent.trim().toLowerCase();
+        loadView(viewName);
+    });
+});
+
+async function loadView(view) {
+    if (view === 'agenda') {
+        // Fetch only today's tasks
+        const response = await fetch('http://127.0.0.1:8000/tasks?today=true');
+        const tasks = await response.json();
+        renderTaskList(tasks, 'agendaList');
+    } else if (view === 'my tasks') {
+        // Fetch ALL tasks from the DB
+        const response = await fetch('http://127.0.0.1:8000/tasks');
+        const tasks = await response.json();
+        renderTaskList(tasks, 'agendaList'); // Or a different container
+    }
+}
 
 // --- HELPER FUNCTIONS (KEEP THESE) ---
 function capitalizePriority(priority) {

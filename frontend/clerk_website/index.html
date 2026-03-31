@@ -672,7 +672,10 @@ function setLiveDates() {
 }
 
 // Run the function as soon as the page loads
-window.addEventListener('DOMContentLoaded', setLiveDates);
+window.addEventListener('DOMContentLoaded', () => {
+    setLiveDates();
+    buildCalendar();
+});
 
 // Checks for a date change every minute
 setInterval(setLiveDates, 60000);

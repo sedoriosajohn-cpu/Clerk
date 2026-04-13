@@ -2,23 +2,19 @@ from .extractor import extract_task_from_text
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from fastapi.middleware.cors import CORSMiddleware
-import sqlite3
-import os
+from sqlalchemy.orm import Session
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, ForeignKey
+from scripts.init_db import engine, Task, RawInput, sessionmaker
 
 app = FastAPI()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  
-    allow_credentials=True,
-    allow_methods=["*"],  
-    allow_headers=["*"],  
-)
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "..", "data", "clerk.db")
-
+def get_db():
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 class UserInput(BaseModel):
     content: str
@@ -26,80 +22,60 @@ class UserInput(BaseModel):
     source_id: Optional[str] = None
 
 @app.post("/ingest")
-async def ingest_task(data: UserInput):
+async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
     structured_data = extract_task_from_text(data.content)
     
     if not structured_data:
-        raise HTTPException(status_code=500, detail="AI Extraction failed. Check terminal for errors.")
+        raise HTTPException(status_code=500, detail="AI Extraction failed.")
 
     try:
-        with sqlite3.connect(DB_PATH) as conn:
-            cursor = conn.cursor()
-            
-            #Save the RAW input first
-            cursor.execute(
-                "INSERT INTO raw_inputs (content, source_type, source_id) VALUES (?, ?, ?)",
-                (data.content, data.source_type, data.source_id)
-            )
-            new_raw_id = cursor.lastrowid
+        #saves raw input
+        new_raw = RawInput(
+            content=data.content,
+            source_type=data.source_type,
+            source_id=data.source_id
+        )
+        db.add(new_raw)
+        db.flush()
 
-            #Save the AI's results into the TASKS table
-            cursor.execute(
-                """INSERT INTO tasks (
-                    raw_id, title, due_date, due_text, 
-                    assignee, priority, confidence, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    new_raw_id,
-                    structured_data.get("title"),
-                    structured_data.get("due_date"), # ISO format for sorting
-                    structured_data.get("due"),      # Human format for display
-                    structured_data.get("assignee", "me"),
-                    structured_data.get("priority", "normal"),
-                    structured_data.get("confidence", 0),
-                    "pending"
-                )
-            )
-            
-            conn.commit()
+        #Save the AI's results into the TASKS table
+        new_task = Task(
+            raw_id=new_raw.raw_id,
+            title=structured_data.get("title"),
+            due_date=str(structured_data.get("due_date")),
+            due_text=structured_data.get("due_text"),
+            assignee=structured_data.get("assignee", "me"),
+            priority=structured_data.get("priority", "normal"),
+            confidence=structured_data.get("confidence"),
+            status="pending"
+        )
+        db.add(new_task)
+        db.commit() #saves everything to neon 
 
-            return {
-                "task_id": cursor.lastrowid,
-                "title": structured_data.get("title", "Untitled Task"),
-                "description": structured_data.get("description", ""),
-                "due_date": structured_data.get("due_date"),
-                "due": structured_data.get("due"),
-                "priority": structured_data.get("priority", "normal"),
-                "confidence": structured_data.get("confidence", 0),
-                "status": "pending"
-            }
-            
-            
+        return {"status": "success", "task_id": new_task.task_id}
+
     except Exception as e:
+        db.rollback()
         print(f"Database Error: {e}")
-        raise HTTPException(status_code=500, detail="Database insertion failed.")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/tasks")
-async def get_all_tasks():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM tasks")
-        return {"tasks": [dict(row) for row in cursor.fetchall()]}
+async def get_tasks(db: Session = Depends(get_db)):
+    tasks = db.query(Task).all()
+    return tasks
     
-@app.delete("/tasks/{task_id}")
-async def delete_task(task_id: int):
+@app.post("/tasks/delete/{task_id}")
+async def delete_task(task_id: int, db: Session = Depends(get_db)):
+    
+    task_to_delete = db.query(Task).filter(Task.task_id == task_id).first()
+    
+    if not task_to_delete:
+        raise HTTPException(status_code=404, detail="Task not found")
+
     try:
-        with sqlite3.connect(DB_PATH) as conn:
-            cursor = conn.cursor()
-            #check if it exists first
-            cursor.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,))
-            if not cursor.fetchone():
-                raise HTTPException(status_code=404, detail="Task not found")
-            
-            #deletes just the task
-            cursor.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
-            conn.commit()
-            return {"message": f"Task {task_id} deleted successfully"}
+        db.delete(task_to_delete)
+        db.commit()
+        return {"status": "success", "message": f"Task {task_id} deleted"}
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

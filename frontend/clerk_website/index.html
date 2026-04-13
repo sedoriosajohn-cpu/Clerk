@@ -485,11 +485,11 @@ button:disabled{
                 <div class="panel" id="demoPanel"> 
                                   <h2>Clerk Extracted This:</h2>
                                   <div class="agenda-item">
-                                      <div class="time" id="outDue">--:--</div>
+                                      <div class="time" id="taskDuePreview">--:--</div>
                                       <div class="item-details">
                                           <div class="task-title" id="outTitle">Task Title</div>
                                           <div class="pill" id="outPriority">Normal</div>
-                                          <div class="task-sub" id="outDescription">Description...</div>
+                                          <div class="task-sub" id="taskDescPreview">Description...</div>
                                           <div class="meta-row">
                                               <span class="confidence-pill">Confidence: <span id="outConfidence">0</span>%</span>
                                           </div>
@@ -522,7 +522,7 @@ const processBtn = document.getElementById('processBtn');
 const voiceBtn = document.getElementById('voiceBtn');
 const agendaBtn = document.getElementById('agendaBtn');
 const clearBtn = document.getElementById('clearBtn');
-const demoPanel = document.getElementById('demoPanel');
+const panelPreview = document.getElementById('panelPreview');
 const statusMsg = document.getElementById('statusMsg');
 const agendaList = document.getElementById('agendaList');
 const newTasksList = document.getElementById('newTasksList');
@@ -581,7 +581,7 @@ function renderOutput(task) {
     outPriority.textContent = capitalizePriority(task.priority || 'normal');
     
     // Check for due date or the human 'due' text
-    outDue.textContent = task.due || task.due_date || 'No due date';
+    taskDuePreview.textContent = task.due || task.due_date || 'No due date';
     
     // Confidence check
     if (task.confidence !== undefined && task.confidence !== null) {
@@ -592,7 +592,7 @@ function renderOutput(task) {
         outConfidence.textContent = '—';
     }
     
-    outDescription.textContent = task.description || 'No description provided.';
+    taskDescPreview.textContent = task.description || 'No description provided.';
 
     // 3. Show the panel
     demoPanel.classList.add('show');

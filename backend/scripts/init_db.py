@@ -1,52 +1,58 @@
-import sqlite3
 import os
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from datetime import datetime
 
+load_dotenv()
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    print("Error: DATABASE_URL not found in .env file!")
+    # For local debugging only, uncomment if needed:
+    # DATABASE_URL = "sqlite:///./clerk.db" 
+else:
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+Base = declarative_base()
+
+#Define Table Structures
+class RawInput(Base):
+    __tablename__ = "raw_inputs"
+    raw_id = Column(Integer, primary_key=True, index=True)
+    content = Column(Text, nullable=False)
+    source_type = Column(String, default="text")
+    source_id = Column(String)
+    received_at = Column(DateTime, default=datetime.utcnow)
+
+class Task(Base):
+    __tablename__ = "tasks"
+    task_id = Column(Integer, primary_key=True, index=True)
+    raw_id = Column(Integer, ForeignKey("raw_inputs.raw_id"))
+    title = Column(String, nullable=False)
+    due_date = Column(String) 
+    due_text = Column(String)
+    assignee = Column(String, default="me")
+    priority = Column(String, default="normal")
+    confidence = Column(Float)
+    status = Column(String, default="pending")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+#Initialization Function
 def initialize_database():
-    #Determines the path of the database file relative to this script 
-    #This makes it more robust across different environments and setups
-
-    ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    DB_PATH = os.path.join(ROOT_DIR, "data", "clerk.db")
-
-    print(f"DEBUG: Looking for database at: {DB_PATH}")
-
-    if not os.path.exists(DB_PATH):
-        #Creates the data directory if it doesn't exist
-        print(f"Error: No database found at {DB_PATH}")
+    if not DATABASE_URL:
         return
-    #Connects to the SQLite database and creates the necessary tables if they don't already exist
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+
+    print(f"Connecting to: {DATABASE_URL.split('@')[-1]}")
     
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS raw_inputs (
-        raw_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        content TEXT NOT NULL,
-        source_type TEXT DEFAULT 'text',
-        source_id TEXT,
-        received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS tasks (
-        task_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        raw_id INTEGER,
-        title TEXT NOT NULL,
-        due_date DATE,
-        due_text TEXT,
-        assignee TEXT DEFAULT 'me',
-        priority TEXT DEFAULT 'normal',
-        confidence REAL,
-        status TEXT DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (raw_id) REFERENCES raw_inputs(raw_id)
-    );
-    """)
-
-    conn.commit()
-    conn.close()
-    print(f"Database initialized at: {DB_PATH}")
+    try:
+        engine = create_engine(DATABASE_URL)
+        Base.metadata.create_all(bind=engine)
+        print("✅ Success: Cloud database tables created/verified!")
+    except Exception as e:
+        print(f"Failed to initialize database: {e}")
 
 if __name__ == "__main__":
     initialize_database()

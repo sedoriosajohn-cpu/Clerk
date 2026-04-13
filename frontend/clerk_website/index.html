@@ -454,8 +454,8 @@ button:disabled{
     <aside class="sidebar">
       <div class="month-card">
         <div class="month-row">
-          <span id="sidebarMonthYear">March 2026</span>
-          <span>›</span>
+          <span id="sidebarMonthYear"></span>
+          <span>🗓️</span>
         </div>
         <div class="calendar-grid" id="calendarGrid"></div>
       </div>
@@ -463,60 +463,57 @@ button:disabled{
 
     <section class="main-stack">
 
-      <div class="today-header">
+      <header class="today-header">
         <h1 id="liveDateHeader">Today: Loading...</h1> 
         <div class="line"></div>
-      </div>
+      </header>
 
       <section class="panel">
         <h2>Today's Agenda</h2>
-
         <div class="agenda-list" id="agendaList"></div>
       </section>
 
-      <section class="panel">
-        <h2>New Tasks <span id="statusMsg" style="font-size: 14px; color: var(--teal); display: none;">✓ Added!</span></h2>
-        <div class="agenda-list" id="newTasksList"></div>
-      </section>
-
       <section class="composer">
-  <h2>Add a Task</h2>
-  <div class="subline"></div>
+        <h2>Add a Task</h2>
+        <div class="subline"></div>
+        
+        <div class="input-group">
+                    <label for="taskInput">What would you like to add?</label>
+                    <textarea id="taskInput" placeholder="Enter a task or reminder..."></textarea>
+                </div>
 
-  <label for="taskInput">What would you like to add?</label>
-  <textarea id="taskInput" placeholder="Enter a task or reminder..."></textarea>
+                <div class="panel" id="demoPanel"> 
+                                  <h2>Clerk Extracted This:</h2>
+                                  <div class="agenda-item">
+                                      <div class="time" id="outDue">--:--</div>
+                                      <div class="item-details">
+                                          <div class="task-title" id="outTitle">Task Title</div>
+                                          <div class="pill" id="outPriority">Normal</div>
+                                          <div class="task-sub" id="outDescription">Description...</div>
+                                          <div class="meta-row">
+                                              <span class="confidence-pill">Confidence: <span id="outConfidence">0</span>%</span>
+                                          </div>
+                                      </div>
+                                  </div>
 
-  <section class="panel" id="demoPanel" style="display:none;">
-  <h2>Clerk Extracted This:</h2>
-  <div class="agenda-item">
-    <div class="time" id="outDue">--:--</div>
-    <div>
-      <div class="task-title" id="outTitle">Task Title</div>
-      <div class="pill" id="outPriority">Normal</div>
-      <div class="task-sub" id="outDescription">Description...</div>
-      <div class="meta-row">
-        <span class="confidence-pill">Confidence: <span id="outConfidence">0</span>%</span>
-      </div>
-    </div>
-  </div>
-  <div class="composer-actions">
-     <button id="agendaBtn" class="primary">Looks Good, Add It</button>
-     <button id="clearBtn" class="ghost">Try Again</button>
-  </div>
-  </section>
-    <div class="composer-actions">
-      <div class="left-buttons">
-        <button class="ghost" type="button" id="voiceBtn">🎤 Voice</button>
-        <button class="ghost" type="button">✉️ Email</button>
-        <button class="ghost" type="button">💬 Text</button>
-      </div>
+                                  <div class="composer-actions">
+                                      <button id="agendaBtn" class="primary">Looks Good, Add It</button>
+                                      <button id="clearBtn" class="ghost">Try Again</button>
+                                  </div>
+                              </div>
 
-      <button class="primary" id="processBtn" type="button">Add Task</button>
-    </div>
-  </section>
+                              <div class="composer-actions">
+                                  <div class="left-buttons">
+                                      <button class="ghost" type="button">🎙️ Voice</button>
+                                      <button class="ghost" type="button">✉️ Email</button>
+                                      <button class="ghost" type="button">💬 Text</button>
+                                  </div>
+                                  <button class="primary" id="processBtn" type="button">Add Task</button>
+                              </div>
 
-  </section>
-  </div>
+      </section> 
+    </section>
+   </div> 
 </main>
 
 <script>
@@ -530,11 +527,11 @@ const statusMsg = document.getElementById('statusMsg');
 const agendaList = document.getElementById('agendaList');
 const newTasksList = document.getElementById('newTasksList');
 
-const outTitle = document.getElementById('outTitle');
+const taskTitlePreview = document.getElementById('taskTitlePreview');
 const outPriority = document.getElementById('outPriority');
-const outDue = document.getElementById('outDue');
-const outConfidence = document.getElementById('outConfidence');
-const outDescription = document.getElementById('outDescription');
+const taskDuePreview = document.getElementById('taskDuePreview');
+const taskConfidence = document.getElementById('taskConfidence');
+const taskDescPreview = document.getElementById('taskDescPreview');
 
 let currentTask = null; // This will hold the result from your FastAPI /ingest
 let currentView = 'agenda';
@@ -652,17 +649,16 @@ function setLiveDates() {
     const formattedHeader = today.toLocaleDateString('en-US', headerOptions);
     document.getElementById('liveDateHeader').textContent = `Today: ${formattedHeader}`;
 
-    // 2. Format for Sidebar (e.g., "March 2026")
+    //Format for Sidebar (e.g., "March 2026")
     const sidebarOptions = { month: 'long', year: 'numeric' };
     const formattedSidebar = today.toLocaleDateString('en-US', sidebarOptions);
     document.getElementById('sidebarMonthYear').textContent = formattedSidebar;
 
-    // 3. (Optional) Highlight the current day in the calendar grid
+    //Highlights the current day in the calendar grid
     const currentDay = today.getDate();
     const calendarDays = document.querySelectorAll('.calendar-grid div:not(.dayname)');
     
     calendarDays.forEach(dayDiv => {
-        // Remove old hardcoded selection
         dayDiv.classList.remove('selected');
         // Match the number and add the teal circle
         if (dayDiv.textContent == currentDay) {

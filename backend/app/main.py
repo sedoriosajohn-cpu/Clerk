@@ -2,13 +2,23 @@ from .extractor import extract_task_from_text
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 import os
 
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  
+    allow_credentials=True,
+    allow_methods=["*"],  
+    allow_headers=["*"],  
+)
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "..", "data", "clerk.db")
+
 
 class UserInput(BaseModel):
     content: str
@@ -54,10 +64,16 @@ async def ingest_task(data: UserInput):
             conn.commit()
 
             return {
-                "message": "Task ingested successfully",
                 "task_id": cursor.lastrowid,
-                "extracted": structured_data
+                "title": structured_data.get("title", "Untitled Task"),
+                "description": structured_data.get("description", ""),
+                "due_date": structured_data.get("due_date"),
+                "due": structured_data.get("due"),
+                "priority": structured_data.get("priority", "normal"),
+                "confidence": structured_data.get("confidence", 0),
+                "status": "pending"
             }
+            
             
     except Exception as e:
         print(f"Database Error: {e}")

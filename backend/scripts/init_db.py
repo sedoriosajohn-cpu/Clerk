@@ -18,9 +18,14 @@ else:
 
 Base = declarative_base()
 
-    ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    DATA_DIR = os.path.join(ROOT_DIR, "data")
-    DB_PATH = os.path.join(DATA_DIR, "clerk.db")
+#Define Table Structures
+class RawInput(Base):
+    __tablename__ = "raw_inputs"
+    raw_id = Column(Integer, primary_key=True, index=True)
+    content = Column(Text, nullable=False)
+    source_type = Column(String, default="text")
+    source_id = Column(String)
+    received_at = Column(DateTime, default=datetime.utcnow)
 
 class Task(Base):
     __tablename__ = "tasks"
@@ -35,10 +40,9 @@ class Task(Base):
     status = Column(String, default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    if not os.path.exists(DATA_DIR):
-        #Creates the data directory if it doesn't exist
-        os.makedirs(DATA_DIR, exist_ok=True)
-        print(f"Error: No database found at {DATA_DIR}")
+#Initialization Function
+def initialize_database():
+    if not DATABASE_URL:
         return
 
     print(f"Connecting to: {DATABASE_URL.split('@')[-1]}")

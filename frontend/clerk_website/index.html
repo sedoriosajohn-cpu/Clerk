@@ -658,6 +658,7 @@ function renderTaskList(tasks, containerId) {
 
 //this function is the main driver for changing views between agenda, my tasks, and calendar. It fetches the appropriate data and calls the rendering functions.
 async function loadView(view) {
+  
     const agendaList = document.getElementById('agendaList');
     const titleHeader = document.querySelector('h2'); // The "Today's Agenda" text
     
@@ -692,13 +693,15 @@ async function loadView(view) {
 
 async function renderBigCalendar(month, year) {
     const container = document.getElementById('agendaList');
+    
+    // 1. Fetch data from backend
     const response = await fetch('http://127.0.0.1:8000/tasks');
     const allTasks = await response.json();
 
     const monthNames = ["January", "February", "March", "April", "May", "June",
         "July", "August", "September", "October", "November", "December"];
 
-    // 1. Create Navigation Header
+    // 2. Create Navigation Header
     container.innerHTML = `
         <div class="cal-nav">
             <button class="ghost" onclick="changeMonth(-1)">◀ Prev</button>
@@ -710,7 +713,7 @@ async function renderBigCalendar(month, year) {
 
     const grid = document.getElementById('bigCalGrid');
     
-    // 2. Add Day Headers (Sun-Sat)
+    // 3. Add Day Headers
     ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(day => {
         const d = document.createElement('div');
         d.className = 'cal-header';
@@ -718,27 +721,73 @@ async function renderBigCalendar(month, year) {
         grid.appendChild(d);
     });
 
-    // 3. Calculate Days
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-    // Fill empty start slots
     for (let i = 0; i < firstDay; i++) grid.appendChild(document.createElement('div'));
 
     // 4. Draw Days and Insert Tasks
     for (let day = 1; day <= daysInMonth; day++) {
         const daySquare = document.createElement('div');
         daySquare.className = 'cal-day';
+        
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        daySquare.dataset.date = dateStr; 
         daySquare.innerHTML = `<span class="day-num">${day}</span>`;
 
-        // Filter tasks for this specific day
-        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        // --- DROP ZONE LOGIC ---
+        daySquare.addEventListener('dragover', (e) => {
+            e.preventDefault(); 
+            daySquare.style.backgroundColor = '#f0f9ff';
+        });
+
+        daySquare.addEventListener('dragleave', () => {
+            daySquare.style.backgroundColor = 'white';
+        });
+
+        daySquare.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            daySquare.style.backgroundColor = 'white';
+            
+            const taskId = e.dataTransfer.getData('text/plain');
+            const targetDate = daySquare.dataset.date;
+            
+            // Safety check: Don't send request if ID is invalid
+            if (!taskId || taskId === "undefined") {
+                console.error("Drop failed: No valid Task ID found.");
+                return;
+            }
+            
+            await updateTaskDate(taskId, targetDate);
+            renderBigCalendar(currentCalMonth, currentCalYear);
+        });
+
+        // Filter tasks for this day
         const dayTasks = allTasks.filter(t => (t.due || t.due_date || '').startsWith(dateStr));
 
         dayTasks.forEach(t => {
             const tEl = document.createElement('div');
             tEl.className = `cal-task-pill ${String(t.priority).toLowerCase()}`;
             tEl.textContent = t.title;
+            
+            // --- DRAGGABLE LOGIC ---
+            tEl.draggable = true;
+            tEl.addEventListener('dragstart', (e) => {
+                // Check multiple ID formats just in case
+                const idToStore = t.id || t.task_id; 
+                
+                if (idToStore === undefined) {
+                    console.error("DRAG START ERROR: Task is missing ID field", t);
+                }
+
+                e.dataTransfer.setData('text/plain', idToStore);
+                tEl.style.opacity = '0.4';
+            });
+
+            tEl.addEventListener('dragend', () => {
+                tEl.style.opacity = '1';
+            });
+
             daySquare.appendChild(tEl);
         });
 
@@ -760,6 +809,14 @@ function capitalizePriority(priority) {
   if (!priority) return 'Normal';
   const p = String(priority).toLowerCase().trim();
   return p.charAt(0).toUpperCase() + p.slice(1);
+}
+
+async function updateTaskDate(id, newDate) {
+    await fetch(`http://127.0.0.1:8000/tasks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ due_date: newDate }) // Ensure backend expects 'due_date'
+    });
 }
 
 function renderOutput(task) { //tidy up later

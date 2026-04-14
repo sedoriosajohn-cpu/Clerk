@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from .extractor import extract_task_from_text
 from scripts.init_db import SessionLocal, Task, RawInput
 from datetime import datetime
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -27,6 +28,10 @@ class UserInput(BaseModel):
     content: str
     source_type: Optional[str] = "text"
     source_id: Optional[str] = None
+    
+class TaskUpdate(BaseModel):
+    due_date: Optional[str] = None
+    title: Optional[str] = None
 
 @app.post("/ingest")
 async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
@@ -86,3 +91,15 @@ async def delete_task(task_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.patch("/tasks/{task_id}")
+async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depends(get_db)):
+    task = db.query(Task).filter(Task.task_id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if task_update.due_date is not None:
+        task.due = task_update.due_date # Ensure this matches your DB column name (due vs due_date)
+        
+    db.commit()
+    return {"message": "Updated successfully"}

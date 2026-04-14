@@ -15,6 +15,9 @@ if not DATABASE_URL:
 else:
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+        
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
@@ -48,7 +51,6 @@ def initialize_database():
     print(f"Connecting to: {DATABASE_URL.split('@')[-1]}")
     
     try:
-        engine = create_engine(DATABASE_URL)
         Base.metadata.create_all(bind=engine)
         print("✅ Success: Cloud database tables created/verified!")
     except Exception as e:

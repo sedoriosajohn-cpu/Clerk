@@ -5,6 +5,105 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Clerk</title>
 
+.auth-screen{
+  position:fixed;
+  inset:0;
+  background:linear-gradient(135deg,#dff5f2 0%,#eef3f5 45%,#f7f8fa 100%);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:9999;
+  padding:24px;
+}
+
+.auth-card{
+  width:100%;
+  max-width:420px;
+  background:rgba(255,255,255,.92);
+  border:1px solid rgba(221,230,235,.95);
+  border-radius:26px;
+  box-shadow:var(--shadow);
+  padding:28px;
+}
+
+.auth-card h2{
+  margin:0 0 18px;
+  font-size:28px;
+}
+
+.auth-sub{
+  color:var(--muted);
+  margin-bottom:18px;
+  font-size:15px;
+}
+
+.auth-form{
+  display:grid;
+  gap:14px;
+}
+
+.auth-form input{
+  width:100%;
+  border:1px solid #d7e2e7;
+  border-radius:14px;
+  padding:14px 16px;
+  font-size:16px;
+  outline:none;
+}
+
+.auth-switch{
+  margin-top:14px;
+  font-size:14px;
+  color:var(--muted);
+  text-align:center;
+}
+
+.auth-link{
+  background:none;
+  border:none;
+  padding:0;
+  font-size:14px;
+  font-weight:700;
+  color:var(--teal-dark);
+  cursor:pointer;
+}
+
+.auth-error{
+  color:#b43f3f;
+  font-size:14px;
+  margin-top:4px;
+}
+
+.hidden{
+  display:none !important;
+}
+
+.user-chip{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.user-email{
+  font-size:14px;
+  color:var(--muted);
+  max-width:180px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.logout-btn{
+  background:#f5fbfb;
+  color:var(--teal-dark);
+  border:1px solid #d8ecea;
+  border-radius:12px;
+  padding:10px 14px;
+  font-size:14px;
+  font-weight:700;
+  cursor:pointer;
+}
+
 <style>
 :root{
   --text:#436172;
@@ -484,6 +583,25 @@ button:disabled{
 
 <body>
 
+<div class="auth-screen" id="authScreen">
+  <div class="auth-card">
+    <h2 id="authTitle">Sign In</h2>
+    <div class="auth-sub" id="authSubtitle">Access your Clerk workspace.</div>
+
+    <form class="auth-form" id="authForm">
+      <input type="email" id="authEmail" placeholder="Email" required>
+      <input type="password" id="authPassword" placeholder="Password" required>
+      <button class="primary" id="authSubmitBtn" type="submit">Sign In</button>
+      <div class="auth-error" id="authError"></div>
+    </form>
+
+    <div class="auth-switch">
+      <span id="authSwitchText">Don't have an account?</span>
+      <button class="auth-link" id="authToggleBtn" type="button">Create account</button>
+    </div>
+  </div>
+</div>
+
 <header class="topbar">
   <div class="brand">
     <img src="logo.png" alt="Clerk logo">
@@ -497,7 +615,10 @@ button:disabled{
     <a href="#insightsSection">Clerk Insights</a>
   </nav>
 
-  <div class="avatar">👤</div>
+  <div class="user-chip">
+  <div class="user-email" id="userEmailDisplay"></div>
+  <button class="logout-btn" id="logoutBtn" type="button">Log Out</button>
+</div>
 </header>
 
 <main class="page">
@@ -569,6 +690,8 @@ button:disabled{
     </section>
    </div> 
 </main>
+
+
 
 <script>
 const taskInput = document.getElementById('taskInput');
@@ -863,8 +986,13 @@ function setLiveDates() {
 
 // Run the function as soon as the page loads
 window.addEventListener('DOMContentLoaded', () => {
+    initAuth();
     setLiveDates();
     buildCalendar();
+
+    if (getCurrentUser()) {
+        loadView('agenda');
+    }
 });
 
 // Checks for a date change every minute

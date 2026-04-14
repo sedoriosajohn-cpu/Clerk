@@ -27,6 +27,10 @@ class UserInput(BaseModel):
     content: str
     source_type: Optional[str] = "text"
     source_id: Optional[str] = None
+    
+class TaskUpdate(BaseModel):
+    due_date: Optional[str] = None
+    title: Optional[str] = None
 
 @app.post("/ingest")
 async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
@@ -86,3 +90,21 @@ async def delete_task(task_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.patch("/tasks/{task_id}")
+async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depends(get_db)):
+    
+    task = db.query(Task).filter(Task.task_id == task_id).first() 
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if task_update.due_date is not None:
+        new_date = task_update.due_date
+        if len(new_date) == 10:
+            new_date += "T12:00:00Z" 
+    
+        task.due_date = new_date
+        
+    db.commit()
+    db.refresh(task)
+    return {"message": "Updated successfully"}

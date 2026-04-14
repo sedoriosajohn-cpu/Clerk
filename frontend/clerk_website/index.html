@@ -184,28 +184,28 @@ body{
   display:grid
 }
 
-.agenda-item{
-  display:grid;
-  grid-template-columns:120px 1fr;
-  gap:18px;
-  padding:22px 4px;
-  border-top:1px solid var(--line)
+.agenda-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px; 
+    padding: 15px;
+    margin-bottom: 10px;
 }
 
 .agenda-item:first-child{
   border-top:none
 }
 
-.time{
-  font-size:18px;
-  font-weight:700
+.time {
+    min-width: 120px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    color: var(--muted);
+    white-space: nowrap;
 }
 
-.task-main{
-  display:inline-block;
-  padding:14px 18px;
-  border-radius:14px;
-  min-width:260px
+.task-main {
+    flex-grow: 1; /* Lets the task fill the remaining space */
 }
 
 .task-main.teal{background:rgba(106,208,199,.18)}
@@ -427,6 +427,58 @@ button:disabled{
   .agenda-item{grid-template-columns:1fr;gap:10px}
   .insights-grid{grid-template-columns:1fr}
 }
+
+.cal-nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.big-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 1px;
+    background: #e2e8f0; /* Grid line color */
+    border: 1px solid #e2e8f0;
+}
+
+.cal-header {
+    background: #f8fafc;
+    padding: 10px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 0.8rem;
+}
+
+.cal-day {
+    background: white;
+    min-height: 100px;
+    padding: 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.day-num {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    margin-bottom: 4px;
+}
+
+.cal-task-pill {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: #dff4f2;
+    color: #47b9b2;
+}
+
+.cal-task-pill.high { background: #fee2e2; color: #ef4444; }
+
 </style>
 </head>
 
@@ -439,9 +491,9 @@ button:disabled{
   </div>
 
   <nav class="nav">
-    <a href="#">Calendar</a>
-    <a href="#">My Tasks</a>
-    <a href="#" class="active">Agenda</a>
+    <a href="#" onclick="loadView('calendar')">Calendar</a>
+    <a href="#" onclick="loadView('my tasks')">My Tasks</a>
+    <a href="#" class="active" onclick="loadView('agenda')">Agenda</a>
     <a href="#insightsSection">Clerk Insights</a>
   </nav>
 
@@ -471,6 +523,8 @@ button:disabled{
       <section class="panel">
         <h2>Today's Agenda</h2>
         <div class="agenda-list" id="agendaList"></div>
+          <div id="newTasksList"></div>
+          <div id="statusMsg" style="display:none;">Task saved!</div>
       </section>
 
       <section class="composer">
@@ -482,31 +536,31 @@ button:disabled{
                     <textarea id="taskInput" placeholder="Enter a task or reminder..."></textarea>
                 </div>
 
-                <div class="panel" id="demoPanel"> 
-                                  <h2>Clerk Extracted This:</h2>
+                <div class="panel" id="panelPreview"> 
+                                  <!-- <h2>Clerk Extracted This:</h2> 
                                   <div class="agenda-item">
                                       <div class="time" id="taskDuePreview">--:--</div>
                                       <div class="item-details">
-                                          <div class="task-title" id="outTitle">Task Title</div>
-                                          <div class="pill" id="outPriority">Normal</div>
+                                          <div class="task-title" id="taskTitlePreview">Task Title</div>
+                                          <div class="pill" id="taskPriorityPreview">Normal</div>
                                           <div class="task-sub" id="taskDescPreview">Description...</div>
                                           <div class="meta-row">
-                                              <span class="confidence-pill">Confidence: <span id="outConfidence">0</span>%</span>
+                                              <span class="confidence-pill">Confidence: <span id="taskConfidence">0</span>%</span>
                                           </div>
                                       </div>
                                   </div>
 
                                   <div class="composer-actions">
                                       <button id="agendaBtn" class="primary">Looks Good, Add It</button>
-                                      <button id="clearBtn" class="ghost">Try Again</button>
-                                  </div>
+                                      <button id="clearBtn" class="ghost">Try Again</button> 
+                                  </div> -->
                               </div>
 
                               <div class="composer-actions">
                                   <div class="left-buttons">
-                                      <button class="ghost" type="button">🎙️ Voice</button>
-                                      <button class="ghost" type="button">✉️ Email</button>
-                                      <button class="ghost" type="button">💬 Text</button>
+                                      <button class="ghost" id="voiceBtn" type="button">🎙️ Voice</button>
+                                      <!-- <button class="ghost" type="button">✉️ Email</button>
+                                      <button class="ghost" type="button">💬 Text</button> -->
                                   </div>
                                   <button class="primary" id="processBtn" type="button">Add Task</button>
                               </div>
@@ -520,21 +574,25 @@ button:disabled{
 const taskInput = document.getElementById('taskInput');
 const processBtn = document.getElementById('processBtn');
 const voiceBtn = document.getElementById('voiceBtn');
-const agendaBtn = document.getElementById('agendaBtn');
-const clearBtn = document.getElementById('clearBtn');
+//const agendaBtn = document.getElementById('agendaBtn');
+//const clearBtn = document.getElementById('clearBtn');
 const panelPreview = document.getElementById('panelPreview');
 const statusMsg = document.getElementById('statusMsg');
 const agendaList = document.getElementById('agendaList');
 const newTasksList = document.getElementById('newTasksList');
 
 const taskTitlePreview = document.getElementById('taskTitlePreview');
-const outPriority = document.getElementById('outPriority');
+const taskPriorityPreview = document.getElementById('taskPriorityPreview');
 const taskDuePreview = document.getElementById('taskDuePreview');
 const taskConfidence = document.getElementById('taskConfidence');
 const taskDescPreview = document.getElementById('taskDescPreview');
 
 let currentTask = null; // This will hold the result from your FastAPI /ingest
 let currentView = 'agenda';
+
+//for the calendar, it keeps track where the user is currently looking at
+let currentCalMonth = new Date().getMonth();
+let currentCalYear = new Date().getFullYear();
 
 
 document.querySelectorAll('.nav a').forEach(link => {
@@ -551,19 +609,151 @@ document.querySelectorAll('.nav a').forEach(link => {
     });
 });
 
+
+function renderTaskList(tasks, containerId) {
+  
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // Clear the "Loading..." or old tasks
+    container.innerHTML = '';
+
+    if (tasks.length === 0) {
+        container.innerHTML = '<p style="color:var(--muted); padding:20px;">No tasks found for this view.</p>';
+        return;
+    }
+
+    tasks.forEach(task => {
+    const item = document.createElement('div');
+    item.className = 'agenda-item';
+
+    const taskDateStr = task.due || task.due_date;
+    let formattedTime = "No Date";
+
+    if (taskDateStr && taskDateStr !== 'None') {
+        const d = new Date(taskDateStr);
+        // This creates a format like "Apr 14 @ 05:30 PM"
+        formattedTime = d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + 
+                        ' @ ' + 
+                        d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    // ------------------------------------
+
+    const priority = String(task.priority || 'normal').toLowerCase();
+    const colorClass = priority === 'high' ? 'pink' : (priority === 'medium' ? 'gold' : 'teal');
+
+    item.innerHTML = `
+        <div class="time">${formattedTime}</div> 
+        <div class="task-main ${colorClass}">
+            <div class="task-title">${task.title}</div>
+            <div class="task-sub">${task.description || ''}</div>
+            <div class="meta-row">
+                <span class="confidence-pill">Match: ${(task.confidence > 1 ? task.confidence : (task.confidence || 0) * 100).toFixed(0)}%</span>
+            </div>
+        </div>
+    `;
+    container.appendChild(item);
+});
+}
+
+//this function is the main driver for changing views between agenda, my tasks, and calendar. It fetches the appropriate data and calls the rendering functions.
 async function loadView(view) {
+    const agendaList = document.getElementById('agendaList');
+    const titleHeader = document.querySelector('h2'); // The "Today's Agenda" text
+    
     if (view === 'agenda') {
-        // Fetch only today's tasks
+        titleHeader.textContent = "Today's Agenda";
         const response = await fetch('http://127.0.0.1:8000/tasks?today=true');
         const tasks = await response.json();
-        renderTaskList(tasks, 'agendaList');
-    } else if (view === 'my tasks') {
-        // Fetch ALL tasks from the DB
+
+        // STRICT FRONTEND FILTER: Ensure task date matches today's date
+        const todayStr = new Date().toISOString().split('T')[0]; // Result: "2026-04-13"
+        
+        const todaysTasks = tasks.filter(task => {
+            const taskDate = task.due || task.due_date;
+            if (!taskDate || taskDate === 'None') return false;
+            return taskDate.startsWith(todayStr);
+        });
+
+        renderTaskList(todaysTasks, 'agendaList');
+    }
+    else if (view === 'my tasks') {
+        titleHeader.textContent = "All My Tasks";
+        // Fetch ALL tasks from the DB without the 'today' filter
         const response = await fetch('http://127.0.0.1:8000/tasks');
         const tasks = await response.json();
-        renderTaskList(tasks, 'agendaList'); // Or a different container
+        renderTaskList(tasks, 'agendaList');
+    }
+    else if (view === 'calendar') {
+    titleHeader.textContent = "Monthly Schedule";
+    renderBigCalendar(currentCalMonth, currentCalYear);
+}
+}
+
+async function renderBigCalendar(month, year) {
+    const container = document.getElementById('agendaList');
+    const response = await fetch('http://127.0.0.1:8000/tasks');
+    const allTasks = await response.json();
+
+    const monthNames = ["January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"];
+
+    // 1. Create Navigation Header
+    container.innerHTML = `
+        <div class="cal-nav">
+            <button class="ghost" onclick="changeMonth(-1)">◀ Prev</button>
+            <h2 style="margin:0">${monthNames[month]} ${year}</h2>
+            <button class="ghost" onclick="changeMonth(1)">Next ▶</button>
+        </div>
+        <div class="big-calendar-grid" id="bigCalGrid"></div>
+    `;
+
+    const grid = document.getElementById('bigCalGrid');
+    
+    // 2. Add Day Headers (Sun-Sat)
+    ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(day => {
+        const d = document.createElement('div');
+        d.className = 'cal-header';
+        d.textContent = day;
+        grid.appendChild(d);
+    });
+
+    // 3. Calculate Days
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    // Fill empty start slots
+    for (let i = 0; i < firstDay; i++) grid.appendChild(document.createElement('div'));
+
+    // 4. Draw Days and Insert Tasks
+    for (let day = 1; day <= daysInMonth; day++) {
+        const daySquare = document.createElement('div');
+        daySquare.className = 'cal-day';
+        daySquare.innerHTML = `<span class="day-num">${day}</span>`;
+
+        // Filter tasks for this specific day
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const dayTasks = allTasks.filter(t => (t.due || t.due_date || '').startsWith(dateStr));
+
+        dayTasks.forEach(t => {
+            const tEl = document.createElement('div');
+            tEl.className = `cal-task-pill ${String(t.priority).toLowerCase()}`;
+            tEl.textContent = t.title;
+            daySquare.appendChild(tEl);
+        });
+
+        grid.appendChild(daySquare);
     }
 }
+
+// Navigation Helper
+window.changeMonth = (dir) => {
+    currentCalMonth += dir;
+    if (currentCalMonth < 0) { currentCalMonth = 11; currentCalYear--; }
+    if (currentCalMonth > 11) { currentCalMonth = 0; currentCalYear++; }
+    renderBigCalendar(currentCalMonth, currentCalYear);
+};
+
 
 // --- HELPER FUNCTIONS (KEEP THESE) ---
 function capitalizePriority(priority) {
@@ -572,31 +762,35 @@ function capitalizePriority(priority) {
   return p.charAt(0).toUpperCase() + p.slice(1);
 }
 
-function renderOutput(task) {
+function renderOutput(task) { //tidy up later
     // 1. Log the data so you can see exactly what the backend sent in the F12 console
     console.log("Data received from backend:", task);
+//  //refreshes the list 
+    loadView('agenda');
+    //clears the input box
+    taskInput.value = '';
 
     // 2. Safe mapping with backups
-    outTitle.textContent = task.title || 'Untitled Task';
-    outPriority.textContent = capitalizePriority(task.priority || 'normal');
+    //taskTitlePreview.textContent = task.title || 'Untitled Task';
+    //taskPriorityPreview.textContent = capitalizePriority(task.priority || 'normal');
     
     // Check for due date or the human 'due' text
-    taskDuePreview.textContent = task.due || task.due_date || 'No due date';
+    //taskDuePreview.textContent = task.due || task.due_date || 'No due date';
     
     // Confidence check
-    if (task.confidence !== undefined && task.confidence !== null) {
+    /*if (task.confidence !== undefined && task.confidence !== null) {
         // If it's a decimal (0.94), make it 94%
         let displayConf = task.confidence > 1 ? task.confidence : (task.confidence * 100).toFixed(0);
-        outConfidence.textContent = `${displayConf}%`;
+        taskConfidence.textContent = `${displayConf}%`;
     } else {
-        outConfidence.textContent = '—';
-    }
+        taskConfidence.textContent = '—';
+    }*/
     
-    taskDescPreview.textContent = task.description || 'No description provided.';
+    //taskDescPreview.textContent = task.description || 'No description provided.';
 
     // 3. Show the panel
-    demoPanel.classList.add('show');
-    statusMsg.classList.remove('show');
+    //panelPreview.classList.add('show');
+    //statusMsg.classList.remove('show');
 }
 
 function buildCalendar() {
@@ -732,7 +926,7 @@ processBtn.addEventListener('click', async () => {
 });
 
 // finializes the UI update 
-agendaBtn.addEventListener('click', () => {
+/* agendaBtn.addEventListener('click', () => {
   if (!currentTask) return;
 
   const item = document.createElement('div');
@@ -759,17 +953,17 @@ agendaBtn.addEventListener('click', () => {
   if(statusMsg) statusMsg.style.display = 'inline';
   
   setTimeout(() => {
-      demoPanel.classList.remove('show');
+      panelPreview.classList.remove('show');
       taskInput.value = '';
       if(statusMsg) statusMsg.style.display = 'none';
   }, 2000);
-});
+}); */
 
-clearBtn.addEventListener('click', () => {
+/*clearBtn.addEventListener('click', () => {
   taskInput.value = '';
-  demoPanel.classList.remove('show');
+  panelPreview.classList.remove('show');
   statusMsg.classList.remove('show');
-});
+}); */
 
 document.querySelectorAll('.sample').forEach(btn => {
   btn.addEventListener('click', () => { taskInput.value = btn.dataset.text; });

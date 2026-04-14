@@ -1,15 +1,22 @@
-from .extractor import extract_task_from_text
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, ForeignKey
-from scripts.init_db import engine, Task, RawInput, sessionmaker
+from .extractor import extract_task_from_text
+from scripts.init_db import SessionLocal, Task, RawInput
+from datetime import datetime
 
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 def get_db():
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     db = SessionLocal()
     try:
         yield db
@@ -29,11 +36,12 @@ async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="AI Extraction failed.")
 
     try:
-        #saves raw input
+        #Saves the RAW input
         new_raw = RawInput(
             content=data.content,
             source_type=data.source_type,
-            source_id=data.source_id
+            source_id=data.source_id,
+            received_at=datetime.now()
         )
         db.add(new_raw)
         db.flush()
@@ -50,7 +58,7 @@ async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
             status="pending"
         )
         db.add(new_task)
-        db.commit() #saves everything to neon 
+        db.commit()
 
         return {"status": "success", "task_id": new_task.task_id}
 
@@ -66,7 +74,6 @@ async def get_tasks(db: Session = Depends(get_db)):
     
 @app.post("/tasks/delete/{task_id}")
 async def delete_task(task_id: int, db: Session = Depends(get_db)):
-    
     task_to_delete = db.query(Task).filter(Task.task_id == task_id).first()
     
     if not task_to_delete:

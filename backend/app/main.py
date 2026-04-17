@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
 from .extractor import extract_task_from_text
-from scripts.init_db import SessionLocal, Task, RawInput
+from scripts.init_db import SessionLocal, Task, RawInput, User
 from datetime import datetime
 
 app = FastAPI()
@@ -27,10 +27,12 @@ class UserInput(BaseModel):
     content: str
     source_type: Optional[str] = "text"
     source_id: Optional[str] = None
+    user_id: int
     
 class TaskUpdate(BaseModel):
     due_date: Optional[str] = None
     title: Optional[str] = None
+    priority: Optional[str] = None
 
 @app.post("/ingest")
 async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
@@ -52,6 +54,7 @@ async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
 
         #Save the AI's results into the TASKS table
         new_task = Task(
+            owner_id=data.user_id,
             raw_id=new_raw.raw_id,
             title=structured_data.get("title"),
             due_date=str(structured_data.get("due_date")),
@@ -72,11 +75,11 @@ async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/tasks")
-async def get_tasks(db: Session = Depends(get_db)):
-    tasks = db.query(Task).all()
+async def get_tasks(user_id: int, db: Session = Depends(get_db)):
+    tasks = db.query(Task).filter(Task.owner_id == user_id).all()
     return tasks
     
-@app.post("/tasks/delete/{task_id}")
+@app.delete("/tasks/{task_id}")
 async def delete_task(task_id: int, db: Session = Depends(get_db)):
     task_to_delete = db.query(Task).filter(Task.task_id == task_id).first()
     
@@ -97,6 +100,11 @@ async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depen
     task = db.query(Task).filter(Task.task_id == task_id).first() 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    
+    if task_update.title:
+        task.title = task_update.title
+    if task_update.priority:
+        task.priority = task_update.priority
     
     if task_update.due_date is not None:
         new_date = task_update.due_date

@@ -527,7 +527,7 @@ button:disabled{
 
 <main class="page">
   <div class="layout">
-
+    
     <aside class="sidebar">
       <div class="month-card">
         <div class="month-row">
@@ -592,6 +592,18 @@ button:disabled{
 
       </section> 
     </section>
+    <div id="login-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.98); z-index:9999; display:flex; justify-content:center; align-items:center;">
+    <div style="background:#1e293b; padding:40px; border-radius:26px; text-align:center; border:1px solid var(--teal); box-shadow: var(--shadow); width: 350px;">
+        <h2 style="color:white; margin-bottom:10px; font-size: 28px;">Clerk Login</h2>
+        <p style="color:var(--muted); margin-bottom:25px;">Enter your credentials</p>
+        
+        <input type="text" id="username-input" placeholder="Username" style="padding:15px; border-radius:12px; border:none; margin-bottom:15px; width:100%; font-size:16px;">
+        
+        <input type="password" id="password-input" placeholder="Password" style="padding:15px; border-radius:12px; border:none; margin-bottom:20px; width:100%; font-size:16px;">
+        
+        <button onclick="login()" class="primary" style="width:100%;">Sign In</button>
+        <p id="login-error" style="color:var(--pink); font-size:14px; margin-top:15px; display:none;">Invalid username or password</p>
+    </div>
    </div> 
 </main>
 
@@ -612,6 +624,9 @@ const taskDuePreview = document.getElementById('taskDuePreview');
 const taskConfidence = document.getElementById('taskConfidence');
 const taskDescPreview = document.getElementById('taskDescPreview');
 
+//holds the user  
+let CURRENT_USER_ID = null;
+
 let currentTask = null; // This will hold the result from your FastAPI /ingest
 let currentView = 'agenda';
 
@@ -619,21 +634,32 @@ let currentView = 'agenda';
 let currentCalMonth = new Date().getMonth();
 let currentCalYear = new Date().getFullYear();
 
+//login function 
+async function login() {
+    const userVal = document.getElementById('username-input').value;
+    const passVal = document.getElementById('password-input').value;
+    const errorMsg = document.getElementById('login-error');
 
-document.querySelectorAll('.nav a').forEach(link => {
-    link.addEventListener('click', (e) => {
-        e.preventDefault();
-        
-        // 1. Remove 'active' class from all, add to the clicked one
-        document.querySelectorAll('.nav a').forEach(l => l.classList.remove('active'));
-        link.classList.add('active');
-        
-        // 2. Change the view
-        const viewName = link.textContent.trim().toLowerCase();
-        loadView(viewName);
-    });
-});
+    try {
+        const response = await fetch('http://127.0.0.1:8000/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: userVal, password: passVal })
+        });
 
+        if (response.ok) {
+            const data = await response.json();
+            CURRENT_USER_ID = data.user_id; // Set the global ID from the database
+            
+            document.getElementById('login-overlay').style.display = 'none';
+            loadView('agenda'); // Success!
+        } else {
+            errorMsg.style.display = 'block';
+        }
+    } catch (err) {
+        alert("Server connection failed");
+    }
+}
 
 function renderTaskList(tasks, containerId) {
     const container = document.getElementById(containerId);
@@ -688,71 +714,61 @@ function renderTaskList(tasks, containerId) {
     });
 }
 
+
 //this function is the main driver for changing views between agenda, my tasks, and calendar. It fetches the appropriate data and calls the rendering functions.
 async function loadView(view) {
-  
+    // 1. Update Navbar UI
+    document.querySelectorAll('.nav a').forEach(link => {
+        link.classList.remove('active');
+        if (link.textContent.toLowerCase() === view) {
+            link.classList.add('active');
+        }
+    });
+
+    const titleHeader = document.querySelector('h2'); 
     const agendaList = document.getElementById('agendaList');
-    const titleHeader = document.querySelector('h2'); // The "Today's Agenda" text
-    const response = await fetch('http://127.0.0.1:8000/tasks?today=true');
+    
+    // Show loading state immediately
+    agendaList.innerHTML = '<p style="padding:20px;">Loading tasks...</p>';
+
+    // 2. Fetch data ONCE for all views
+    const baseUrl = `http://127.0.0.1:8000/tasks?user_id=${CURRENT_USER_ID}`;
+    const response = await fetch(baseUrl);
     const allTasks = await response.json();
+
     if (view === 'agenda') {
         titleHeader.textContent = "Today's Agenda";
-        
         const todayStr = new Date().toISOString().split('T')[0]; 
-        
-        const todayTasks = allTasks.filter(t => {
-          const taskDate = t.due_date || t.due || '';
-          // This checks if the task date STARTS with today's YYYY-MM-DD
-          return taskDate.startsWith(todayStr);
-        });
-
+        const todayTasks = allTasks.filter(t => (t.due_date || t.due || '').startsWith(todayStr));
         renderTaskList(todayTasks, 'agendaList');
     }
     else if (view === 'my tasks') {
-      titleHeader.textContent = "All My Tasks";
-      const response = await fetch('http://127.0.0.1:8000/tasks');
-      let tasks = await response.json();
-
-      // --- ADD THIS SORTING LOGIC ---
-      const priorityOrder = { 
-        'high': 4, 
-        'medium': 3, 
-        'normal': 2, 
-        'low': 1 
-      };
-      tasks.sort((a, b) => {
-          // 1. Sort by Priority (Higher weight first)
-          const pA = priorityOrder[String(a.priority).toLowerCase()] || 0;
-          const pB = priorityOrder[String(b.priority).toLowerCase()] || 0;
-
-          if (pA !== pB) {
-              return pB - pA; // Descending: 3, 2, 1
-          }
-
-          // 2. If priorities are the same, sort by Date (Earliest first)
-          const dateA = new Date(a.due_date || a.due || '9999');
-          const dateB = new Date(b.due_date || b.due || '9999');
-          return dateA - dateB;
-      });
-      renderTaskList(tasks, 'agendaList');
+        titleHeader.textContent = "All My Tasks";
+        const priorityOrder = { 'high': 4, 'medium': 3, 'normal': 2, 'low': 1 };
+        
+        // Sort the tasks we already fetched
+        allTasks.sort((a, b) => {
+            const pA = priorityOrder[String(a.priority).toLowerCase()] || 0;
+            const pB = priorityOrder[String(b.priority).toLowerCase()] || 0;
+            return pA !== pB ? pB - pA : new Date(a.due_date) - new Date(b.due_date);
+        });
+        renderTaskList(allTasks, 'agendaList');
     }
     else if (view === 'calendar') {
-    titleHeader.textContent = "Monthly Schedule";
-    renderBigCalendar(currentCalMonth, currentCalYear);
+        titleHeader.textContent = "Monthly Schedule";
+        // Pass the already fetched tasks into the calendar
+        renderBigCalendar(currentCalMonth, currentCalYear, allTasks);
+    }
 }
-}
-
-async function renderBigCalendar(month, year) {
+function renderBigCalendar(month, year, allTasks = []) {
     const container = document.getElementById('agendaList');
     
-    // 1. Fetch data from backend
-    const response = await fetch('http://127.0.0.1:8000/tasks');
-    const allTasks = await response.json();
+    // We REMOVE the fetch from inside here because loadView now passes the data in!
 
     const monthNames = ["January", "February", "March", "April", "May", "June",
         "July", "August", "September", "October", "November", "December"];
 
-    // 2. Create Navigation Header
+    // Navigation Header
     container.innerHTML = `
         <div class="cal-nav">
             <button class="ghost" onclick="changeMonth(-1)">◀ Prev</button>
@@ -764,7 +780,7 @@ async function renderBigCalendar(month, year) {
 
     const grid = document.getElementById('bigCalGrid');
     
-    // 3. Add Day Headers
+    // Add Day Headers
     ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(day => {
         const d = document.createElement('div');
         d.className = 'cal-header';
@@ -777,7 +793,7 @@ async function renderBigCalendar(month, year) {
 
     for (let i = 0; i < firstDay; i++) grid.appendChild(document.createElement('div'));
 
-    // 4. Draw Days and Insert Tasks
+    // Draw Days
     for (let day = 1; day <= daysInMonth; day++) {
         const daySquare = document.createElement('div');
         daySquare.className = 'cal-day';
@@ -786,58 +802,31 @@ async function renderBigCalendar(month, year) {
         daySquare.dataset.date = dateStr; 
         daySquare.innerHTML = `<span class="day-num">${day}</span>`;
 
-        // --- DROP ZONE LOGIC ---
-        daySquare.addEventListener('dragover', (e) => {
-            e.preventDefault(); 
-            daySquare.style.backgroundColor = '#f0f9ff';
-        });
-
-        daySquare.addEventListener('dragleave', () => {
-            daySquare.style.backgroundColor = 'white';
-        });
-
+        // Drag & Drop Listeners
+        daySquare.addEventListener('dragover', (e) => e.preventDefault());
         daySquare.addEventListener('drop', async (e) => {
             e.preventDefault();
-            daySquare.style.backgroundColor = 'white';
-            
             const taskId = e.dataTransfer.getData('text/plain');
-            const targetDate = daySquare.dataset.date;
-            
-            // Safety check: Don't send request if ID is invalid
-            if (!taskId || taskId === "undefined") {
-                console.error("Drop failed: No valid Task ID found.");
-                return;
+            if (taskId && taskId !== "undefined") {
+                await updateTaskDate(taskId, daySquare.dataset.date);
+                loadView('calendar'); // Refresh the view properly
             }
-            
-            await updateTaskDate(taskId, targetDate);
-            renderBigCalendar(currentCalMonth, currentCalYear);
         });
 
-        // Filter tasks for this day
-        const dayTasks = allTasks.filter(t => (t.due || t.due_date || '').startsWith(dateStr));
+        // Filter tasks for this day from the passed-in array
+        const dayTasks = allTasks.filter(t => (t.due_date || t.due || '').startsWith(dateStr));
 
         dayTasks.forEach(t => {
             const tEl = document.createElement('div');
-            tEl.className = `cal-task-pill ${String(t.priority).toLowerCase()}`;
+            // Ensure priority class exists
+            const priorityClass = String(t.priority || 'normal').toLowerCase();
+            tEl.className = `cal-task-pill ${priorityClass}`;
             tEl.textContent = t.title;
-            
-            // --- DRAGGABLE LOGIC ---
             tEl.draggable = true;
+            
             tEl.addEventListener('dragstart', (e) => {
-                
-                const idToStore = t.task_id || t.id; 
-                
-                if (!idToStore) {
-                    console.error("DRAG ERROR: This task has no ID!", t);
-                    return;
-                }
-
+                const idToStore = t.task_id || t.id;
                 e.dataTransfer.setData('text/plain', String(idToStore));
-                tEl.style.opacity = '0.4';
-            });
-
-            tEl.addEventListener('dragend', () => {
-                tEl.style.opacity = '1';
             });
 
             daySquare.appendChild(tEl);
@@ -900,28 +889,6 @@ function renderOutput(task) { //tidy up later
     loadView('agenda');
     //clears the input box
     taskInput.value = '';
-
-    // 2. Safe mapping with backups
-    //taskTitlePreview.textContent = task.title || 'Untitled Task';
-    //taskPriorityPreview.textContent = capitalizePriority(task.priority || 'normal');
-    
-    // Check for due date or the human 'due' text
-    //taskDuePreview.textContent = task.due || task.due_date || 'No due date';
-    
-    // Confidence check
-    /*if (task.confidence !== undefined && task.confidence !== null) {
-        // If it's a decimal (0.94), make it 94%
-        let displayConf = task.confidence > 1 ? task.confidence : (task.confidence * 100).toFixed(0);
-        taskConfidence.textContent = `${displayConf}%`;
-    } else {
-        taskConfidence.textContent = '—';
-    }*/
-    
-    //taskDescPreview.textContent = task.description || 'No description provided.';
-
-    // 3. Show the panel
-    //panelPreview.classList.add('show');
-    //statusMsg.classList.remove('show');
 }
 
 function buildCalendar() {
@@ -1024,22 +991,19 @@ processBtn.addEventListener('click', async () => {
   processBtn.textContent = "Processing...";
 
   try {
-    const response = await fetch('http://127.0.0.1:8000/ingest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-          content: text,
-          source_type: "web", 
-          source_id: "clerk_interface" 
-      })
-    });
+    const response = await fetch('http://127.0.0.1:8000/ingest', { 
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ 
+        content: text,
+        user_id: CURRENT_USER_ID,
+        source_type: "web", 
+        source_id: "clerk_interface" 
+    })
+});
 
-    // If the server doesn't send back a 200 OK, throw error
     if (!response.ok) throw new Error("Server error");
-
     const result = await response.json();
-    
-    // Success! Show the data and hide the error alert
     renderOutput(result); 
     
   } catch (err) {
@@ -1056,45 +1020,6 @@ processBtn.addEventListener('click', async () => {
   }
 });
 
-// finializes the UI update 
-/* agendaBtn.addEventListener('click', () => {
-  if (!currentTask) return;
-
-  const item = document.createElement('div');
-  item.className = 'agenda-item';
-  
-  const priority = String(currentTask.priority || 'normal').toLowerCase();
-  const isHigh = priority === 'high';
-
-  item.innerHTML = `
-    <div class="time">${currentTask.due || 'TBD'}</div>
-    <div>
-      <div class="task-title">✨ ${currentTask.title}</div>
-      ${isHigh ? '<div class="pill" style="background:#ef7f93;color:white">High Priority</div>' : ''}
-      <div class="task-sub">${currentTask.description || ''}</div>
-      <div class="meta-row">
-        <span class="date-label">${currentTask.due_date || 'No Date'}</span>
-        <span class="confidence-pill">Match: ${((currentTask.confidence || 0) * 100).toFixed(0)}%</span>
-      </div>
-    </div>
-  `;
-
-  newTasksList.appendChild(item);
-  
-  if(statusMsg) statusMsg.style.display = 'inline';
-  
-  setTimeout(() => {
-      panelPreview.classList.remove('show');
-      taskInput.value = '';
-      if(statusMsg) statusMsg.style.display = 'none';
-  }, 2000);
-}); */
-
-/*clearBtn.addEventListener('click', () => {
-  taskInput.value = '';
-  panelPreview.classList.remove('show');
-  statusMsg.classList.remove('show');
-}); */
 
 document.querySelectorAll('.sample').forEach(btn => {
   btn.addEventListener('click', () => { taskInput.value = btn.dataset.text; });

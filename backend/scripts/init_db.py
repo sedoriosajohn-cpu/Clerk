@@ -53,35 +53,33 @@ class Task(Base):
 #Initialization Function
 def initialize_database():
     if not DATABASE_URL:
+        print("Missing DATABASE_URL!")
         return
 
-    print(f"Connecting to: {DATABASE_URL.split('@')[-1]}")
+    print(f"Connecting to database...")
     
     try:
-        # 1. Create all tables
+        # 1. Create the tables based on your Classes (User, Task, etc.)
         Base.metadata.create_all(bind=engine)
-        print("✅ Success: Cloud database tables created/verified!")
+        print("✅ Tables verified/created.")
 
-        # 2. Seed a test user so your frontend has someone to "log in" as
+        # 2. Open a temporary session to add the admin user
         db = SessionLocal()
         try:
-            # Check if User 1 already exists
-            test_user = db.query(User).filter(User.user_id == 1).first()
+            # Check if 'admin' already exists so we don't create duplicates
+            existing_user = db.query(User).filter(User.username == "admin").first()
             
-            if not test_user:
-                print("Creating default test user (ID: 1)...")
-                new_user = User(
-                    user_id=1, 
-                    username="clerk_tester", 
-                    password_hash="test_pass_123"
+            if not existing_user:
+                print("Seeding database with admin user...")
+                admin_user = User(
+                    username="admin", 
+                    password_hash="MTLIKESRACHEL"  # In production, use a proper password hashing function!
                 )
-                db.add(new_user)
+                db.add(admin_user)
                 db.commit()
-                print("✅ Default user created!")
+                print("✅ Admin user created successfully!")
             else:
-                print("ℹ️ Default user already exists.")
-        except Exception as seed_error:
-            print(f"Warning: Could not seed test user: {seed_error}")
+                print("ℹ️ Admin user already exists, skipping seed.")
         finally:
             db.close()
 

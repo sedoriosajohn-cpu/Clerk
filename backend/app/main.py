@@ -22,7 +22,11 @@ def get_db():
         yield db
     finally:
         db.close()
-
+        
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+    
 class UserInput(BaseModel):
     content: str
     source_type: Optional[str] = "text"
@@ -33,6 +37,19 @@ class TaskUpdate(BaseModel):
     due_date: Optional[str] = None
     title: Optional[str] = None
     priority: Optional[str] = None
+
+
+@app.post("/login")
+async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
+    # Look for the user by username
+    user = db.query(User).filter(User.username == data.username).first()
+    
+    # Check if user exists and password matches (simple check for now)
+    if not user or user.password_hash != data.password:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    # Return the user_id so the frontend knows who is logged in
+    return {"user_id": user.user_id, "username": user.username}
 
 @app.post("/ingest")
 async def ingest_task(data: UserInput, db: Session = Depends(get_db)):

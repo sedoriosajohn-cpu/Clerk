@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 
 load_dotenv()
@@ -22,6 +22,12 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 #Define Table Structures
+class User(Base):
+    __tablename__ = 'users'
+    user_id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True)
+    password_hash = Column(String)
+
 class RawInput(Base):
     __tablename__ = "raw_inputs"
     raw_id = Column(Integer, primary_key=True, index=True)
@@ -32,6 +38,7 @@ class RawInput(Base):
 
 class Task(Base):
     __tablename__ = "tasks"
+    owner_id = Column(Integer, ForeignKey('users.user_id'))
     task_id = Column(Integer, primary_key=True, index=True)
     raw_id = Column(Integer, ForeignKey("raw_inputs.raw_id"))
     title = Column(String, nullable=False)
@@ -46,13 +53,36 @@ class Task(Base):
 #Initialization Function
 def initialize_database():
     if not DATABASE_URL:
+        print("Missing DATABASE_URL!")
         return
 
-    print(f"Connecting to: {DATABASE_URL.split('@')[-1]}")
+    print(f"Connecting to database...")
     
     try:
+        # 1. Create the tables based on your Classes (User, Task, etc.)
         Base.metadata.create_all(bind=engine)
-        print("✅ Success: Cloud database tables created/verified!")
+        print("✅ Tables verified/created.")
+
+        # 2. Open a temporary session to add the admin user
+        db = SessionLocal()
+        try:
+            # Check if 'admin' already exists so we don't create duplicates
+            existing_user = db.query(User).filter(User.username == "admin").first()
+            
+            if not existing_user:
+                print("Seeding database with admin user...")
+                admin_user = User(
+                    username="admin", 
+                    password_hash="MTLIKESRACHEL"  # In production, use a proper password hashing function!
+                )
+                db.add(admin_user)
+                db.commit()
+                print("✅ Admin user created successfully!")
+            else:
+                print("ℹ️ Admin user already exists, skipping seed.")
+        finally:
+            db.close()
+
     except Exception as e:
         print(f"Failed to initialize database: {e}")
 

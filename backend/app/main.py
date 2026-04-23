@@ -133,3 +133,18 @@ async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depen
     db.commit()
     db.refresh(task)
     return {"message": "Updated successfully"}
+
+@app.post("/register")
+async def register_user(data: LoginRequest, db: Session = Depends(get_db)):
+    # Check if user already exists
+    existing_user = db.query(User).filter(User.username == data.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already taken")
+    
+    # Create new user
+    new_user = User(username=data.username, password_hash=data.password)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return {"message": "User created", "user_id": new_user.user_id}

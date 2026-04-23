@@ -593,18 +593,24 @@ button:disabled{
       </section> 
     </section>
     <div id="login-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.98); z-index:9999; display:flex; justify-content:center; align-items:center;">
-    <div style="background:#1e293b; padding:40px; border-radius:26px; text-align:center; border:1px solid var(--teal); box-shadow: var(--shadow); width: 350px;">
-        <h2 style="color:white; margin-bottom:10px; font-size: 28px;">Clerk Login</h2>
-        <p style="color:var(--muted); margin-bottom:25px;">Enter your credentials</p>
-        
-        <input type="text" id="username-input" placeholder="Username" style="padding:15px; border-radius:12px; border:none; margin-bottom:15px; width:100%; font-size:16px;">
-        
-        <input type="password" id="password-input" placeholder="Password" style="padding:15px; border-radius:12px; border:none; margin-bottom:20px; width:100%; font-size:16px;">
-        
-        <button onclick="login()" class="primary" style="width:100%;">Sign In</button>
-        <p id="login-error" style="color:var(--pink); font-size:14px; margin-top:15px; display:none;">Invalid username or password</p>
+      <div style="background:#1e293b; padding:40px; border-radius:26px; text-align:center; border:1px solid var(--teal); box-shadow: var(--shadow); width: 350px;">
+          <h2 id="auth-title" style="color:white; margin-bottom:10px; font-size: 28px;">Clerk Login</h2>
+          <p id="auth-subtitle" style="color:var(--muted); margin-bottom:25px;">Enter your credentials</p>
+          
+          <input type="text" id="username-input" placeholder="Username" style="padding:15px; border-radius:12px; border:none; margin-bottom:15px; width:100%; font-size:16px;">
+          <input type="password" id="password-input" placeholder="Password" style="padding:15px; border-radius:12px; border:none; margin-bottom:20px; width:100%; font-size:16px;">
+          
+          <button id="login-btn" onclick="login()" class="primary" style="width:100%;">Sign In</button>
+          <button id="register-btn" onclick="register()" class="ghost" style="width:100%; margin-top:10px; display:none;">Create Account</button>
+          
+          <p style="margin-top:20px; font-size:14px; color:var(--muted);">
+              <span id="toggle-text">Don't have an account?</span> 
+              <a href="#" onclick="toggleAuthMode()" style="color:var(--teal); text-decoration:none; font-weight:bold;">Click here</a>
+          </p>
+          <p id="login-error" style="color:var(--pink); font-size:14px; margin-top:15px; display:none;"></p>
+      </div>
     </div>
-   </div> 
+  </div> 
 </main>
 
 <script>
@@ -844,6 +850,55 @@ window.changeMonth = (dir) => {
     renderBigCalendar(currentCalMonth, currentCalYear);
 };
 
+//user login 
+let isLoginMode = true;
+
+function toggleAuthMode() {
+    isLoginMode = !isLoginMode;
+    const title = document.getElementById('auth-title');
+    const loginBtn = document.getElementById('login-btn');
+    const registerBtn = document.getElementById('register-btn');
+    const toggleText = document.getElementById('toggle-text');
+
+    if (isLoginMode) {
+        title.textContent = "Clerk Login";
+        loginBtn.style.display = "block";
+        registerBtn.style.display = "none";
+        toggleText.textContent = "Don't have an account?";
+    } else {
+        title.textContent = "Create Account";
+        loginBtn.style.display = "none";
+        registerBtn.style.display = "block";
+        toggleText.textContent = "Already have an account?";
+    }
+}
+
+async function register() {
+    const userVal = document.getElementById('username-input').value;
+    const passVal = document.getElementById('password-input').value;
+    const errorMsg = document.getElementById('login-error');
+
+    if (!userVal || !passVal) return alert("Please fill in all fields");
+
+    try {
+        const response = await fetch('http://127.0.0.1:8000/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: userVal, password: passVal })
+        });
+
+        if (response.ok) {
+            alert("Account created! You can now log in.");
+            toggleAuthMode(); // Switch back to login mode
+        } else {
+            const data = await response.json();
+            errorMsg.textContent = data.detail || "Registration failed";
+            errorMsg.style.display = 'block';
+        }
+    } catch (err) {
+        alert("Server connection failed");
+    }
+}
 
 // --- HELPER FUNCTIONS (KEEP THESE) ---
 function capitalizePriority(priority) {

@@ -455,6 +455,42 @@ input:checked + .slider:before { transform: translateX(26px); }
                             </label>
                         </div>
                     </div>
+<div style="margin-top:24px;">
+    <h4 style="margin-bottom:12px;">
+        Time Format
+    </h4>
+
+    <label style="display:block; margin-bottom:10px;">
+        <input
+            type="radio"
+            name="timeFormat"
+            value="12"
+            checked
+            onchange="setTimeFormat('12')"
+        >
+        Standard (2:30 PM)
+    </label>
+
+    <label style="display:block; margin-bottom:10px;">
+        <input
+            type="radio"
+            name="timeFormat"
+            value="24"
+            onchange="setTimeFormat('24')"
+        >
+        24-Hour (14:30)
+    </label>
+
+    <label style="display:block;">
+        <input
+            type="radio"
+            name="timeFormat"
+            value="military"
+            onchange="setTimeFormat('military')"
+        >
+        Military (1430 hours)
+    </label>
+</div>
 
                     <div>
                         <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 16px;">System (Coming Soon)</h3>
@@ -522,6 +558,8 @@ let CURRENT_USER_ID = null;
 
 let currentTask = null; // This will hold the result from your FastAPI /ingest
 let currentView = 'agenda';
+
+let timeFormat = "12"; 
 
 //for the calendar, it keeps track where the user is currently looking at
 let currentCalMonth = new Date().getMonth();
@@ -610,9 +648,21 @@ function renderTaskList(tasks, containerId) {
                 <div class="task-title">${task.title}</div>
                 <div class="task-sub">${task.description || ''}</div>
                 <div class="meta-row">
-                    <span class="confidence-pill">Match: ${(task.confidence > 1 ? task.confidence : (task.confidence || 0) * 100).toFixed(0)}%</span>
-                </div>
-            </div>
+    <span class="confidence-pill">
+        ${formatTaskTime(taskDateStr)}
+    </span>
+
+    <span class="confidence-pill">
+        Match:
+        ${
+            (
+                task.confidence > 1
+                    ? task.confidence
+                    : (task.confidence || 0) * 100
+            ).toFixed(0)
+        }%
+    </span>
+</div>
         `;
         container.appendChild(item);
     });
@@ -809,6 +859,16 @@ function toggleDarkTheme() {
     }
 }
 
+function setTimeFormat(format){
+   timeFormat = format;
+
+   localStorage.setItem(
+      "timeFormat",
+      format
+   );
+
+   loadView(currentView);
+}
 // Navigation Helper
 window.changeMonth = (dir) => {
     currentCalMonth += dir;
@@ -895,6 +955,46 @@ function logout() {
     document.getElementById('login-overlay').style.display = 'flex';
     document.getElementById('user-dropdown').style.display = 'none';
     console.log("Logged out successfully.");
+}
+
+function formatTaskTime(dateString){
+
+ if(!dateString) return "";
+
+ const d = new Date(dateString);
+
+ if(timeFormat==="24"){
+   return d.toLocaleTimeString(
+      [],
+      {
+       hour:'2-digit',
+       minute:'2-digit',
+       hour12:false
+      }
+   );
+ }
+
+ if(timeFormat==="military"){
+   let h=String(
+      d.getHours()
+   ).padStart(2,'0');
+
+   let m=String(
+      d.getMinutes()
+   ).padStart(2,'0');
+
+   return `${h}${m} hours`;
+ }
+
+ return d.toLocaleTimeString(
+   [],
+   {
+      hour:'numeric',
+      minute:'2-digit',
+      hour12:true
+   }
+ );
+
 }
 
 // --- HELPER FUNCTIONS (KEEP THESE) ---
@@ -1013,8 +1113,25 @@ function setLiveDates() {
 
 // Run the function as soon as the page loads
 window.addEventListener('DOMContentLoaded', () => {
-    setLiveDates();
-    buildCalendar();
+
+ const savedFormat =
+ localStorage.getItem("timeFormat");
+
+ if(savedFormat){
+   timeFormat=savedFormat;
+
+   const radio=document.querySelector(
+      `input[value="${savedFormat}"]`
+   );
+
+   if(radio){
+      radio.checked=true;
+   }
+ }
+
+ setLiveDates();
+ buildCalendar();
+
 });
 
 // Checks for a date change every minute

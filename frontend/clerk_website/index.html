@@ -460,6 +460,20 @@ input:checked + .slider:before { transform: translateX(26px); }
         Time Format
     </h4>
 
+    <h4 style="margin-top:20px;">
+    Accent Color
+</h4>
+
+<input
+    type="color"
+    value="#5eead4"
+    onchange="
+        changeAccentColor(
+            this.value
+        )
+    "
+>
+
     <label style="display:block; margin-bottom:10px;">
         <input
             type="radio"
@@ -864,6 +878,24 @@ function toggleDarkTheme() {
     }
 }
 
+function changeAccentColor(
+    color
+) {
+
+    document
+        .documentElement
+        .style
+        .setProperty(
+            "--teal",
+            color
+        );
+
+    localStorage.setItem(
+        "accentColor",
+        color
+    );
+}
+
 function setTimeFormat(format){
    timeFormat = format;
 
@@ -1133,7 +1165,7 @@ window.addEventListener('DOMContentLoaded', () => {
       radio.checked=true;
    }
  }
- 
+
 
  const savedDarkMode =
 localStorage.getItem("darkMode");

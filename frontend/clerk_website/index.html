@@ -837,6 +837,11 @@ function updateDisplayName(name) {
 
 function toggleDarkTheme() {
     const isDark = document.getElementById('darkThemeToggle').checked;
+   
+    localStorage.setItem(
+   "darkMode",
+   isDark ? "on" : "off"
+);
     const root = document.documentElement;
 
     if (isDark) {
@@ -1128,6 +1133,18 @@ window.addEventListener('DOMContentLoaded', () => {
       radio.checked=true;
    }
  }
+ 
+
+ const savedDarkMode =
+localStorage.getItem("darkMode");
+
+if(savedDarkMode==="on"){
+   document.getElementById(
+      "darkThemeToggle"
+   ).checked=true;
+
+   toggleDarkTheme();
+}
 
  setLiveDates();
  buildCalendar();

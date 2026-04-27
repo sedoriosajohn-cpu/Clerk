@@ -160,6 +160,11 @@ body {
     margin-top: 8px;
 }
 
+.task-main.pink { border-left: 5px solid #ff4b91; background: rgba(255, 75, 145, 0.1); }
+.task-main.amber { border-left: 5px solid #ffb100; background: rgba(255, 177, 0, 0.1); }
+.task-main.teal { border-left: 5px solid #00d7c0; background: rgba(0, 215, 192, 0.1); }
+.task-main.blue { border-left: 5px solid #00a3ff; background: rgba(0, 163, 255, 0.1); }
+
 /* ==========================================================================
    5. COMPOSER & INPUTS
    ========================================================================== */
@@ -306,6 +311,22 @@ button {
 .calendar-grid .empty {
     opacity: 0;
 }
+/* Styling for task "pills" inside calendar days */
+.calendar-event {
+    font-size: 0.75rem;
+    padding: 2px 4px;
+    margin-bottom: 2px;
+    border-radius: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: white; /* Make text white so it stands out on the color */
+}
+
+.calendar-event.pink { background-color: #ff4b91; border-left: 3px solid #d4145a; }
+.calendar-event.amber { background-color: #ffb100; border-left: 3px solid #c68a00; }
+.calendar-event.teal { background-color: #00d7c0; border-left: 3px solid #00a190; }
+.calendar-event.blue { background-color: #00a3ff; border-left: 3px solid #0077bb; }
 
 /* ==========================================================================
    7. THEME TOGGLE (SLIDER)
@@ -517,8 +538,8 @@ const taskDuePreview = document.getElementById('taskDuePreview');
 const taskConfidence = document.getElementById('taskConfidence');
 const taskDescPreview = document.getElementById('taskDescPreview');
 
-//holds the user  
-let CURRENT_USER_ID = null;
+//global user variable 
+window.CURRENT_USER_ID = null;
 
 let currentTask = null; // This will hold the result from your FastAPI /ingest
 let currentView = 'agenda';
@@ -563,258 +584,6 @@ window.login = async function() {
         errorMsg.textContent = "Server connection failed";
         errorMsg.style.display = 'block';
     }
-};
-
-function renderTaskList(tasks, containerId) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    container.innerHTML = '';
-
-    if (tasks.length === 0) {
-        container.innerHTML = '<p style="color:var(--muted); padding:20px;">No tasks found.</p>';
-        return;
-    }
-
-    tasks.forEach(task => {
-        const item = document.createElement('div');
-        item.className = 'agenda-item';
-
-        // Format date for the datetime-local input (YYYY-MM-DDTHH:MM)
-        const taskDateStr = task.due_date || task.due;
-        let inputDateValue = "";
-        if (taskDateStr && taskDateStr !== 'None') {
-            const d = new Date(taskDateStr);
-            // We use ISO string but adjust for the UTC/Local shift we handled earlier
-            inputDateValue = d.toISOString().slice(0, 16); 
-        }
-
-        const priority = String(task.priority || 'normal').toLowerCase();
-
-          let colorClass = 'blue'; 
-          if (priority === 'high') {
-              colorClass = 'pink';
-          } else if (priority === 'medium') {
-              colorClass = 'amber';
-          } else if (priority === 'low') {
-              colorClass = 'teal';
-          }
-
-        item.innerHTML = `
-            <div class="time-container">
-                <input type="datetime-local" 
-                       class="task-date-input" 
-                       value="${inputDateValue}" 
-                       onchange="handleDateChange('${task.task_id}', this.value)">
-            </div> 
-            <div class="task-main ${colorClass}">
-                <div class="task-title">${task.title}</div>
-                <div class="task-sub">${task.description || ''}</div>
-                <div class="meta-row">
-                    <span class="confidence-pill">Match: ${(task.confidence > 1 ? task.confidence : (task.confidence || 0) * 100).toFixed(0)}%</span>
-                </div>
-            </div>
-        `;
-        container.appendChild(item);
-    });
-}
-
-
-//this function is the main driver for changing views between agenda, my tasks, and calendar. It fetches the appropriate data and calls the rendering functions.
-async function loadView(view) {
-    // 1. Update Navbar UI
-    document.querySelectorAll('.nav a').forEach(link => {
-        link.classList.remove('active');
-        if (link.textContent.toLowerCase() === view) link.classList.add('active');
-    });
-
-    // 2. Select specific UI components
-    const agendaPanel = document.querySelector('.panel:not(#settingsView)');
-    const composer = document.querySelector('.composer');
-    const settingsView = document.getElementById('settingsView');
-    
-    // Select the h2 specifically inside the active panel
-    const titleHeader = agendaPanel.querySelector('h2'); 
-    const agendaList = document.getElementById('agendaList');
-
-    // 3. Handle Settings Toggle
-    if (view === 'settings') {
-        agendaPanel.style.display = 'none';
-        composer.style.display = 'none';
-        settingsView.style.display = 'block';
-        return; 
-    } else {
-        agendaPanel.style.display = 'block';
-        composer.style.display = 'block';
-        settingsView.style.display = 'none';
-    }
-    
-    // 4. Loading State
-    agendaList.innerHTML = '<p style="padding:20px; color:var(--muted);">Loading tasks...</p>';
-
-    // 5. Fetch data
-    const baseUrl = `http://127.0.0.1:8000/tasks?user_id=${window.CURRENT_USER_ID}`;
-
-    // Check if user is logged in before fetching to avoid the 422 error
-    if (!window.CURRENT_USER_ID || window.CURRENT_USER_ID === "null") {
-        console.warn("Fetch skipped: No valid user ID found.");
-        return; 
-    }
-
-    const response = await fetch(baseUrl);
-
-    if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    // FIX: You must define 'data' by awaiting the json()
-    const data = await response.json(); 
-
-    // Now 'data' exists, so this won't crash anymore
-    const allTasks = data.tasks || [];
-
-    // 6. View Routing
-    if (view === 'agenda') {
-        titleHeader.textContent = "Today's Agenda";
-        const todayStr = new Date().toISOString().split('T')[0]; 
-        const todayTasks = allTasks.filter(t => (t.due_date || t.due || '').startsWith(todayStr));
-        renderTaskList(todayTasks, 'agendaList');
-    }
-    else if (view === 'my tasks') {
-        titleHeader.textContent = "All My Tasks";
-        const priorityOrder = { 'high': 4, 'medium': 3, 'normal': 2, 'low': 1 };
-        
-        allTasks.sort((a, b) => {
-            const pA = priorityOrder[String(a.priority).toLowerCase()] || 0;
-            const pB = priorityOrder[String(b.priority).toLowerCase()] || 0;
-            return pA !== pB ? pB - pA : new Date(a.due_date) - new Date(b.due_date);
-        });
-        renderTaskList(allTasks, 'agendaList');
-    }
-    else if (view === 'calendar') {
-        titleHeader.textContent = "Monthly Schedule";
-        renderBigCalendar(currentCalMonth, currentCalYear, allTasks);
-    }
-}
-
-function renderBigCalendar(month, year, allTasks = []) {
-    const container = document.getElementById('agendaList');
-    
-    // We REMOVE the fetch from inside here because loadView now passes the data in!
-
-    const monthNames = ["January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December"];
-
-    // Navigation Header
-    container.innerHTML = `
-        <div class="cal-nav">
-            <button class="ghost" onclick="changeMonth(-1)">◀ Prev</button>
-            <h2 style="margin:0">${monthNames[month]} ${year}</h2>
-            <button class="ghost" onclick="changeMonth(1)">Next ▶</button>
-        </div>
-        <div class="big-calendar-grid" id="bigCalGrid"></div>
-    `;
-
-    const grid = document.getElementById('bigCalGrid');
-    
-    // Add Day Headers
-    ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(day => {
-        const d = document.createElement('div');
-        d.className = 'cal-header';
-        d.textContent = day;
-        grid.appendChild(d);
-    });
-
-    const firstDay = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-    for (let i = 0; i < firstDay; i++) grid.appendChild(document.createElement('div'));
-
-    // Draw Days
-    for (let day = 1; day <= daysInMonth; day++) {
-        const daySquare = document.createElement('div');
-        daySquare.className = 'cal-day';
-        
-        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        daySquare.dataset.date = dateStr; 
-        daySquare.innerHTML = `<span class="day-num">${day}</span>`;
-
-        // Drag & Drop Listeners
-        daySquare.addEventListener('dragover', (e) => e.preventDefault());
-        daySquare.addEventListener('drop', async (e) => {
-            e.preventDefault();
-            const taskId = e.dataTransfer.getData('text/plain');
-            if (taskId && taskId !== "undefined") {
-                await updateTaskDate(taskId, daySquare.dataset.date);
-                loadView('calendar'); // Refresh the view properly
-            }
-        });
-
-        // Filter tasks for this day from the passed-in array
-        const dayTasks = allTasks.filter(t => (t.due_date || t.due || '').startsWith(dateStr));
-
-        dayTasks.forEach(t => {
-            const tEl = document.createElement('div');
-            // Ensure priority class exists
-            const priorityClass = String(t.priority || 'normal').toLowerCase();
-            tEl.className = `cal-task-pill ${priorityClass}`;
-            tEl.textContent = t.title;
-            tEl.draggable = true;
-            
-            tEl.addEventListener('dragstart', (e) => {
-                const idToStore = t.task_id || t.id;
-                e.dataTransfer.setData('text/plain', String(idToStore));
-            });
-
-            daySquare.appendChild(tEl);
-        });
-
-        grid.appendChild(daySquare);
-    }
-}
-
-function updateDisplayName(name) {
-    const nameToDisplay = name.trim() || "User";
-    
-    // Update the Top Bar
-    const topBarName = document.getElementById('display-username');
-    if (topBarName) topBarName.textContent = nameToDisplay;
-    
-    // Update the Header (optional touch)
-    const liveHeader = document.getElementById('liveDateHeader');
-    const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-    if (liveHeader) liveHeader.textContent = `Hello, ${nameToDisplay} | ${today}`;
-}
-
-function toggleDarkTheme() {
-    const isDark = document.getElementById('darkThemeToggle').checked;
-    const root = document.documentElement;
-
-    if (isDark) {
-        root.style.setProperty('--bg', '#0f172a'); 
-        root.style.setProperty('--panel-bg', '#1e293b');
-        root.style.setProperty('--text', '#f8fafc');
-        root.style.setProperty('--muted', '#94a3b8');
-        root.style.setProperty('--border', '#334155');
-        root.style.setProperty('--shadow', '0 10px 15px -3px rgba(0, 0, 0, 0.5)');
-        document.body.style.background = "#0f172a"; // Solid for dark mode
-    } else {
-        // MATCH THE ORIGINAL LOOK EXACTLY
-        root.style.setProperty('--bg', 'radial-gradient(circle at top left, #dff5f2 0%, #eef3f5 32%, #f7f8fa 100%)');
-        root.style.setProperty('--panel-bg', 'rgba(255, 255, 255, 0.82)');
-        root.style.setProperty('--text', '#436172');
-        root.style.setProperty('--muted', '#7f98a5');
-        root.style.setProperty('--border', '#e2e8f0');
-        root.style.setProperty('--shadow', '0 10px 28px rgba(79, 113, 130, .12)');
-        document.body.style.background = 'radial-gradient(circle at top left, #dff5f2 0%, #eef3f5 32%, #f7f8fa 100%)';
-    }
-}
-
-// Navigation Helper
-window.changeMonth = (dir) => {
-    currentCalMonth += dir;
-    if (currentCalMonth < 0) { currentCalMonth = 11; currentCalYear--; }
-    if (currentCalMonth > 11) { currentCalMonth = 0; currentCalYear++; }
-    renderBigCalendar(currentCalMonth, currentCalYear);
 };
 
 //user login 
@@ -866,6 +635,287 @@ async function register() {
         alert("Server connection failed");
     }
 }
+
+function renderTaskList(tasks, containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (tasks.length === 0) {
+        container.innerHTML = '<p style="color:var(--muted); padding:20px;">No tasks found.</p>';
+        return;
+    }
+
+    tasks.forEach(task => {
+        const item = document.createElement('div');
+        item.className = 'agenda-item';
+
+        // Safely handle dates to prevent script crashes
+        const taskDateStr = task.due_date || task.due;
+        let inputDateValue = "";
+        
+        if (taskDateStr && taskDateStr !== 'None') {
+            try {
+                const d = new Date(taskDateStr);
+                // Check if date is valid before calling toISOString
+                if (!isNaN(d.getTime())) {
+                    inputDateValue = d.toISOString().slice(0, 16); 
+                }
+            } catch (e) {
+                console.error("Invalid date for task:", task.title);
+            }
+        }
+
+       const priority = String(task.priority || 'normal').toLowerCase();
+
+        let colorClass = 'blue'; 
+        if (priority === 'high') {
+            colorClass = 'pink';
+        } else if (priority === 'medium') {
+            colorClass = 'amber';
+        } else if (priority === 'low') {
+            colorClass = 'teal';
+        }
+
+        item.innerHTML = `
+            <div class="time-container">
+                <input type="datetime-local" 
+                    class="task-date-input" 
+                    value="${inputDateValue}" 
+                    onchange="handleDateChange('${task.task_id}', this.value)">
+            </div> 
+            <div class="task-main ${colorClass}"> 
+                <div class="task-title">${task.title}</div>
+                <div class="task-sub">${task.description || ''}</div>
+                <div class="meta-row">
+                    <span class="confidence-pill">Match: ${(task.confidence > 1 ? task.confidence : (task.confidence || 0) * 100).toFixed(0)}%</span>
+                </div>
+            </div>
+        `;
+        container.appendChild(item);
+    });
+}
+
+
+
+//this function is the main driver for changing views between agenda, my tasks, and calendar. It fetches the appropriate data and calls the rendering functions.
+async function loadView(view) {
+    // 0. Update the global state so other functions know what page we are on
+    currentView = view; 
+
+    // 1. Update Navbar UI
+    document.querySelectorAll('.nav a').forEach(link => {
+        link.classList.remove('active');
+        if (link.textContent.toLowerCase() === view) link.classList.add('active');
+    });
+
+    // 2. Select UI components
+    const agendaPanel = document.querySelector('.panel:not(#settingsView)');
+    const composer = document.querySelector('.composer');
+    const settingsView = document.getElementById('settingsView');
+    const titleHeader = agendaPanel.querySelector('h2'); 
+    const agendaList = document.getElementById('agendaList');
+
+    // 3. Handle Settings Toggle
+    if (view === 'settings') {
+        agendaPanel.style.display = 'none';
+        composer.style.display = 'none';
+        settingsView.style.display = 'block';
+        return; 
+    } else {
+        agendaPanel.style.display = 'block';
+        composer.style.display = 'block';
+        settingsView.style.display = 'none';
+    }
+    
+    // 4. Loading State
+    agendaList.innerHTML = '<p style="padding:20px; color:var(--muted);">Loading tasks...</p>';
+
+    // 5. Fetch data with type-safe User ID
+    // We check window.CURRENT_USER_ID because that's what your login function sets
+    const userId = parseInt(window.CURRENT_USER_ID); 
+    
+    if (isNaN(userId)) {
+        console.warn("Fetch skipped: No valid user ID found.");
+        agendaList.innerHTML = '<p style="padding:20px;">Please log in to see tasks.</p>';
+        return; 
+    }
+
+    try {
+        const response = await fetch(`http://127.0.0.1:8000/tasks?user_id=${userId}`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const data = await response.json();
+        
+        // This is the variable name your renderTaskList expects
+        const allTasks = data.tasks || [];
+        console.log("Tasks successfully loaded for User " + userId + ":", allTasks);
+
+        // 6. View Routing
+        if (view === 'agenda') {
+            titleHeader.textContent = "Today's Agenda";
+            
+            // FIXED: Use local date to match your computer's clock
+            const todayStr = new Date().toLocaleDateString('en-CA'); 
+            
+            const todayTasks = allTasks.filter(t => {
+                const taskDate = (t.due_date || t.due || '').split('T')[0];
+                return taskDate === todayStr;
+            });
+            renderTaskList(todayTasks, 'agendaList');
+        }
+        else if (view === 'my tasks') {
+            titleHeader.textContent = "All My Tasks";
+            
+            // Sort by priority before rendering
+            const priorityOrder = { 'high': 4, 'medium': 3, 'normal': 2, 'low': 1 };
+            allTasks.sort((a, b) => {
+                const pA = priorityOrder[String(a.priority).toLowerCase()] || 0;
+                const pB = priorityOrder[String(b.priority).toLowerCase()] || 0;
+                return pA !== pB ? pB - pA : new Date(a.due_date) - new Date(b.due_date);
+            });
+            
+            renderTaskList(allTasks, 'agendaList');
+        }
+        else if (view === 'calendar') {
+            titleHeader.textContent = "Monthly Schedule";
+            // Uses your global calendar variables
+            renderBigCalendar(currentCalMonth, currentCalYear, allTasks);
+        }
+    } catch (err) {
+        console.error("LoadView Error:", err);
+        agendaList.innerHTML = '<p style="color:pink; padding:20px;">Connection Error: Check if FastAPI is running.</p>';
+    }
+}
+
+function renderBigCalendar(month, year, allTasks = []) {
+    const container = document.getElementById('agendaList');
+    
+    const monthNames = ["January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"];
+
+    // 1. Navigation Header
+    container.innerHTML = `
+        <div class="cal-nav">
+            <button class="ghost" onclick="changeMonth(-1)">◀ Prev</button>
+            <h2 style="margin:0">${monthNames[month]} ${year}</h2>
+            <button class="ghost" onclick="changeMonth(1)">Next ▶</button>
+        </div>
+        <div class="big-calendar-grid" id="bigCalGrid"></div>
+    `;
+
+    const grid = document.getElementById('bigCalGrid');
+    
+    // 2. Add Day Headers
+    ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(day => {
+        const d = document.createElement('div');
+        d.className = 'cal-header';
+        d.textContent = day;
+        grid.appendChild(d);
+    });
+
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    // Padding for empty days at start of month
+    for (let i = 0; i < firstDay; i++) grid.appendChild(document.createElement('div'));
+
+    // 3. Draw Days
+    for (let day = 1; day <= daysInMonth; day++) {
+        const daySquare = document.createElement('div');
+        daySquare.className = 'cal-day';
+        
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        daySquare.dataset.date = dateStr; 
+        daySquare.innerHTML = `<span class="day-num">${day}</span>`;
+
+        // 4. Drag & Drop Listeners
+        daySquare.addEventListener('dragover', (e) => e.preventDefault());
+        daySquare.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            const taskId = e.dataTransfer.getData('text/plain');
+            if (taskId && taskId !== "undefined") {
+                await updateTaskDate(taskId, daySquare.dataset.date);
+                loadView('calendar'); 
+            }
+        });
+
+        // 5. Filter and Render Tasks
+        const dayTasks = allTasks.filter(t => (t.due_date || t.due || '').startsWith(dateStr));
+
+        dayTasks.forEach(task => {
+            const taskEl = document.createElement('div');
+            
+            // Priority Color Logic
+            const priority = String(task.priority || 'normal').toLowerCase();
+            let colorClass = 'blue'; 
+            if (priority === 'high') colorClass = 'pink';
+            else if (priority === 'medium') colorClass = 'amber';
+            else if (priority === 'low') colorClass = 'teal';
+
+            // Apply classes and make it draggable
+            taskEl.className = `calendar-event ${colorClass}`;
+            taskEl.textContent = task.title;
+            taskEl.draggable = true; 
+            
+            // Set data for dragging
+            taskEl.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('text/plain', task.task_id);
+            });
+            
+            daySquare.appendChild(taskEl);
+        });
+
+        grid.appendChild(daySquare);
+    }
+}
+
+function updateDisplayName(name) {
+    const nameToDisplay = name.trim() || "User";
+    
+    // Update the Top Bar
+    const topBarName = document.getElementById('display-username');
+    if (topBarName) topBarName.textContent = nameToDisplay;
+    
+    // Update the Header (optional touch)
+    const liveHeader = document.getElementById('liveDateHeader');
+    const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    if (liveHeader) liveHeader.textContent = `Hello, ${nameToDisplay} | ${today}`;
+}
+
+function toggleDarkTheme() {
+    const isDark = document.getElementById('darkThemeToggle').checked;
+    const root = document.documentElement;
+
+    if (isDark) {
+        root.style.setProperty('--bg', '#0f172a'); 
+        root.style.setProperty('--panel-bg', '#1e293b');
+        root.style.setProperty('--text', '#f8fafc');
+        root.style.setProperty('--muted', '#94a3b8');
+        root.style.setProperty('--border', '#334155');
+        root.style.setProperty('--shadow', '0 10px 15px -3px rgba(0, 0, 0, 0.5)');
+        document.body.style.background = "#0f172a"; // Solid for dark mode
+    } else {
+        // MATCH THE ORIGINAL LOOK EXACTLY
+        root.style.setProperty('--bg', 'radial-gradient(circle at top left, #dff5f2 0%, #eef3f5 32%, #f7f8fa 100%)');
+        root.style.setProperty('--panel-bg', 'rgba(255, 255, 255, 0.82)');
+        root.style.setProperty('--text', '#436172');
+        root.style.setProperty('--muted', '#7f98a5');
+        root.style.setProperty('--border', '#e2e8f0');
+        root.style.setProperty('--shadow', '0 10px 28px rgba(79, 113, 130, .12)');
+        document.body.style.background = 'radial-gradient(circle at top left, #dff5f2 0%, #eef3f5 32%, #f7f8fa 100%)';
+    }
+}
+
+// Navigation Helper
+window.changeMonth = (dir) => {
+    currentCalMonth += dir;
+    if (currentCalMonth < 0) { currentCalMonth = 11; currentCalYear--; }
+    if (currentCalMonth > 11) { currentCalMonth = 0; currentCalYear++; }
+    renderBigCalendar(currentCalMonth, currentCalYear);
+};
+
+
 
 // Toggle the user menu dropdown
 function toggleUserMenu() {
@@ -1034,42 +1084,50 @@ if (SpeechRecognition) {
 }
 
 
-// runs the AI extraction 
+//runs AI extraction 
 processBtn.addEventListener('click', async () => {
-  const text = taskInput.value.trim();
-  if (!text) return;
-
-  processBtn.disabled = true;
-  processBtn.textContent = "Processing...";
-
-  try {
-    const response = await fetch('http://127.0.0.1:8000/ingest', { 
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ 
-        content: text,
-        user_id: CURRENT_USER_ID,
-        source_type: "web", 
-        source_id: "clerk_interface" 
-    })
-});
-
-    if (!response.ok) throw new Error("Server error");
-    const result = await response.json();
-    renderOutput(result); 
-    
-  } catch (err) {
-    console.error("The exact error is:", err);
-    // Only alert if the server is actually dead
-    if (err.message.includes('fetch')) {
-        alert("Make sure your FastAPI server is running!");
-    } else {
-        alert("UI Error: " + err.message); 
+    const text = taskInput.value.trim();
+    // Use window.CURRENT_USER_ID to ensure it's the global variable
+    if (!text || !window.CURRENT_USER_ID) {
+        alert("Please log in first!");
+        return;
     }
-  } finally {
-    processBtn.disabled = false;
-    processBtn.textContent = "Add Task";
-  }
+
+    processBtn.disabled = true;
+    processBtn.textContent = "Processing...";
+
+    try {
+        const response = await fetch('http://127.0.0.1:8000/ingest', { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                content: text,
+                // parseInt ensures we send an Integer to stop the 422 error
+                user_id: parseInt(window.CURRENT_USER_ID), 
+                source_type: "web", 
+                source_id: "clerk_interface" 
+            })
+        });
+
+        if (!response.ok) throw new Error("Server error");
+    
+        const result = await response.json();
+        console.log("Task added successfully:", result);
+        
+        taskInput.value = ''; // Clear the input box
+        
+        // Refresh the whole list properly
+        await loadView(currentView || 'agenda');
+
+    } 
+
+    catch (err) {
+        console.error("The exact error is:", err);
+        alert("UI Error: " + err.message); 
+    } finally {
+        processBtn.disabled = false;
+        processBtn.textContent = "Add Task";
+    }
 });
 
 

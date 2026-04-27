@@ -94,7 +94,7 @@ async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
 @app.get("/tasks")
 async def get_tasks(user_id: int, db: Session = Depends(get_db)):
     tasks = db.query(Task).filter(Task.owner_id == user_id).all()
-    return tasks
+    return {"tasks": tasks}
     
 @app.delete("/tasks/{task_id}")
 async def delete_task(task_id: int, db: Session = Depends(get_db)):

@@ -14,63 +14,69 @@ client = OpenAI(api_key=api_key)
 
 def build_prompt(user_input: str, current_time: str) -> str:
     return f"""
-    You are an AI task extraction engine for a productivity app called Clerk.
+    You are an AI task extraction engine for Clerk.
     Current UTC Timestamp: {current_time}
-    Extract ONE actionable task from the user's input.
-    Return ONLY valid JSON in this exact format:
+    
+    Extract ALL actionable tasks from the user's input.
+    Return ONLY a valid JSON LIST of objects.
+    
+    Each object must follow this format:
     {{
       "title": "short task title",
       "description": "expanded description",
       "due_date": "ISO 8601 timestamp in UTC or null",
       "assignee": "name or null",
       "priority": "low | normal | high",
-      "confidence": 0
+      "confidence": 0-100
     }}
+    
     User input: {user_input}
     """
 
-#old prompt from other javascript logic 
-# You are an AI task extraction engine for a productivity app called Clerk.
-
-# Current UTC Timestamp: ${currentTime}
-
-# Extract ONE actionable task from the user's input.
-
-# Return ONLY valid JSON in this exact format:
-# {
-#   "title": "short task title",
-#   "description": "expanded description",
-#   "due_date": "ISO 8601 timestamp in UTC or null",
-#   "assignee": "name or null",
-#   "priority": "low | normal | high",
-#   "confidence": 0
-# }
-
-# Rules:
-# - Extract only one real actionable task.
-# - Keep the title concise and professional.
-# - Expand the description clearly.
-# - Convert relative dates like "next Friday" or "tomorrow at 5pm" into an exact ISO 8601 UTC timestamp.
-# - If there is no due date, return null.
-# - If no assignee is mentioned, return null.
-# - Priority must be exactly one of: low, normal, high.
-# - Confidence must be an integer from 0 to 100.
-
-# Confidence guide:
-# - 90-100 = explicit obligation
-# - 70-89 = clear task
-# - 40-69 = inferred or tentative task
-# - 0-39 = not really a task
-def extract_json(text: str) -> Dict[str, Any]:
+def extract_json(text: str) -> list:
     trimmed = text.strip()
     try:
-        return json.loads(trimmed)
+        data = json.loads(trimmed)
+        return data if isinstance(data, list) else [data]
     except json.JSONDecodeError:
-        # Improved Regex to handle AI markdown blocks
-        match = re.search(r'\{[\s\S]*\}', trimmed)
+        # Regex to find the list part [ ... ]
+        match = re.search(r'\[[\s\S]*\]', trimmed)
         if not match:
-            raise ValueError(f"Model returned invalid format: {trimmed[:50]}...")
+            # Fallback to check for single object if list markers missing
+            obj_match = re.search(r'\{[\s\S]*\}', trimmed)
+            if obj_match:
+                return [json.loads(obj_match.group(0))]
+            raise ValueError("Model failed to return valid JSON list")
         return json.loads(match.group(0))
+
+def extract_task_from_text(text: str) -> list:
+    if not text or not text.strip():
+        return []
+
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        prompt = build_prompt(text, now_iso)
+
+        response = client.chat.completions.create(
+            model="gpt-5.4", 
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+
+        raw_content = response.choices[0].message.content
+        raw_tasks = extract_json(raw_content)
+        
+        processed_tasks = []
+        for t in raw_tasks:
+            valid = validate_task(t)
+            with_conf = adjust_confidence(text, valid)
+            processed_tasks.append(format_for_frontend(with_conf))
+            
+        return processed_tasks
+        
+    except Exception as e:
+        print(f"EXTRACTION ERROR: {e}")
+        return []
     
 def normalize_priority(priority: str) -> str:
     if not priority: return "normal"
@@ -121,28 +127,3 @@ def format_for_frontend(task: Dict[str, Any]) -> Dict[str, Any]:
     task["due"] = due_dt.strftime("%m/%d/%Y") if due_dt else "No due date"
     task["time"] = due_dt.strftime("%I:%M %p") if due_dt else "No time"
     return task
-
-def extract_task_from_text(text: str) -> Optional[Dict[str, Any]]:
-    if not text or not text.strip():
-        return None
-
-    try:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        prompt = build_prompt(text, now_iso)
-
-        response = client.chat.completions.create(
-            model="gpt-5.4", 
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-
-        raw_content = response.choices[0].message.content
-        
-        task = extract_json(raw_content)
-        task = validate_task(task)
-        task = adjust_confidence(text, task)
-        return format_for_frontend(task)
-        
-    except Exception as e:
-        print(f"EXTRACTION ERROR: {e}")
-        return None

@@ -53,13 +53,14 @@ async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
 
 @app.post("/ingest")
 async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
-    structured_data = extract_task_from_text(data.content)
+    # This now returns a LIST of dictionaries
+    structured_tasks = extract_task_from_text(data.content)
     
-    if not structured_data:
-        raise HTTPException(status_code=500, detail="AI Extraction failed.")
+    if not structured_tasks:
+        raise HTTPException(status_code=500, detail="AI Extraction failed to find any tasks.")
 
     try:
-        #Saves the RAW input
+        # 1. Save the RAW input once for the whole batch
         new_raw = RawInput(
             content=data.content,
             source_type=data.source_type,
@@ -67,24 +68,33 @@ async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
             received_at=datetime.now()
         )
         db.add(new_raw)
-        db.flush()
+        db.flush() # Get the raw_id
 
-        #Save the AI's results into the TASKS table
-        new_task = Task(
-            owner_id=data.user_id,
-            raw_id=new_raw.raw_id,
-            title=structured_data.get("title"),
-            due_date=str(structured_data.get("due_date")),
-            due_text=structured_data.get("due_text"),
-            assignee=structured_data.get("assignee", "me"),
-            priority=structured_data.get("priority", "normal"),
-            confidence=structured_data.get("confidence"),
-            status="pending"
-        )
-        db.add(new_task)
+        # 2. Loop and save each individual task
+        task_ids = []
+        for task_data in structured_tasks:
+            new_task = Task(
+                owner_id=data.user_id,
+                raw_id=new_raw.raw_id,
+                title=task_data.get("title"),
+                due_date=str(task_data.get("due_date")),
+                due_text=task_data.get("due"), # From format_for_frontend
+                assignee=task_data.get("assignee", "me"),
+                priority=task_data.get("priority", "normal"),
+                confidence=task_data.get("confidence"),
+                status="pending"
+            )
+            db.add(new_task)
+            db.flush() # Get each task_id
+            task_ids.append(new_task.task_id)
+
         db.commit()
 
-        return {"status": "success", "task_id": new_task.task_id}
+        return {
+            "status": "success", 
+            "message": f"Extracted {len(task_ids)} tasks",
+            "task_ids": task_ids
+        }
 
     except Exception as e:
         db.rollback()

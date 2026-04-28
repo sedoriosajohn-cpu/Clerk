@@ -907,12 +907,18 @@ function toggleDarkTheme() {
     }
 }
 
-// Navigation Helper
-window.changeMonth = (dir) => {
-    currentCalMonth += dir;
-    if (currentCalMonth < 0) { currentCalMonth = 11; currentCalYear--; }
-    if (currentCalMonth > 11) { currentCalMonth = 0; currentCalYear++; }
-    renderBigCalendar(currentCalMonth, currentCalYear);
+// Navigation Helper for calendar
+window.changeMonth = function(offset) {
+    currentCalMonth += offset;
+    
+    if (currentCalMonth > 11) {
+        currentCalMonth = 0;
+        currentCalYear++;
+    } else if (currentCalMonth < 0) {
+        currentCalMonth = 11;
+        currentCalYear--;
+    }
+    loadView('calendar'); 
 };
 
 

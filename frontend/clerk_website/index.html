@@ -566,6 +566,10 @@ window.login = async function() {
             const data = await response.json();
             // Store the ID and Name
             window.CURRENT_USER_ID = data.user_id;
+            localStorage.setItem("clerk_current_user", JSON.stringify({
+                user_id: data.user_id,
+                username: data.username
+            }));
             const initialName = data.username || "User";
             
             // Update UI

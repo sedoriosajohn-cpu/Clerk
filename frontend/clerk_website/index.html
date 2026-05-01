@@ -1077,17 +1077,71 @@ window.addEventListener('DOMContentLoaded', () => {
 setInterval(setLiveDates, 60000);
 
 // --- VOICE RECOGNITION (KEEP THIS) ---
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognition = null;
-let listening = false;
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
 
-if (SpeechRecognition) {
-  recognition = new SpeechRecognition();
-  recognition.onstart = () => { listening = true; voiceBtn.textContent = 'Listening...'; };
-  recognition.onresult = (event) => { taskInput.value = event.results[0][0].transcript; };
-  recognition.onend = () => { listening = false; voiceBtn.textContent = '🎤 Voice'; };
-  voiceBtn.addEventListener('click', () => listening ? recognition.stop() : recognition.start());
-}
+voiceBtn.addEventListener('click', async () => {
+  if (!isRecording) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      mediaRecorder = new MediaRecorder(stream);
+      audioChunks = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunks.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        try {
+          voiceBtn.disabled = true;
+          voiceBtn.textContent = "Transcribing...";
+
+          const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+
+          const formData = new FormData();
+          formData.append("file", audioBlob, "speech.webm");
+
+          const response = await fetch("http://127.0.0.1:8000/transcribe", {
+            method: "POST",
+            body: formData
+          });
+
+          if (!response.ok) {
+            throw new Error("Transcription failed");
+          }
+
+          const result = await response.json();
+
+          taskInput.value = result.text || "";
+
+        } catch (err) {
+          console.error(err);
+          alert("Could not transcribe audio.");
+        } finally {
+          voiceBtn.disabled = false;
+          voiceBtn.textContent = "🎙️ Voice";
+        }
+      };
+
+      mediaRecorder.start();
+      isRecording = true;
+      voiceBtn.textContent = "⏹ Stop Recording";
+
+    } catch (err) {
+      console.error(err);
+      alert("Microphone access was denied or unavailable.");
+    }
+
+  } else {
+    isRecording = false;
+    voiceBtn.textContent = "Processing...";
+    mediaRecorder.stop();
+  }
+});
 
 
 //runs AI extraction 

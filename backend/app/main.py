@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -6,8 +6,14 @@ from sqlalchemy.orm import Session
 from .extractor import extract_task_from_text
 from scripts.init_db import SessionLocal, Task, RawInput, User
 from datetime import datetime
+from openai import OpenAI
+from dotenv import load_dotenv
+import os
+import tempfile
 
 app = FastAPI()
+load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app.add_middleware(
     CORSMiddleware,

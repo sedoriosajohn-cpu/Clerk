@@ -44,6 +44,31 @@ class TaskUpdate(BaseModel):
     title: Optional[str] = None
     priority: Optional[str] = None
 
+@app.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    tmp_path = None
+
+    try:
+        suffix = os.path.splitext(file.filename or "speech.webm")[1] or ".webm"
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(await file.read())
+            tmp_path = tmp.name
+
+        with open(tmp_path, "rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file
+            )
+
+        return {"text": transcript.text}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 @app.post("/login")
 async def login_user(data: LoginRequest, db: Session = Depends(get_db)):

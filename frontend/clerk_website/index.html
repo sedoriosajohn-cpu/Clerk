@@ -1117,6 +1117,7 @@ voiceBtn.addEventListener('click', async () => {
           const result = await response.json();
 
           taskInput.value = result.text || "";
+          processBtn.click();
 
         } catch (err) {
           console.error(err);

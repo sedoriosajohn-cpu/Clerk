@@ -768,6 +768,7 @@ async function loadView(view) {
         
         // This is the variable name your renderTaskList expects
         const allTasks = data.tasks || [];
+        checkUpcomingTasks(allTasks);
         console.log("Tasks successfully loaded for User " + userId + ":", allTasks);
 
         // 6. View Routing
@@ -1043,6 +1044,35 @@ async function handleDateChange(taskId, newFullDate) {
     }
 }
 
+const notifiedUpcomingTasks = new Set();
+
+function checkUpcomingTasks(tasks) {
+    const now = new Date();
+    const reminderWindowMinutes = 30; // change this to 10, 15, 60, etc.
+
+    tasks.forEach(task => {
+        if (!task.due_date) return;
+
+        const dueDate = new Date(task.due_date);
+        if (isNaN(dueDate.getTime())) return;
+
+        const minutesUntilDue = (dueDate - now) / 60000;
+
+        if (
+            minutesUntilDue > 0 &&
+            minutesUntilDue <= reminderWindowMinutes &&
+            !notifiedUpcomingTasks.has(task.task_id)
+        ) {
+            showToast(
+                `Upcoming task: ${task.title} is due in ${Math.ceil(minutesUntilDue)} minutes`,
+                "info"
+            );
+
+            notifiedUpcomingTasks.add(task.task_id);
+        }
+    });
+}
+
 function renderOutput(task) { //tidy up later
     // 1. Log the data so you can see exactly what the backend sent in the F12 console
     console.log("Data received from backend:", task);
@@ -1129,6 +1159,11 @@ window.addEventListener('DOMContentLoaded', () => {
 
 // Checks for a date change every minute
 setInterval(setLiveDates, 60000);
+setInterval(() => {
+    if (window.CURRENT_USER_ID) {
+        loadView(currentView || "agenda");
+    }
+}, 60000);
 
 // --- VOICE RECOGNITION (KEEP THIS) ---
 let mediaRecorder = null;

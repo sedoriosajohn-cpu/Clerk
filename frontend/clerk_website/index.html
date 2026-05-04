@@ -476,6 +476,19 @@ input:checked + .slider:before { transform: translateX(26px); }
                             </label>
                         </div>
                     </div>
+                    <div style="background: rgba(127, 152, 165, 0.05); border: 1px solid var(--border); padding: 20px; border-radius: 18px; display: flex; justify-content: space-between; align-items: center; margin-top:16px;">
+    <div style="display: flex; align-items: center; gap: 16px;">
+        <div style="font-size: 24px;">🕒</div>
+        <div>
+            <h4 style="margin: 0; font-size: 16px; color: var(--text);">24-Hour Time</h4>
+            <p style="margin: 4px 0 0; font-size: 13px; color: var(--muted);">Switch task times between 12-hour and 24-hour format.</p>
+        </div>
+    </div>
+    <label class="switch">
+        <input type="checkbox" id="timeFormatToggle" onchange="saveTimeFormatSetting(); loadView(currentView);">
+        <span class="slider"></span>
+    </label>
+</div>
 
                     <div>
                         <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 16px;">System (Coming Soon)</h3>
@@ -657,6 +670,7 @@ function renderTaskList(tasks, containerId) {
         // Safely handle dates to prevent script crashes
         const taskDateStr = task.due_date || task.due;
         let inputDateValue = "";
+        let displayTime = formatTaskTime(taskDateStr);
         
         if (taskDateStr && taskDateStr !== 'None') {
             try {
@@ -691,6 +705,7 @@ function renderTaskList(tasks, containerId) {
             <div class="task-main ${colorClass}"> 
                 <div class="task-title">${task.title}</div>
                 <div class="task-sub">${task.description || ''}</div>
+                <div class="task-sub">Time: ${displayTime}</div>
                 <div class="meta-row">
                     <span class="confidence-pill">Match: ${(task.confidence > 1 ? task.confidence : (task.confidence || 0) * 100).toFixed(0)}%</span>
                 </div>
@@ -911,6 +926,40 @@ function toggleDarkTheme() {
     }
 }
 
+function saveTimeFormatSetting() {
+    const use24Hour = document.getElementById("timeFormatToggle").checked;
+    localStorage.setItem("clerk_use_24_hour_time", JSON.stringify(use24Hour));
+}
+
+function loadTimeFormatSetting() {
+    const saved = JSON.parse(localStorage.getItem("clerk_use_24_hour_time") || "false");
+    const toggle = document.getElementById("timeFormatToggle");
+
+    if (toggle) {
+        toggle.checked = saved;
+    }
+}
+
+function formatTaskTime(dateValue) {
+    if (!dateValue || dateValue === "None" || dateValue === "No due date") {
+        return "No time";
+    }
+
+    const d = new Date(dateValue);
+
+    if (isNaN(d.getTime())) {
+        return "No time";
+    }
+
+    const use24Hour = JSON.parse(localStorage.getItem("clerk_use_24_hour_time") || "false");
+
+    return d.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: !use24Hour
+    });
+}
+
 // Navigation Helper for calendar
 window.changeMonth = function(offset) {
     currentCalMonth += offset;
@@ -1073,6 +1122,7 @@ function setLiveDates() {
 
 // Run the function as soon as the page loads
 window.addEventListener('DOMContentLoaded', () => {
+    loadTimeFormatSetting();
     setLiveDates();
     buildCalendar();
 });

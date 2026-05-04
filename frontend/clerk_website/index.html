@@ -47,6 +47,37 @@ body {
     backdrop-filter: blur(10px); /* Modern glass effect */
 }
 
+.toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.toast {
+    background: var(--panel-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 14px 18px;
+    border-radius: 12px;
+    min-width: 250px;
+    box-shadow: var(--shadow);
+    animation: slideIn 0.25s ease;
+}
+
+.toast.success { border-left: 4px solid var(--teal); }
+.toast.error   { border-left: 4px solid #ff4b91; }
+.toast.warning { border-left: 4px solid orange; }
+.toast.info    { border-left: 4px solid #00a3ff; }
+
+@keyframes slideIn {
+    from { transform: translateX(30px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
 .brand {
     display: flex;
     align-items: center;
@@ -591,6 +622,7 @@ window.login = async function() {
             
             // Hide login and show agenda
             document.getElementById('login-overlay').style.display = 'none';
+            showToast("Logged in successfully", "success");
             loadView('agenda');
         } else {
             errorMsg.textContent = "Invalid username or password";
@@ -770,6 +802,7 @@ async function loadView(view) {
         const allTasks = data.tasks || [];
         checkUpcomingTasks(allTasks);
         console.log("Tasks successfully loaded for User " + userId + ":", allTasks);
+        showToast("Task added successfully", "success");
 
         // 6. View Routing
         if (view === 'agenda') {
@@ -927,6 +960,70 @@ function toggleDarkTheme() {
     }
 }
 
+function showToast(message, type = "info", duration = 3000) {
+    const container = document.getElementById("toastContainer");
+    if (!container) return;
+
+    const toast = document.createElement("div");
+    toast.className = `toast ${type}`;
+
+    let icon = "ℹ️";
+    if (type === "success") icon = "✔️";
+    if (type === "error") icon = "❌";
+    if (type === "warning") icon = "⚠️";
+
+    toast.innerHTML = `
+        <div style="display:flex; align-items:center; gap:10px;">
+            <span>${icon}</span>
+            <span>${message}</span>
+        </div>
+    `;
+
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.remove();
+    }, duration);
+}
+
+const notifiedUpcomingTasks = new Set();
+
+function checkUpcomingTasks(tasks) {
+    const now = new Date();
+    const reminderWindowMinutes = 30;
+
+    tasks.forEach(task => {
+        if (!task.due_date) return;
+
+        const dueDate = new Date(task.due_date);
+        if (isNaN(dueDate.getTime())) return;
+
+        const minutesUntilDue = (dueDate - now) / 60000;
+
+        if (
+            minutesUntilDue > 0 &&
+            minutesUntilDue <= reminderWindowMinutes &&
+            !notifiedUpcomingTasks.has(task.task_id)
+        ) {
+            let type = "info";
+
+            if (minutesUntilDue <= 5) {
+                type = "error";
+            } else if (minutesUntilDue <= 15) {
+                type = "warning";
+            }
+
+            showToast(
+                `${task.title} is due in ${Math.ceil(minutesUntilDue)} minute(s)`,
+                type,
+                5000
+            );
+
+            notifiedUpcomingTasks.add(task.task_id);
+        }
+    });
+}
+
 function saveTimeFormatSetting() {
     const use24Hour = document.getElementById("timeFormatToggle").checked;
     localStorage.setItem("clerk_use_24_hour_time", JSON.stringify(use24Hour));
@@ -1042,35 +1139,6 @@ async function handleDateChange(taskId, newFullDate) {
     } catch (error) {
         alert("Failed to save new date. Please try again.");
     }
-}
-
-const notifiedUpcomingTasks = new Set();
-
-function checkUpcomingTasks(tasks) {
-    const now = new Date();
-    const reminderWindowMinutes = 30; // change this to 10, 15, 60, etc.
-
-    tasks.forEach(task => {
-        if (!task.due_date) return;
-
-        const dueDate = new Date(task.due_date);
-        if (isNaN(dueDate.getTime())) return;
-
-        const minutesUntilDue = (dueDate - now) / 60000;
-
-        if (
-            minutesUntilDue > 0 &&
-            minutesUntilDue <= reminderWindowMinutes &&
-            !notifiedUpcomingTasks.has(task.task_id)
-        ) {
-            showToast(
-                `Upcoming task: ${task.title} is due in ${Math.ceil(minutesUntilDue)} minutes`,
-                "info"
-            );
-
-            notifiedUpcomingTasks.add(task.task_id);
-        }
-    });
 }
 
 function renderOutput(task) { //tidy up later
@@ -1285,6 +1353,8 @@ document.querySelectorAll('.sample').forEach(btn => {
   btn.addEventListener('click', () => { taskInput.value = btn.dataset.text; });
 });
 </script>
+
+<div id="toastContainer" class="toast-container"></div>
 
 </body>
 </html>

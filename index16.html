@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clerk Pro</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="min-h-screen bg-gradient-to-br from-indigo-200 via-white to-purple-200">
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel">
+
+// ---------- UI ----------
+const Card = ({children}) => (
+<div className="bg-white/80 backdrop-blur rounded-2xl shadow-xl p-5">
+{children}
+</div>
+)
+
+const Button = ({children,onClick}) => (
+<button onClick={onClick}
+className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white px-4 py-2 rounded-xl">
+{children}
+</button>
+)
+
+// ---------- SIDEBAR ----------
+function Sidebar({setPage}){
+return(
+<div className="w-64 bg-white/70 backdrop-blur shadow-2xl p-5 flex flex-col gap-4">
+<h1 className="text-2xl font-bold">Clerk AI</h1>
+<Button onClick={()=>setPage('dashboard')}>Dashboard</Button>
+<Button onClick={()=>setPage('input')}>Add Task</Button>
+<Button onClick={()=>setPage('calendar')}>Calendar</Button>
+<Button onClick={()=>setPage('audio')}>Audio</Button>
+</div>
+)
+}
+
+// ---------- DASHBOARD ----------
+function Dashboard({tasks,setPage}){
+
+function drag(e,id){
+ e.dataTransfer.setData('id',id)
+}
+
+return(
+<div className="grid md:grid-cols-3 gap-5">
+{tasks.map(t=>(
+<div key={t.id} draggable onDragStart={(e)=>drag(e,t.id)}>
+<Card>
+<h3 className="font-bold text-lg">{t.title}</h3>
+<p className="text-sm opacity-70">
+{t.date} • {t.time}
+</p>
+
+<div className="flex gap-2 mt-3">
+<Button onClick={()=>setPage('task-'+t.id)}>Open</Button>
+</div>
+
+</Card>
+</div>
+))}
+</div>
+)
+}
+
+// ---------- TASK DETAIL ----------
+function TaskDetail({task,tasks,setTasks,setPage}){
+
+function approve(){
+ setTasks(tasks.filter(t=>t.id!==task.id)) // REMOVE ON APPROVE
+ setPage('dashboard')
+}
+
+function remove(){
+ setTasks(tasks.filter(t=>t.id!==task.id))
+ setPage('dashboard')
+}
+
+return(
+<div className="flex justify-center mt-10">
+<Card>
+<h2 className="text-2xl font-bold">{task.title}</h2>
+<p className="opacity-70">{task.date} • {task.time}</p>
+
+<div className="flex gap-3 mt-5">
+<Button onClick={approve}>Approve</Button>
+<Button onClick={remove}>Delete</Button>
+</div>
+</Card>
+</div>
+)
+}
+
+// ---------- CALENDAR ----------
+function Calendar({tasks,setTasks}){
+
+function getNext7Days(){
+ const days=[]
+ for(let i=0;i<7;i++){
+  const d=new Date()
+  d.setDate(d.getDate()+i)
+  days.push(d.toISOString().split('T')[0])
+ }
+ return days
+}
+
+function drop(e,date){
+ const id=e.dataTransfer.getData('id')
+ setTasks(tasks.map(t=>t.id==id?{...t,date}:t))
+}
+
+return(
+<div className="grid grid-cols-7 gap-3">
+{getNext7Days().map(date=>(
+<div key={date}
+onDragOver={(e)=>e.preventDefault()}
+onDrop={(e)=>drop(e,date)}>
+
+<Card>
+<h3 className="font-bold text-sm">{date}</h3>
+
+{tasks.filter(t=>t.date===date).map(t=>(
+<div key={t.id}
+className="mt-2 p-2 bg-gradient-to-r from-purple-400 to-indigo-400 text-white rounded">
+{t.title}
+</div>
+))}
+
+</Card>
+
+</div>
+))}
+</div>
+)
+}
+
+// ---------- INPUT ----------
+function Input({tasks,setTasks}){
+const [text,setText]=React.useState("")
+const [date,setDate]=React.useState("")
+
+function add(){
+ if(!text || !date) return
+
+ setTasks([...tasks,{
+  id:Date.now(),
+  title:text,
+  date:date,
+  time:"--",
+ }])
+
+ setText("")
+ setDate("")
+}
+
+return(
+<Card>
+<h2 className="text-xl font-bold">Create Task</h2>
+
+<input
+className="border p-2 w-full mt-2"
+placeholder="Task name"
+value={text}
+onChange={e=>setText(e.target.value)}
+/>
+
+<input
+type="date"
+className="border p-2 w-full mt-2"
+value={date}
+onChange={e=>setDate(e.target.value)}
+/>
+
+<div className="mt-3">
+<Button onClick={add}>Add Task</Button>
+</div>
+</Card>
+)
+}
+
+// ---------- AUDIO ----------
+function Audio(){
+const [rec,setRec]=React.useState(null)
+const [url,setUrl]=React.useState(null)
+const [sec,setSec]=React.useState(0)
+const [intId,setIntId]=React.useState(null)
+
+async function start(){
+ const stream=await navigator.mediaDevices.getUserMedia({audio:true})
+ const r=new MediaRecorder(stream)
+ let chunks=[]
+
+ r.ondataavailable=e=>chunks.push(e.data)
+ r.onstop=()=>setUrl(URL.createObjectURL(new Blob(chunks)))
+
+ r.start()
+ setRec(r)
+
+ setSec(0)
+ const id=setInterval(()=>setSec(s=>s+1),1000)
+ setIntId(id)
+}
+
+function stop(){
+ if(rec) rec.stop()
+ if(intId) clearInterval(intId)
+}
+
+return(
+<Card>
+<h2 className="text-xl font-bold">Audio</h2>
+
+<div className="flex gap-2 mt-3">
+<Button onClick={start}>Record</Button>
+<Button onClick={stop}>Stop</Button>
+</div>
+
+{rec && <p className="mt-3">Recording: {sec}s</p>}
+{url && <audio className="mt-3" controls src={url}/>}
+</Card>
+)
+}
+
+// ---------- APP ----------
+function App(){
+const [user,setUser]=React.useState(true)
+const [page,setPage]=React.useState('dashboard')
+
+const [tasks,setTasks]=React.useState([
+{id:1,title:'Build AI',date:'',time:'10AM'},
+{id:2,title:'Gym',date:'',time:'6PM'},
+])
+
+let view
+
+if(page==='dashboard') view=<Dashboard tasks={tasks} setPage={setPage}/>
+else if(page==='input') view=<Input tasks={tasks} setTasks={setTasks}/>
+else if(page==='calendar') view=<Calendar tasks={tasks} setTasks={setTasks}/>
+else if(page==='audio') view=<Audio/>
+else if(page.startsWith('task-')){
+ const id=page.split('-')[1]
+ const task=tasks.find(t=>t.id==id)
+ view=<TaskDetail task={task} tasks={tasks} setTasks={setTasks} setPage={setPage}/>
+}
+
+return(
+<div className="flex">
+<Sidebar setPage={setPage}/>
+<div className="flex-1 p-6">{view}</div>
+</div>
+)
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>)
+
+</script>
+</body>
+</html>

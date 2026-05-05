@@ -6,14 +6,10 @@ from sqlalchemy.orm import Session
 from .extractor import extract_task_from_text
 from scripts.init_db import SessionLocal, Task, RawInput, User
 from datetime import datetime
-from openai import OpenAI
-from dotenv import load_dotenv
 import os
 import tempfile
 
 app = FastAPI()
-load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app.add_middleware(
     CORSMiddleware,

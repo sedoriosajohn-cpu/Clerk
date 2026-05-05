@@ -948,7 +948,9 @@ function renderBigCalendar(month, year, allTasks = []) {
         });
 
         // 5. Filter and Render Tasks
-        const dayTasks = allTasks.filter(t => (t.due_date || t.due || '').startsWith(dateStr));
+        const dayTasks = allTasks 
+        .filter(t => t.status !== 'completed') 
+        .filter(t => (t.due_date || t.due || '').startsWith(dateStr));
 
         dayTasks.forEach(task => {
             const taskEl = document.createElement('div');

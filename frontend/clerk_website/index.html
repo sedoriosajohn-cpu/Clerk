@@ -47,37 +47,6 @@ body {
     backdrop-filter: blur(10px); /* Modern glass effect */
 }
 
-.toast-container {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    z-index: 9999;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.toast {
-    background: var(--panel-bg);
-    color: var(--text);
-    border: 1px solid var(--border);
-    padding: 14px 18px;
-    border-radius: 12px;
-    min-width: 250px;
-    box-shadow: var(--shadow);
-    animation: slideIn 0.25s ease;
-}
-
-.toast.success { border-left: 4px solid var(--teal); }
-.toast.error   { border-left: 4px solid #ff4b91; }
-.toast.warning { border-left: 4px solid orange; }
-.toast.info    { border-left: 4px solid #00a3ff; }
-
-@keyframes slideIn {
-    from { transform: translateX(30px); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
-}
-
 .brand {
     display: flex;
     align-items: center;
@@ -573,19 +542,6 @@ input:checked + .slider:before { transform: translateX(26px); }
                             </label>
                         </div>
                     </div>
-                    <div style="background: rgba(127, 152, 165, 0.05); border: 1px solid var(--border); padding: 20px; border-radius: 18px; display: flex; justify-content: space-between; align-items: center; margin-top:16px;">
-    <div style="display: flex; align-items: center; gap: 16px;">
-        <div style="font-size: 24px;">🕒</div>
-        <div>
-            <h4 style="margin: 0; font-size: 16px; color: var(--text);">24-Hour Time</h4>
-            <p style="margin: 4px 0 0; font-size: 13px; color: var(--muted);">Switch task times between 12-hour and 24-hour format.</p>
-        </div>
-    </div>
-    <label class="switch">
-        <input type="checkbox" id="timeFormatToggle" onchange="saveTimeFormatSetting(); loadView(currentView);">
-        <span class="slider"></span>
-    </label>
-</div>
 
                     <div>
                         <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 16px;">System (Coming Soon)</h3>
@@ -676,10 +632,6 @@ window.login = async function() {
             const data = await response.json();
             // Store the ID and Name
             window.CURRENT_USER_ID = data.user_id;
-            localStorage.setItem("clerk_current_user", JSON.stringify({
-                user_id: data.user_id,
-                username: data.username
-            }));
             const initialName = data.username || "User";
             
             // Update UI
@@ -688,7 +640,6 @@ window.login = async function() {
             
             // Hide login and show agenda
             document.getElementById('login-overlay').style.display = 'none';
-            showToast("Logged in successfully", "success");
             loadView('agenda');
         } else {
             errorMsg.textContent = "Invalid username or password";
@@ -768,42 +719,17 @@ function renderTaskList(tasks, containerId) {
         item.className = 'agenda-item';
         item.id = `task-item-${task.task_id}`; // ID for animation target
 
-        // Safely handle dates to prevent script crashes
-        const taskDateStr = task.due_date || task.due;
-        let inputDateValue = "";
-        let displayTime = formatTaskTime(taskDateStr);
-        
-        if (taskDateStr && taskDateStr !== 'None') {
-            try {
-                const d = new Date(taskDateStr);
-                // Check if date is valid before calling toISOString
-                if (!isNaN(d.getTime())) {
-                    inputDateValue = d.toISOString().slice(0, 16); 
-                }
-            } catch (e) {
-                console.error("Invalid date for task:", task.title);
-            }
-        }
-
-       const priority = String(task.priority || 'normal').toLowerCase();
-
-        let colorClass = 'blue'; 
-        if (priority === 'high') {
-            colorClass = 'pink';
-        } else if (priority === 'medium') {
-            colorClass = 'amber';
-        } else if (priority === 'low') {
-            colorClass = 'teal';
-        }
+        const priority = String(task.priority || 'normal').toLowerCase();
+        let colorClass = priority === 'high' ? 'pink' : (priority === 'low' ? 'teal' : 'blue');
 
         item.innerHTML = `
             <div class="task-main ${colorClass}" style="flex-grow: 1;"> 
                 <div class="task-title">${task.title}</div>
                 <div class="task-sub">${task.description || ''}</div>
-                <div class="task-sub">Time: ${displayTime}</div>
-                <div class="meta-row">
-                    <span class="confidence-pill">Match: ${(task.confidence > 1 ? task.confidence : (task.confidence || 0) * 100).toFixed(0)}%</span>
-                </div>
+            </div>
+            <div class="task-actions">
+                <button class="done-btn" onclick="completeTask(${task.task_id})" title="Complete">✓</button>
+                <button class="done-btn delete" onclick="dismissTask(${task.task_id})" title="Dismiss">✕</button>
             </div>
         `;
         container.appendChild(item);
@@ -930,9 +856,7 @@ async function loadView(view) {
         
         // This is the variable name your renderTaskList expects
         const allTasks = data.tasks || [];
-        checkUpcomingTasks(allTasks);
         console.log("Tasks successfully loaded for User " + userId + ":", allTasks);
-        showToast("Task added successfully", "success");
 
         // 6. View Routing
         if (view === 'agenda') {
@@ -1090,104 +1014,6 @@ function toggleDarkTheme() {
         root.style.setProperty('--shadow', '0 10px 28px rgba(79, 113, 130, .12)');
         document.body.style.background = 'radial-gradient(circle at top left, #dff5f2 0%, #eef3f5 32%, #f7f8fa 100%)';
     }
-}
-
-function showToast(message, type = "info", duration = 3000) {
-    const container = document.getElementById("toastContainer");
-    if (!container) return;
-
-    const toast = document.createElement("div");
-    toast.className = `toast ${type}`;
-
-    let icon = "ℹ️";
-    if (type === "success") icon = "✔️";
-    if (type === "error") icon = "❌";
-    if (type === "warning") icon = "⚠️";
-
-    toast.innerHTML = `
-        <div style="display:flex; align-items:center; gap:10px;">
-            <span>${icon}</span>
-            <span>${message}</span>
-        </div>
-    `;
-
-    container.appendChild(toast);
-
-    setTimeout(() => {
-        toast.remove();
-    }, duration);
-}
-
-const notifiedUpcomingTasks = new Set();
-
-function checkUpcomingTasks(tasks) {
-    const now = new Date();
-    const reminderWindowMinutes = 30;
-
-    tasks.forEach(task => {
-        if (!task.due_date) return;
-
-        const dueDate = new Date(task.due_date);
-        if (isNaN(dueDate.getTime())) return;
-
-        const minutesUntilDue = (dueDate - now) / 60000;
-
-        if (
-            minutesUntilDue > 0 &&
-            minutesUntilDue <= reminderWindowMinutes &&
-            !notifiedUpcomingTasks.has(task.task_id)
-        ) {
-            let type = "info";
-
-            if (minutesUntilDue <= 5) {
-                type = "error";
-            } else if (minutesUntilDue <= 15) {
-                type = "warning";
-            }
-
-            showToast(
-                `${task.title} is due in ${Math.ceil(minutesUntilDue)} minute(s)`,
-                type,
-                5000
-            );
-
-            notifiedUpcomingTasks.add(task.task_id);
-        }
-    });
-}
-
-function saveTimeFormatSetting() {
-    const use24Hour = document.getElementById("timeFormatToggle").checked;
-    localStorage.setItem("clerk_use_24_hour_time", JSON.stringify(use24Hour));
-}
-
-function loadTimeFormatSetting() {
-    const saved = JSON.parse(localStorage.getItem("clerk_use_24_hour_time") || "false");
-    const toggle = document.getElementById("timeFormatToggle");
-
-    if (toggle) {
-        toggle.checked = saved;
-    }
-}
-
-function formatTaskTime(dateValue) {
-    if (!dateValue || dateValue === "None" || dateValue === "No due date") {
-        return "No time";
-    }
-
-    const d = new Date(dateValue);
-
-    if (isNaN(d.getTime())) {
-        return "No time";
-    }
-
-    const use24Hour = JSON.parse(localStorage.getItem("clerk_use_24_hour_time") || "false");
-
-    return d.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: !use24Hour
-    });
 }
 
 // Navigation Helper for calendar
@@ -1372,86 +1198,25 @@ function setLiveDates() {
 
 // Run the function as soon as the page loads
 window.addEventListener('DOMContentLoaded', () => {
-    loadTimeFormatSetting();
     setLiveDates();
     buildCalendar();
 });
 
 // Checks for a date change every minute
 setInterval(setLiveDates, 60000);
-setInterval(() => {
-    if (window.CURRENT_USER_ID) {
-        loadView(currentView || "agenda");
-    }
-}, 60000);
 
 // --- VOICE RECOGNITION (KEEP THIS) ---
-let mediaRecorder = null;
-let audioChunks = [];
-let isRecording = false;
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let listening = false;
 
-voiceBtn.addEventListener('click', async () => {
-  if (!isRecording) {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      mediaRecorder = new MediaRecorder(stream);
-      audioChunks = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunks.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        try {
-          voiceBtn.disabled = true;
-          voiceBtn.textContent = "Transcribing...";
-
-          const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
-
-          const formData = new FormData();
-          formData.append("file", audioBlob, "speech.webm");
-
-          const response = await fetch("http://127.0.0.1:8000/transcribe", {
-            method: "POST",
-            body: formData
-          });
-
-          if (!response.ok) {
-            throw new Error("Transcription failed");
-          }
-
-          const result = await response.json();
-
-          taskInput.value = result.text || "";
-          processBtn.click();
-
-        } catch (err) {
-          console.error(err);
-          alert("Could not transcribe audio.");
-        } finally {
-          voiceBtn.disabled = false;
-          voiceBtn.textContent = "🎙️ Voice";
-        }
-      };
-
-      mediaRecorder.start();
-      isRecording = true;
-      voiceBtn.textContent = "⏹ Stop Recording";
-
-    } catch (err) {
-      console.error(err);
-      alert("Microphone access was denied or unavailable.");
-    }
-
-  } else {
-    isRecording = false;
-    voiceBtn.textContent = "Processing...";
-    mediaRecorder.stop();
-  }
-});
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
+  recognition.onstart = () => { listening = true; voiceBtn.textContent = 'Listening...'; };
+  recognition.onresult = (event) => { taskInput.value = event.results[0][0].transcript; };
+  recognition.onend = () => { listening = false; voiceBtn.textContent = '🎤 Voice'; };
+  voiceBtn.addEventListener('click', () => listening ? recognition.stop() : recognition.start());
+}
 
 
 //runs AI extraction 
@@ -1466,24 +1231,7 @@ processBtn.addEventListener('click', async () => {
     processBtn.disabled = true;
 
     try {
-        const response = await ('http://127.0.0.1:8000/ingest', { 
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                content: text,
-                // parseInt ensures we send an Integer to stop the 422 error
-                user_id: parseInt(window.CURRENT_USER_ID), 
-                source_type: "web", 
-                source_id: "clerk_interface" 
-            })
-        });
-
-        if (!response.ok) throw new Error("Server error");
-    
-        const result = await response.json();
-        console.log("Task added successfully:", result);
-        
-        taskInput.value = ''; // Clear the input box
+        let response;
         
         // Case A: File Upload
         if (fileInput.files.length > 0) {
@@ -1535,8 +1283,6 @@ document.querySelectorAll('.sample').forEach(btn => {
   btn.addEventListener('click', () => { taskInput.value = btn.dataset.text; });
 });
 </script>
-
-<div id="toastContainer" class="toast-container"></div>
 
 </body>
 </html>

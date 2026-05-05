@@ -2,77 +2,52 @@ import os
 import json
 import re
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# Check for API Key at startup
 api_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=api_key)
 
 def build_prompt(user_input: str, current_time: str) -> str:
     return f"""
-    You are the core extraction engine for 'Clerk', an AI task manager.
+    You are an AI task extraction engine for Clerk.
     Current UTC Timestamp: {current_time}
     
-    TASK:
-    Extract EVERY actionable task, assignment, or deadline from the provided text.
-    The text may come from a raw user message, a PDF syllabus, or a document. 
-    Ignore page numbers, headers, and non-actionable information.
-
-    DATA FORMAT:
-    Return ONLY a valid JSON LIST of objects. Do not include markdown formatting like ```json.
+    Extract ALL actionable tasks from the user's input.
+    Return ONLY a valid JSON LIST of objects.
     
-    SCHEMA:
+    Each object must follow this format:
     {{
-      "title": "Clear, concise task name",
-      "description": "Any extra context found in the text",
-      "due_date": "ISO 8601 timestamp (YYYY-MM-DDTHH:MM:SSZ) or null",
-      "assignee": "name or 'me'",
+      "title": "short task title",
+      "description": "expanded description",
+      "due_date": "ISO 8601 timestamp in UTC or null",
+      "assignee": "name or null",
       "priority": "low | normal | high",
-      "confidence": 0-100,
-      "reasoning": "Briefly explain why this is a task"
+      "confidence": 0-100
     }}
     
-    INPUT TEXT:
-    {user_input}
+    User input: {user_input}
     """
-
-def verify_with_regex(raw_text: str, extracted_date: str) -> bool:
-    """
-    Fact-checks the AI by looking for the extracted date string 
-    inside the raw document text using basic regex patterns.
-    """
-    if not extracted_date:
-        return True # Nothing to verify
-    
-    # Extract just the YYYY-MM-DD part
-    date_match = re.search(r'(\d{4}-\d{2}-\d{2})', extracted_date)
-    if not date_match:
-        return True
-    
-    target = date_match.group(1)
-    # Check for common variations: 2026-05-12, 05/12, May 12
-    # This is a 'soft' check to ensure the date actually exists in the source
-    if target in raw_text or target.replace('-', '/') in raw_text:
-        return True
-    
-    return False
 
 def extract_json(text: str) -> list:
-    trimmed = text.replace('```json', '').replace('```', '').strip()
+    trimmed = text.strip()
     try:
         data = json.loads(trimmed)
         return data if isinstance(data, list) else [data]
     except json.JSONDecodeError:
+        # Regex to find the list part [ ... ]
         match = re.search(r'\[[\s\S]*\]', trimmed)
-        if match:
-            return json.loads(match.group(0))
-        obj_match = re.search(r'\{[\s\S]*\}', trimmed)
-        if obj_match:
-            return [json.loads(obj_match.group(0))]
-        raise ValueError("Failed to parse AI response as JSON")
+        if not match:
+            # Fallback to check for single object if list markers missing
+            obj_match = re.search(r'\{[\s\S]*\}', trimmed)
+            if obj_match:
+                return [json.loads(obj_match.group(0))]
+            raise ValueError("Model failed to return valid JSON list")
+        return json.loads(match.group(0))
 
 def extract_task_from_text(text: str) -> list:
     if not text or not text.strip():
@@ -83,7 +58,7 @@ def extract_task_from_text(text: str) -> list:
         prompt = build_prompt(text, now_iso)
 
         response = client.chat.completions.create(
-            model="gpt-5.4",
+            model="gpt-5.4", 
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
@@ -94,17 +69,7 @@ def extract_task_from_text(text: str) -> list:
         processed_tasks = []
         for t in raw_tasks:
             valid = validate_task(t)
-            
-            # Hybrid Confidence Check
-            # 1. Keyword Heuristics
             with_conf = adjust_confidence(text, valid)
-            
-            # 2. Regex Anchor Verification (Fact-Checking)
-            is_verified = verify_with_regex(text, valid.get("due_date"))
-            if not is_verified:
-                with_conf["confidence"] = int(with_conf["confidence"] * 0.5) # Penalty for hallucination risk
-                with_conf["description"] += " (Warning: Date not explicitly found in source)"
-                
             processed_tasks.append(format_for_frontend(with_conf))
             
         return processed_tasks
@@ -112,53 +77,52 @@ def extract_task_from_text(text: str) -> list:
     except Exception as e:
         print(f"EXTRACTION ERROR: {e}")
         return []
+    
+def normalize_priority(priority: str) -> str:
+    if not priority: return "normal"
+    p = str(priority).lower().strip()
+    if p in ["high", "urgent", "important"]: return "high"
+    if p in ["low", "minor"]: return "low"
+    return "normal"
+
+def validate_task(task: Dict[str, Any]) -> Dict[str, Any]:
+    title = str(task.get("title", "Untitled Task")).strip()
+    description = str(task.get("description", "")).strip()
+    
+    try:
+        confidence = int(float(task.get("confidence", 50)))
+    except (ValueError, TypeError):
+        confidence = 50
+
+    return {
+        "title": title,
+        "description": description,
+        "due_date": task.get("due_date"),
+        "assignee": task.get("assignee") if task.get("assignee") else "me",
+        "priority": normalize_priority(task.get("priority")),
+        "confidence": max(0, min(100, confidence))
+    }
 
 def adjust_confidence(user_input: str, task: Dict[str, Any]) -> Dict[str, Any]:
     text = user_input.lower()
     score = task["confidence"]
     
-    # Intent keywords
-    if any(word in text for word in ["submit", "must", "due", "deadline", "assignment"]):
-        score += 10
-    if any(word in text for word in ["maybe", "might", "probably", "optional"]):
-        score -= 20
-        
-    # Document-specific grounding
-    if "syllabus" in text or "course" in text:
+    if any(word in text for word in ["submit", "send", "finish", "due", "must"]):
         score += 5
+    if any(word in text for word in ["maybe", "might", "should", "probably"]):
+        score -= 15
         
     task["confidence"] = max(0, min(100, score))
     return task
 
-def validate_task(task: Dict[str, Any]) -> Dict[str, Any]:
-    # Ensure title exists
-    title = str(task.get("title", "New Task")).strip()
-    if not title or title == "null": title = "Untitled Task"
-    
-    # Standardize Priority
-    p = str(task.get("priority", "normal")).lower()
-    if p in ["high", "urgent"]: p = "high"
-    elif p in ["low", "minor"]: p = "low"
-    else: p = "normal"
-
-    return {
-        "title": title,
-        "description": str(task.get("description", "")),
-        "due_date": task.get("due_date"),
-        "assignee": task.get("assignee") if task.get("assignee") else "me",
-        "priority": p,
-        "confidence": int(task.get("confidence", 70))
-    }
-
 def format_for_frontend(task: Dict[str, Any]) -> Dict[str, Any]:
     due_dt = None
-    if task.get("due_date"):
+    if task.get("due_date") and isinstance(task["due_date"], str):
         try:
-            # Handle 'Z' or offset formats
             clean_date = task["due_date"].replace('Z', '+00:00')
             due_dt = datetime.fromisoformat(clean_date)
-        except:
-            pass
+        except Exception as e:
+            print(f"Date parsing error: {e}")
             
     task["due"] = due_dt.strftime("%m/%d/%Y") if due_dt else "No due date"
     task["time"] = due_dt.strftime("%I:%M %p") if due_dt else "No time"

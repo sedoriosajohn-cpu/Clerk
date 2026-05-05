@@ -160,6 +160,67 @@ body {
     margin-top: 8px;
 }
 
+.warning-text {
+    color: #e11d48;
+    font-size: 11px;
+    font-weight: bold;
+    display: block;
+    margin-top: 4px;
+}
+
+.confidence-pill {
+    background: var(--teal-soft);
+    color: var(--teal-dark);
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.task-actions {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+    align-self: center;
+}
+
+.done-btn {
+    background: #f1f5f9;
+    color: #64748b;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.done-btn:hover {
+    background: var(--teal);
+    color: white;
+    transform: scale(1.1);
+}
+
+.agenda-item.removing {
+    transform: translateX(100px);
+    opacity: 0;
+    transition: all 0.4s ease;
+    pointer-events: none;
+}
+
+.done-btn.delete:hover {
+    background: #fee2e2; /* Soft red background */
+    color: #ef4444;
+}
+
+.agenda-item.completed {
+    opacity: 0.5;
+    text-decoration: line-through;
+}
+
 .task-main.pink { border-left: 5px solid #ff4b91; background: rgba(255, 75, 145, 0.1); }
 .task-main.amber { border-left: 5px solid #ffb100; background: rgba(255, 177, 0, 0.1); }
 .task-main.teal { border-left: 5px solid #00d7c0; background: rgba(0, 215, 192, 0.1); }
@@ -217,6 +278,7 @@ button {
     color: var(--teal-dark);
     border: 1px solid var(--teal-soft);
 }
+
 
 /* ==========================================================================
    6. CALENDAR GRID (BIG)
@@ -436,14 +498,18 @@ input:checked + .slider:before { transform: translateX(26px); }
                     <div class="subline"></div>
                     <div class="input-group">
                         <label for="taskInput">What would you like to add?</label>
-                        <textarea id="taskInput" placeholder="Enter a task or reminder..."></textarea>
+                        <textarea id="taskInput" placeholder="Enter a task or paste a syllabus..."></textarea>
                     </div>
+                    <input type="file" id="fileInput" style="display: none;" accept=".pdf,.txt,.md">
+                    
                     <div class="composer-actions">
                         <div class="left-buttons">
                             <button class="ghost" id="voiceBtn" type="button">🎙️ Voice</button>
+                            <button class="ghost" id="uploadBtn" type="button" onclick="document.getElementById('fileInput').click()">📎 Attach Doc</button>
                         </div>
-                        <button class="primary" id="processBtn" type="button">Add Task</button>
+                        <button class="primary" id="processBtn" type="button">Process Input</button>
                     </div>
+                    <div id="fileInfo" style="font-size: 12px; color: var(--teal-dark); margin-top: 8px; display: none;"></div>
                 </section>
 
                 <section class="panel" id="settingsView" style="display: none;">
@@ -641,61 +707,102 @@ function renderTaskList(tasks, containerId) {
     if (!container) return;
     container.innerHTML = '';
 
-    if (tasks.length === 0) {
-        container.innerHTML = '<p style="color:var(--muted); padding:20px;">No tasks found.</p>';
+    const pendingTasks = tasks.filter(t => t.status !== 'completed');
+
+    if (pendingTasks.length === 0) {
+        container.innerHTML = '<p style="color:var(--muted); padding:20px;">All clear!</p>';
         return;
     }
 
-    tasks.forEach(task => {
+    pendingTasks.forEach(task => {
         const item = document.createElement('div');
         item.className = 'agenda-item';
+        item.id = `task-item-${task.task_id}`; // ID for animation target
 
-        // Safely handle dates to prevent script crashes
-        const taskDateStr = task.due_date || task.due;
-        let inputDateValue = "";
-        
-        if (taskDateStr && taskDateStr !== 'None') {
-            try {
-                const d = new Date(taskDateStr);
-                // Check if date is valid before calling toISOString
-                if (!isNaN(d.getTime())) {
-                    inputDateValue = d.toISOString().slice(0, 16); 
-                }
-            } catch (e) {
-                console.error("Invalid date for task:", task.title);
-            }
-        }
-
-       const priority = String(task.priority || 'normal').toLowerCase();
-
-        let colorClass = 'blue'; 
-        if (priority === 'high') {
-            colorClass = 'pink';
-        } else if (priority === 'medium') {
-            colorClass = 'amber';
-        } else if (priority === 'low') {
-            colorClass = 'teal';
-        }
+        const priority = String(task.priority || 'normal').toLowerCase();
+        let colorClass = priority === 'high' ? 'pink' : (priority === 'low' ? 'teal' : 'blue');
 
         item.innerHTML = `
-            <div class="time-container">
-                <input type="datetime-local" 
-                    class="task-date-input" 
-                    value="${inputDateValue}" 
-                    onchange="handleDateChange('${task.task_id}', this.value)">
-            </div> 
-            <div class="task-main ${colorClass}"> 
+            <div class="task-main ${colorClass}" style="flex-grow: 1;"> 
                 <div class="task-title">${task.title}</div>
                 <div class="task-sub">${task.description || ''}</div>
-                <div class="meta-row">
-                    <span class="confidence-pill">Match: ${(task.confidence > 1 ? task.confidence : (task.confidence || 0) * 100).toFixed(0)}%</span>
-                </div>
+            </div>
+            <div class="task-actions">
+                <button class="done-btn" onclick="completeTask(${task.task_id})" title="Complete">✓</button>
+                <button class="done-btn delete" onclick="dismissTask(${task.task_id})" title="Dismiss">✕</button>
             </div>
         `;
         container.appendChild(item);
     });
 }
 
+
+async function dismissTask(taskId) {
+    const element = document.getElementById(`task-item-${taskId}`);
+    
+    // 1. Visual feedback immediately (feels snappy)
+    if (element) element.classList.add('removing');
+
+    try {
+        // 2. Perform the actual delete in the background
+        const response = await fetch(`http://127.0.0.1:8000/tasks/${taskId}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) throw new Error("Delete failed");
+        
+        // 3. Remove from DOM after animation finishes
+        setTimeout(() => {
+            if (element) element.remove();
+            // If the list is now empty, refresh the view to show "All clear!"
+            const remaining = document.querySelectorAll('.agenda-item');
+            if (remaining.length === 0) loadView(currentView);
+        }, 400);
+
+    } catch (err) {
+        console.error("Dismiss failed:", err);
+        // If server fails, bring it back
+        if (element) element.classList.remove('removing');
+        alert("Couldn't remove task. Server might be down.");
+    }
+}
+
+async function completeTask(taskId) {
+    const element = document.getElementById(`task-item-${taskId}`);
+    
+    // 1. Trigger the "slide out" animation immediately
+    if (element) {
+        element.classList.add('removing');
+    }
+
+    try {
+        // 2. Update the status in the backend
+        const response = await fetch(`http://127.0.0.1:8000/tasks/${taskId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'completed' })
+        });
+
+        if (!response.ok) throw new Error("Completion update failed");
+
+        // 3. Wait for animation to finish 
+        setTimeout(() => {
+            if (element) element.remove();
+            
+            // Check if the list is empty to show the "All clear!" message
+            const remaining = document.querySelectorAll('.agenda-item');
+            if (remaining.length === 0) {
+                loadView(currentView);
+            }
+        }, 400);
+
+    } catch (err) {
+        console.error("Failed to complete task:", err);
+        // If it fails, bring the task back visually
+        if (element) element.classList.remove('removing');
+        alert("Couldn't update task status.");
+    }
+}
 
 
 //this function is the main driver for changing views between agenda, my tasks, and calendar. It fetches the appropriate data and calls the rendering functions.
@@ -841,7 +948,9 @@ function renderBigCalendar(month, year, allTasks = []) {
         });
 
         // 5. Filter and Render Tasks
-        const dayTasks = allTasks.filter(t => (t.due_date || t.due || '').startsWith(dateStr));
+        const dayTasks = allTasks 
+        .filter(t => t.status !== 'completed') 
+        .filter(t => (t.due_date || t.due || '').startsWith(dateStr));
 
         dayTasks.forEach(task => {
             const taskEl = document.createElement('div');
@@ -953,7 +1062,27 @@ function logout() {
     console.log("Logged out successfully.");
 }
 
-// --- HELPER FUNCTIONS (KEEP THESE) ---
+//upload documents 
+async function uploadDocument(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("user_id", window.CURRENT_USER_ID);
+
+    const response = await fetch("http://127.0.0.1:8000/ingest-doc", {
+        method: "POST",
+        body: formData // No headers needed, the browser sets 'multipart/form-data'
+    });
+}
+
+//gets documents 
+document.getElementById('fileInput').addEventListener('change', function(e) {
+    const fileInfo = document.getElementById('fileInfo');
+    if (this.files && this.files[0]) {
+        fileInfo.innerText = "📄 Selected: " + this.files[0].name;
+        fileInfo.style.display = "block";
+    }
+});
+
 function capitalizePriority(priority) {
   if (!priority) return 'Normal';
   const p = String(priority).toLowerCase().trim();
@@ -1093,48 +1222,61 @@ if (SpeechRecognition) {
 //runs AI extraction 
 processBtn.addEventListener('click', async () => {
     const text = taskInput.value.trim();
-    // Use window.CURRENT_USER_ID to ensure it's the global variable
-    if (!text || !window.CURRENT_USER_ID) {
-        alert("Please log in first!");
-        return;
-    }
+    const fileInput = document.getElementById('fileInput');
+    const userId = window.CURRENT_USER_ID;
 
+    if (!userId) return alert("Please log in first.");
+    
+    processBtn.innerText = "Processing...";
     processBtn.disabled = true;
-    processBtn.textContent = "Processing...";
 
     try {
-        const response = await fetch('http://127.0.0.1:8000/ingest', { 
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                content: text,
-                // parseInt ensures we send an Integer to stop the 422 error
-                user_id: parseInt(window.CURRENT_USER_ID), 
-                source_type: "web", 
-                source_id: "clerk_interface" 
-            })
-        });
-
-        if (!response.ok) throw new Error("Server error");
-    
-        const result = await response.json();
-        console.log("Task added successfully:", result);
+        let response;
         
-        taskInput.value = ''; // Clear the input box
-        
-        // Refresh the whole list properly
-        await loadView(currentView || 'agenda');
+        // Case A: File Upload
+        if (fileInput.files.length > 0) {
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+            formData.append("user_id", userId);
 
-    } 
+            response = await fetch('http://127.0.0.1:8000/ingest-doc', {
+                method: 'POST',
+                body: formData // Browser sets Content-Type to multipart/form-data automatically
+            });
+        } 
+        // Case B: Text Input
+        else if (text) {
+            response = await fetch('http://127.0.0.1:8000/ingest', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: text, user_id: userId })
+            });
+        } else {
+            alert("Please enter text or select a file.");
+            resetBtn();
+            return;
+        }
 
-    catch (err) {
-        console.error("The exact error is:", err);
-        alert("UI Error: " + err.message); 
+        if (response.ok) {
+            taskInput.value = "";
+            fileInput.value = "";
+            document.getElementById('fileInfo').style.display = "none";
+            loadView(currentView); // Refresh the list
+        } else {
+            const err = await response.json();
+            alert("Error: " + err.detail);
+        }
+    } catch (error) {
+        console.error("Connection failed:", error);
     } finally {
-        processBtn.disabled = false;
-        processBtn.textContent = "Add Task";
+        resetBtn();
     }
 });
+
+function resetBtn() {
+    processBtn.innerText = "Process Input";
+    processBtn.disabled = false;
+}
 
 
 document.querySelectorAll('.sample').forEach(btn => {

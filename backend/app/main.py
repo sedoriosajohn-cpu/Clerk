@@ -7,7 +7,6 @@ from .extractor import extract_task_from_text
 from scripts.init_db import SessionLocal, Task, RawInput, User
 from datetime import datetime
 import fitz
-import tempfile
 
 app = FastAPI()
 
@@ -43,7 +42,7 @@ class TaskUpdate(BaseModel):
     priority: Optional[str] = None
     status: Optional[str] = None
 
- #-- Auth routes--
+# --- AUTH ROUTES ---
 @app.post("/login")
 async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == data.username).first()
@@ -140,33 +139,6 @@ async def process_and_save_tasks(text_content, user_id, source_info, db):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-
-#Audio         
-@app.post("/transcribe")
-async def transcribe_audio(file: UploadFile = File(...)):
-    tmp_path = None
-
-    try:
-        suffix = os.path.splitext(file.filename or "speech.webm")[1] or ".webm"
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(await file.read())
-            tmp_path = tmp.name
-
-        with open(tmp_path, "rb") as audio_file:
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file
-            )
-
-        return {"text": transcript.text}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            os.remove(tmp_path)
 
 # --- TASK MANAGEMENT ROUTES ---
 @app.get("/tasks")

@@ -5,7 +5,7 @@ from typing import Optional, List
 from sqlalchemy.orm import Session
 from .extractor import extract_task_from_text
 from scripts.init_db import SessionLocal, Task, RawInput, User
-from datetime import datetime
+from datetime import datetime, timedelta
 import fitz
 
 app = FastAPI()
@@ -38,9 +38,16 @@ class UserInput(BaseModel):
 
 class TaskUpdate(BaseModel):
     due_date: Optional[str] = None
+    end_date: Optional[str] = None
     title: Optional[str] = None
     priority: Optional[str] = None
+    item_type: Optional[str] = None
     status: Optional[str] = None
+
+class UserSettingsUpdate(BaseModel):
+    preferred_name: Optional[str] = None
+    dark_mode: Optional[bool] = None
+    notifications_enabled: Optional[bool] = None
 
 # --- AUTH ROUTES ---
 @app.post("/login")
@@ -122,10 +129,12 @@ async def process_and_save_tasks(text_content, user_id, source_info, db):
                 owner_id=user_id,
                 raw_id=new_raw.raw_id,
                 title=task_data.get("title"),
-                due_date=str(task_data.get("due_date")),
+                due_date=task_data.get("due_date"), # Store None if not provided, not "None" string
+                end_date=task_data.get("end_date"),
                 due_text=task_data.get("due"),
                 assignee=task_data.get("assignee", "me"),
                 priority=task_data.get("priority", "normal"),
+                item_type=task_data.get("item_type", "task"),
                 confidence=task_data.get("confidence"),
                 status="pending"
             )
@@ -146,14 +155,52 @@ async def get_tasks(user_id: int, db: Session = Depends(get_db)):
     tasks = db.query(Task).filter(Task.owner_id == user_id).all()
     return {"tasks": tasks}
 
-@app.delete("/tasks/{task_id}")
-async def delete_task(task_id: int, db: Session = Depends(get_db)):
-    task_to_delete = db.query(Task).filter(Task.task_id == task_id).first()
-    if not task_to_delete:
-        raise HTTPException(status_code=404, detail="Task not found")
-    db.delete(task_to_delete)
+@app.get("/users/{user_id}/settings")
+async def get_user_settings(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {
+        "preferred_name": user.preferred_name or user.username,
+        "dark_mode": bool(user.dark_mode),
+        "notifications_enabled": bool(user.notifications_enabled)
+    }
+
+@app.patch("/users/{user_id}/settings")
+async def update_user_settings(user_id: int, settings: UserSettingsUpdate, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if settings.preferred_name is not None:
+        user.preferred_name = settings.preferred_name
+    if settings.dark_mode is not None:
+        user.dark_mode = 1 if settings.dark_mode else 0
+    if settings.notifications_enabled is not None:
+        user.notifications_enabled = 1 if settings.notifications_enabled else 0
+        
     db.commit()
-    return {"status": "success"}
+    return {"message": "Settings updated"}
+
+@app.get("/tasks/history")
+async def get_task_history(user_id: int, db: Session = Depends(get_db), limit: int = 50):
+    """
+    Fetches recently completed or deleted tasks for a user.
+    """
+    # Auto-delete tasks older than 7 days from history
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    db.query(Task).filter(
+        Task.owner_id == user_id,
+        (Task.status == 'completed') | (Task.status == 'deleted'),
+        Task.created_at < cutoff
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    history_tasks = db.query(Task).filter(
+        Task.owner_id == user_id,
+        (Task.status == 'completed') | (Task.status == 'deleted')
+    ).order_by(Task.created_at.desc()).limit(limit).all()
+    return {"tasks": history_tasks}
 
 @app.patch("/tasks/{task_id}")
 async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depends(get_db)):
@@ -163,11 +210,25 @@ async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depen
     
     if task_update.title: task.title = task_update.title
     if task_update.priority: task.priority = task_update.priority
-    if task_update.status: task.status = task_update.status # This handles "completed
+    if task_update.item_type: task.item_type = task_update.item_type
+    if task_update.status: task.status = task_update.status # This handles "completed" and "deleted"
     if task_update.due_date:
         new_date = task_update.due_date
         if len(new_date) == 10: new_date += "T12:00:00Z" 
         task.due_date = new_date
+    if task_update.end_date:
+        new_end = task_update.end_date
+        if len(new_end) == 10: new_end += "T13:00:00Z"
+        task.end_date = new_end
         
     db.commit()
     return {"message": "Updated successfully"}
+
+@app.delete("/tasks/{task_id}/permanent")
+async def permanent_delete_task(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(Task).filter(Task.task_id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    db.delete(task)
+    db.commit()
+    return {"message": "Task permanently deleted"}

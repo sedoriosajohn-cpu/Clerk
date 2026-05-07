@@ -17,7 +17,7 @@ def build_prompt(user_input: str, current_time: str) -> str:
     Current UTC Timestamp: {current_time}
     
     TASK:
-    Extract EVERY actionable task, assignment, or deadline from the provided text.
+    Extract EVERY actionable task, reminder, assignment, or deadline from the provided text.
     The text may come from a raw user message, a PDF syllabus, or a document. 
     Ignore page numbers, headers, and non-actionable information.
 
@@ -26,14 +26,21 @@ def build_prompt(user_input: str, current_time: str) -> str:
     
     SCHEMA:
     {{
+      "item_type": "task | reminder",
       "title": "Clear, concise task name",
       "description": "Any extra context found in the text",
       "due_date": "ISO 8601 timestamp (YYYY-MM-DDTHH:MM:SSZ) or null",
+      "end_date": "ISO 8601 timestamp (YYYY-MM-DDTHH:MM:SSZ) or null",
       "assignee": "name or 'me'",
       "priority": "low | normal | high",
       "confidence": 0-100,
       "reasoning": "Briefly explain why this is a task"
     }}
+
+    GUIDELINES:
+    - Use 'reminder' for simple alerts (e.g., "Remind me to call Mom", "Alert me at 5pm").
+    - Use 'task' for actionable work or assignments (e.g., "Finish the report", "Submit homework").
+    - If a time range is provided (e.g. "3pm to 10pm"), use the start for due_date and end for end_date.
     
     INPUT TEXT:
     {user_input}
@@ -142,9 +149,11 @@ def validate_task(task: Dict[str, Any]) -> Dict[str, Any]:
     else: p = "normal"
 
     return {
+        "item_type": str(task.get("item_type", "task")).lower(),
         "title": title,
         "description": str(task.get("description", "")),
         "due_date": task.get("due_date"),
+        "end_date": task.get("end_date"),
         "assignee": task.get("assignee") if task.get("assignee") else "me",
         "priority": p,
         "confidence": int(task.get("confidence", 70))

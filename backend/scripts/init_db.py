@@ -27,6 +27,9 @@ class User(Base):
     user_id = Column(Integer, primary_key=True)
     username = Column(String, unique=True)
     password_hash = Column(String)
+    preferred_name = Column(String)
+    dark_mode = Column(Integer, default=0)
+    notifications_enabled = Column(Integer, default=1)
 
 class RawInput(Base):
     __tablename__ = "raw_inputs"
@@ -43,8 +46,10 @@ class Task(Base):
     raw_id = Column(Integer, ForeignKey("raw_inputs.raw_id"))
     title = Column(String, nullable=False)
     due_date = Column(String) 
+    end_date = Column(String) # For spanning time slots
     due_text = Column(String)
     assignee = Column(String, default="me")
+    item_type = Column(String, default="task") # 'task' or 'reminder'
     priority = Column(String, default="normal")
     confidence = Column(Float)
     status = Column(String, default="pending")

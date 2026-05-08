@@ -14,10 +14,10 @@ client = OpenAI(api_key=api_key)
 def build_prompt(user_input: str, current_time: str) -> str:
     return f"""
     You are the core extraction engine for 'Clerk', an AI task manager.
-    Current UTC Timestamp: {current_time}
+    Current Local Timestamp: {current_time}
     
     TASK:
-    Extract EVERY actionable task, assignment, or deadline from the provided text.
+    Extract EVERY actionable task, reminder, assignment, or deadline from the provided text.
     The text may come from a raw user message, a PDF syllabus, or a document. 
     Ignore page numbers, headers, and non-actionable information.
 
@@ -26,14 +26,21 @@ def build_prompt(user_input: str, current_time: str) -> str:
     
     SCHEMA:
     {{
+      "item_type": "task | reminder",
       "title": "Clear, concise task name",
       "description": "Any extra context found in the text",
       "due_date": "ISO 8601 timestamp (YYYY-MM-DDTHH:MM:SSZ) or null",
+      "end_date": "ISO 8601 timestamp (YYYY-MM-DDTHH:MM:SSZ) or null",
       "assignee": "name or 'me'",
       "priority": "low | normal | high",
       "confidence": 0-100,
       "reasoning": "Briefly explain why this is a task"
     }}
+
+    GUIDELINES:
+    - Use 'reminder' for simple alerts (e.g., "Remind me to call Mom", "Alert me at 5pm").
+    - Use 'task' for actionable work or assignments (e.g., "Finish the report", "Submit homework").
+    - If a time range is provided (e.g. "3pm to 10pm"), use the start for due_date and end for end_date.
     
     INPUT TEXT:
     {user_input}
@@ -74,12 +81,13 @@ def extract_json(text: str) -> list:
             return [json.loads(obj_match.group(0))]
         raise ValueError("Failed to parse AI response as JSON")
 
-def extract_task_from_text(text: str) -> list:
+def extract_task_from_text(text: str, current_time: Optional[str] = None) -> list:
     if not text or not text.strip():
         return []
 
     try:
-        now_iso = datetime.now(timezone.utc).isoformat()
+        # Use provided local time or fallback to server UTC
+        now_iso = current_time if current_time else datetime.now(timezone.utc).isoformat()
         prompt = build_prompt(text, now_iso)
 
         response = client.chat.completions.create(
@@ -142,9 +150,11 @@ def validate_task(task: Dict[str, Any]) -> Dict[str, Any]:
     else: p = "normal"
 
     return {
+        "item_type": str(task.get("item_type", "task")).lower(),
         "title": title,
         "description": str(task.get("description", "")),
         "due_date": task.get("due_date"),
+        "end_date": task.get("end_date"),
         "assignee": task.get("assignee") if task.get("assignee") else "me",
         "priority": p,
         "confidence": int(task.get("confidence", 70))
@@ -154,8 +164,9 @@ def format_for_frontend(task: Dict[str, Any]) -> Dict[str, Any]:
     due_dt = None
     if task.get("due_date"):
         try:
-            # Handle 'Z' or offset formats
-            clean_date = task["due_date"].replace('Z', '+00:00')
+            # Strip 'Z' or offsets to treat as "Wall Time" (local naive datetime)
+            # This ensures the backend-generated time string matches the extracted wall time
+            clean_date = re.sub(r'Z$|[+-]\d{2}:\d{2}$', '', task["due_date"])
             due_dt = datetime.fromisoformat(clean_date)
         except:
             pass

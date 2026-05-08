@@ -24,6 +24,10 @@
     --shadow: 0 10px 28px rgba(79, 113, 130, .12);
 }
 
+* {
+    box-sizing: border-box;
+}
+
 body {
     margin: 0;
     font-family: 'Inter', Arial, sans-serif;
@@ -225,6 +229,81 @@ body {
 .task-main.amber { border-left: 5px solid #ffb100; background: rgba(255, 177, 0, 0.1); }
 .task-main.teal { border-left: 5px solid #00d7c0; background: rgba(0, 215, 192, 0.1); }
 .task-main.blue { border-left: 5px solid #00a3ff; background: rgba(0, 163, 255, 0.1); }
+.task-main.reminder { border-left: 5px solid #a855f7; background: rgba(168, 85, 247, 0.1); } /* Purple for reminders */
+
+/* Styles for the expanded day view */
+#expandedDayModal {
+    display: none; /* Hidden by default */
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.6);
+    z-index: 10002;
+    justify-content: center;
+    align-items: center;
+}
+
+#dayViewScrollContainer {
+    max-height: 60vh;
+    overflow-y: auto;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+}
+
+#hourlySlotsContainer {
+    position: relative;
+    height: 1200px; /* 24 hours * 50px per hour */
+    background: var(--panel-bg);
+}
+
+.hour-marker {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 50px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    pointer-events: none;
+}
+
+.hour-label {
+    width: 70px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    text-align: right;
+    padding-right: 10px;
+    padding-top: 4px;
+    border-right: 1px solid var(--border);
+    background: rgba(127, 152, 165, 0.05);
+}
+
+.hourly-event {
+    position: absolute;
+    z-index: 10;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: white;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    border-left: 4px solid rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+}
+
+/* Priority Colors for Hourly View */
+.hourly-event.pink { background-color: #ff4b91 !important; }
+.hourly-event.amber { background-color: #ffb100 !important; }
+.hourly-event.teal { background-color: #00d7c0 !important; }
+.hourly-event.blue { background-color: #00a3ff !important; }
+.hourly-event.reminder { background-color: #a855f7 !important; }
+
+.all-day-section {
+    padding: 15px;
+    background: rgba(127, 152, 165, 0.05);
+    border-bottom: 2px dashed var(--border);
+}
 
 /* ==========================================================================
    5. COMPOSER & INPUTS
@@ -299,6 +378,7 @@ button {
     min-height: 110px;
     padding: 10px;
     color: var(--text);
+    min-width: 0; /* Ensures the cell can shrink to allow for ellipsis */
 }
 
 .cal-header {
@@ -378,20 +458,55 @@ button {
     font-size: 0.75rem;
     padding: 2px 4px;
     margin-bottom: 2px;
-    border-radius: 3px;
+    border-radius: 6px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    color: white; /* Make text white so it stands out on the color */
+    color: var(--text); /* Darker text for readability on transparent background */
+    font-weight: 500;
 }
 
-.calendar-event.pink { background-color: #ff4b91; border-left: 3px solid #d4145a; }
-.calendar-event.amber { background-color: #ffb100; border-left: 3px solid #c68a00; }
-.calendar-event.teal { background-color: #00d7c0; border-left: 3px solid #00a190; }
-.calendar-event.blue { background-color: #00a3ff; border-left: 3px solid #0077bb; }
+.calendar-event.pink { background-color: rgba(255, 75, 145, 0.15); border-left: 3px solid #d4145a; }
+.calendar-event.amber { background-color: rgba(255, 177, 0, 0.15); border-left: 3px solid #c68a00; }
+.calendar-event.teal { background-color: rgba(0, 215, 192, 0.15); border-left: 3px solid #00a190; }
+.calendar-event.blue { background-color: rgba(0, 163, 255, 0.15); border-left: 3px solid #0077bb; }
+.calendar-event.reminder { background-color: rgba(168, 85, 247, 0.15); border-left: 3px solid #7e22ce; } /* Purple for reminders */
+
 
 /* ==========================================================================
-   7. THEME TOGGLE (SLIDER)
+   7. NOTIFICATIONS (TOASTS)
+   ========================================================================== */
+#toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 10001;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.notification-toast {
+    background: var(--panel-bg);
+    border-left: 5px solid var(--teal);
+    padding: 16px 20px;
+    border-radius: 16px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 280px;
+    animation: toastIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    transition: all 0.3s ease;
+}
+
+@keyframes toastIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+/* ==========================================================================
+   8. THEME TOGGLE (SLIDER)
    ========================================================================== */
 .switch {
     position: relative;
@@ -425,7 +540,7 @@ input:checked + .slider { background-color: var(--teal); }
 input:checked + .slider:before { transform: translateX(26px); }
 
 /* ==========================================================================
-   8. RESPONSIVE BITS
+   9. RESPONSIVE BITS
    ========================================================================== */
 @media (max-width: 980px) {
     .layout {
@@ -450,6 +565,8 @@ input:checked + .slider:before { transform: translateX(26px); }
         <nav class="nav">
             <a href="#" onclick="loadView('calendar')">Calendar</a>
             <a href="#" onclick="loadView('my tasks')">My Tasks</a>
+            <a href="#" onclick="loadView('reminders')">Reminders</a>
+            <a href="#" onclick="loadView('history')">History</a>
             <a href="#" class="active" onclick="loadView('agenda')">Agenda</a>
             <a href="#insightsSection">Clerk Insights</a>
         </nav>
@@ -523,12 +640,12 @@ input:checked + .slider:before { transform: translateX(26px); }
                     <div style="margin-bottom: 32px;">
                         <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--teal-dark); margin-bottom: 16px;">Personalization</h3>
                         <label style="font-size: 14px; color: var(--text); margin-bottom: 8px; display: block;">What should Clerk call you?</label>
-                        <input type="text" id="preferred-name-input" placeholder="Enter your name..." oninput="updateDisplayName(this.value)" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text); outline: none;">
+                        <input type="text" id="preferred-name-input" placeholder="Enter your name..." onchange="updateDisplayName(this.value)" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text); outline: none;">
                     </div>
 
                     <div style="margin-bottom: 32px;">
                         <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--teal-dark); margin-bottom: 16px;">Appearance</h3>
-                        <div style="background: rgba(127, 152, 165, 0.05); border: 1px solid var(--border); padding: 20px; border-radius: 18px; display: flex; justify-content: space-between; align-items: center;">
+                        <div style="background: rgba(127, 152, 165, 0.05); border: 1px solid var(--border); padding: 20px; border-radius: 18px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                             <div style="display: flex; align-items: center; gap: 16px;">
                                 <div style="font-size: 24px;">🌙</div>
                                 <div>
@@ -544,14 +661,25 @@ input:checked + .slider:before { transform: translateX(26px); }
                     </div>
 
                     <div>
-                        <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 16px;">System (Coming Soon)</h3>
+                        <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--teal-dark); margin-bottom: 16px;">Preferences</h3>
+                        <div style="background: rgba(127, 152, 165, 0.05); border: 1px solid var(--border); padding: 20px; border-radius: 18px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <div style="display: flex; align-items: center; gap: 16px;">
+                                <div style="font-size: 24px;">🔔</div>
+                                <div>
+                                    <h4 style="margin: 0; font-size: 16px; color: var(--text);">Push Notifications</h4>
+                                    <p style="margin: 4px 0 0; font-size: 13px; color: var(--muted);">Get alerts for tasks due soon.</p>
+                                </div>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="notificationToggle" onchange="saveUserSettings()">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+
+                        <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 16px; margin-top: 32px;">System (Coming Soon)</h3>
                         <div style="display: grid; gap: 12px; opacity: 0.6;">
                             <div style="border: 1px dashed var(--border); padding: 16px; border-radius: 14px; display: flex; align-items: center; gap: 12px; color: var(--muted);">
-                                <span>🔔</span>
-                                <span style="font-size: 14px; font-weight: 600;">Notification Preferences</span>
-                            </div>
-                            <div style="border: 1px dashed var(--border); padding: 16px; border-radius: 14px; display: flex; align-items: center; gap: 12px; color: var(--muted);">
-                                <span>🔒</span>
+                                <span></span>
                                 <span style="font-size: 14px; font-weight: 600;">Privacy & Data Security</span>
                             </div>
                             <div style="border: 1px dashed var(--border); padding: 16px; border-radius: 14px; display: flex; align-items: center; gap: 12px; color: var(--muted);">
@@ -583,6 +711,22 @@ input:checked + .slider:before { transform: translateX(26px); }
             <p id="login-error" style="color:var(--pink); font-size:14px; margin-top:15px; display:none;"></p>
         </div>
     </div>
+    <div id="toast-container"></div>
+
+    <!-- Expanded Day Modal -->
+    <div id="expandedDayModal">
+        <div style="background:var(--panel-bg); padding:20px; border-radius:26px; width:90%; max-width:600px; max-height:90vh; overflow-y:auto; position:relative;">
+            <button onclick="closeExpandedDayView()" style="position:absolute; top:15px; right:15px; background:none; border:none; font-size:24px; cursor:pointer; color:var(--muted);">✕</button>
+            <h3 id="expandedDayTitle" style="color:var(--text); margin-top:0; margin-bottom:20px;"></h3>
+            <div id="allDayContainer"></div>
+            <div id="dayViewScrollContainer">
+                <div id="hourlySlotsContainer">
+                    <!-- Hourly slots will be rendered here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
 </body>
 
 <script>
@@ -604,9 +748,37 @@ const taskDuePreview = document.getElementById('taskDuePreview');
 const taskConfidence = document.getElementById('taskConfidence');
 const taskDescPreview = document.getElementById('taskDescPreview');
 
+// Helper to parse dates as "Wall Time" (ignoring UTC shift)
+const parseWallTime = (isoStr) => {
+    if (!isoStr) return null;
+    // Remove 'Z' or any timezone offset if present to treat as local wall time
+    const cleanedIsoStr = isoStr.replace(/Z$|[+-]\d{2}:\d{2}$/, '');
+    
+    // Extract components manually for local construction
+    const parts = cleanedIsoStr.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+    if (parts) {
+        return new Date(
+            parseInt(parts[1], 10),      // year
+            parseInt(parts[2], 10) - 1,  // month (0-indexed)
+            parseInt(parts[3], 10),      // day
+            parseInt(parts[4], 10),      // hours
+            parseInt(parts[5], 10),      // minutes
+            parseInt(parts[6], 10)       // seconds
+        );
+    }
+    // Fallback for YYYY-MM-DD
+    if (cleanedIsoStr.length === 10) {
+        const [y, m, d] = cleanedIsoStr.split('-').map(Number);
+        return new Date(y, m - 1, d);
+    }
+    return new Date(cleanedIsoStr);
+};
+
 //global user variable 
 window.CURRENT_USER_ID = null;
+window.USER_SETTINGS = { preferred_name: "User", dark_mode: false, notifications_enabled: true };
 
+const notifiedTasks = new Set(); // To prevent duplicate alerts
 let currentTask = null; // This will hold the result from your FastAPI /ingest
 let currentView = 'agenda';
 
@@ -632,11 +804,8 @@ window.login = async function() {
             const data = await response.json();
             // Store the ID and Name
             window.CURRENT_USER_ID = data.user_id;
-            const initialName = data.username || "User";
             
-            // Update UI
-            document.getElementById('display-username').textContent = initialName;
-            document.getElementById('preferred-name-input').value = initialName;
+            await fetchUserSettings();
             
             // Hide login and show agenda
             document.getElementById('login-overlay').style.display = 'none';
@@ -651,6 +820,42 @@ window.login = async function() {
         errorMsg.style.display = 'block';
     }
 };
+
+async function fetchUserSettings() {
+    try {
+        const response = await fetch(`http://127.0.0.1:8000/users/${window.CURRENT_USER_ID}/settings`);
+        if (response.ok) {
+            window.USER_SETTINGS = await response.json();
+            
+            // Apply to UI
+            updateDisplayName(window.USER_SETTINGS.preferred_name, false);
+            document.getElementById('darkThemeToggle').checked = window.USER_SETTINGS.dark_mode;
+            document.getElementById('notificationToggle').checked = window.USER_SETTINGS.notifications_enabled;
+            
+            if (window.USER_SETTINGS.dark_mode) toggleDarkTheme(false);
+        }
+    } catch (err) {
+        console.error("Failed to fetch settings:", err);
+    }
+}
+
+async function saveUserSettings() {
+    if (!window.CURRENT_USER_ID) return;
+    
+    const settings = {
+        preferred_name: document.getElementById('preferred-name-input').value,
+        dark_mode: document.getElementById('darkThemeToggle').checked,
+        notifications_enabled: document.getElementById('notificationToggle').checked
+    };
+    
+    window.USER_SETTINGS = settings;
+
+    await fetch(`http://127.0.0.1:8000/users/${window.CURRENT_USER_ID}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+    });
+}
 
 //user login 
 let isLoginMode = true;
@@ -702,51 +907,107 @@ async function register() {
     }
 }
 
-function renderTaskList(tasks, containerId) {
+function renderTaskList(tasks, containerId, isHistoryView = false) {
     const container = document.getElementById(containerId);
     if (!container) return;
     container.innerHTML = '';
 
-    const pendingTasks = tasks.filter(t => t.status !== 'completed');
+    const tasksToShow = isHistoryView ? tasks : tasks.filter(t => t.status !== 'completed' && t.status !== 'deleted');
 
-    if (pendingTasks.length === 0) {
-        container.innerHTML = '<p style="color:var(--muted); padding:20px;">All clear!</p>';
+    if (tasksToShow.length === 0) {
+        if (isHistoryView) {
+            container.innerHTML = '<p style="color:var(--muted); padding:20px;">No history yet!</p>';
+        } else {
+            container.innerHTML = '<p style="color:var(--muted); padding:20px;">All clear!</p>';
+        }
         return;
     }
 
-    pendingTasks.forEach(task => {
+    tasksToShow.forEach(task => {
         const item = document.createElement('div');
         item.className = 'agenda-item';
         item.id = `task-item-${task.task_id}`; // ID for animation target
 
         const priority = String(task.priority || 'normal').toLowerCase();
-        let colorClass = priority === 'high' ? 'pink' : (priority === 'low' ? 'teal' : 'blue');
+        const itemType = String(task.item_type || 'task').toLowerCase();
+        
+        let colorClass = 'blue';
+        if (itemType === 'reminder') colorClass = 'reminder';
+        else if (priority === 'high') colorClass = 'pink';
+        else if (priority === 'low') colorClass = 'teal';
+        else if (priority === 'medium') colorClass = 'amber';
 
-        item.innerHTML = `
-            <div class="task-main ${colorClass}" style="flex-grow: 1;"> 
-                <div class="task-title">${task.title}</div>
-                <div class="task-sub">${task.description || ''}</div>
-            </div>
-            <div class="task-actions">
+        // Format the date for the datetime-local input (YYYY-MM-DDTHH:MM)
+        let displayDate = "";
+        const dateObj = parseWallTime(task.due_date);
+        if (dateObj) {
+            const y = dateObj.getFullYear();
+            const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const d = String(dateObj.getDate()).padStart(2, '0');
+            const hh = String(dateObj.getHours()).padStart(2, '0');
+            const mm = String(dateObj.getMinutes()).padStart(2, '0');
+            displayDate = `${y}-${m}-${d}T${hh}:${mm}`;
+        }
+
+        let actionButtonsHtml = '';
+        let datePickerHtml = '';
+
+        if (!isHistoryView) {
+            actionButtonsHtml = `
                 <button class="done-btn" onclick="completeTask(${task.task_id})" title="Complete">✓</button>
                 <button class="done-btn delete" onclick="dismissTask(${task.task_id})" title="Dismiss">✕</button>
+            `;
+            datePickerHtml = `
+                <div class="edit-due" style="margin-top: 10px; display: ${currentView === 'my tasks' ? 'flex' : 'none'}; align-items: center; gap: 10px;">
+                    <span style="font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;">Set Due:</span>
+                    <input type="datetime-local" value="${displayDate}" onchange="handleDateChange(${task.task_id}, this.value)" 
+                           style="border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; font-size: 12px; background: rgba(255,255,255,0.4); color: var(--text); outline: none;">
+                </div>
+            `;
+        } else {
+            actionButtonsHtml = `
+                <span style="font-size: 12px; color: var(--muted); text-transform: capitalize; margin-right: 8px;">${task.status}</span>
+                <button class="done-btn" onclick="restoreTask(${task.task_id})" title="Restore">🔄</button>
+                <button class="done-btn delete" onclick="permanentlyDeleteTask(${task.task_id})" title="Delete Permanently">🗑️</button>
+            `;
+        }
+
+        // Calculate Wall Time for display
+        const startDt = parseWallTime(task.due_date);
+        const timeStr = (startDt && task.due_date.includes('T')) 
+            ? startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+            : "";
+
+        item.innerHTML = `
+              <div class="time">${timeStr}</div>
+              <div class="task-main ${colorClass}" style="flex-grow: 1;">
+                <div style="font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--muted); margin-bottom: 2px;">
+                    ${itemType === 'reminder' ? '🔔 Reminder' : '📋 Task'}
+                </div>
+                <div class="task-title">${task.title}</div>
+                <div class="task-sub">${task.description || ''}</div>
+                ${datePickerHtml}
+            </div>
+            <div class="task-actions">
+                ${actionButtonsHtml}
             </div>
         `;
         container.appendChild(item);
     });
 }
 
-
 async function dismissTask(taskId) {
     const element = document.getElementById(`task-item-${taskId}`);
     
-    // 1. Visual feedback immediately (feels snappy)
+    // 1. Visual feedback immediately
     if (element) element.classList.add('removing');
 
     try {
-        // 2. Perform the actual delete in the background
+        // 2. Perform a soft delete (update status to 'deleted')
         const response = await fetch(`http://127.0.0.1:8000/tasks/${taskId}`, {
-            method: 'DELETE'
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'deleted' })
         });
 
         if (!response.ok) throw new Error("Delete failed");
@@ -764,6 +1025,43 @@ async function dismissTask(taskId) {
         // If server fails, bring it back
         if (element) element.classList.remove('removing');
         alert("Couldn't remove task. Server might be down.");
+    }
+}
+
+async function restoreTask(taskId) {
+    try {
+        const response = await fetch(`http://127.0.0.1:8000/tasks/${taskId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'pending' })
+        });
+
+        if (!response.ok) throw new Error("Restore failed");
+        
+        // Refresh history view
+        loadView('history');
+        showNotificationToast({ title: "Task restored to Agenda", due_text: "" });
+    } catch (err) {
+        console.error("Restore failed:", err);
+        alert("Failed to restore task.");
+    }
+}
+
+async function permanentlyDeleteTask(taskId) {
+    if (!confirm("Are you sure you want to permanently delete this task? This cannot be undone.")) return;
+
+    try {
+        const response = await fetch(`http://127.0.0.1:8000/tasks/${taskId}/permanent`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) throw new Error("Permanent delete failed");
+
+        // Refresh history view
+        loadView('history');
+    } catch (err) {
+        console.error("Permanent delete failed:", err);
+        alert("Failed to delete task permanently.");
     }
 }
 
@@ -813,7 +1111,9 @@ async function loadView(view) {
     // 1. Update Navbar UI
     document.querySelectorAll('.nav a').forEach(link => {
         link.classList.remove('active');
-        if (link.textContent.toLowerCase() === view) link.classList.add('active');
+        if (link.textContent.toLowerCase() === view || (view === 'history' && link.textContent.toLowerCase() === 'history')) {
+            link.classList.add('active');
+        }
     });
 
     // 2. Select UI components
@@ -866,28 +1166,41 @@ async function loadView(view) {
             const todayStr = new Date().toLocaleDateString('en-CA'); 
             
             const todayTasks = allTasks.filter(t => {
+                if (t.item_type === 'reminder') return false; // Hide reminders from main agenda
                 const taskDate = (t.due_date || t.due || '').split('T')[0];
                 return taskDate === todayStr;
             });
-            renderTaskList(todayTasks, 'agendaList');
+            renderTaskList(todayTasks, 'agendaList', false);
         }
         else if (view === 'my tasks') {
             titleHeader.textContent = "All My Tasks";
-            
             // Sort by priority before rendering
+            const tasksOnly = allTasks.filter(t => t.item_type !== 'reminder');
             const priorityOrder = { 'high': 4, 'medium': 3, 'normal': 2, 'low': 1 };
-            allTasks.sort((a, b) => {
+            tasksOnly.sort((a, b) => {
                 const pA = priorityOrder[String(a.priority).toLowerCase()] || 0;
                 const pB = priorityOrder[String(b.priority).toLowerCase()] || 0;
                 return pA !== pB ? pB - pA : new Date(a.due_date) - new Date(b.due_date);
             });
-            
-            renderTaskList(allTasks, 'agendaList');
+            renderTaskList(tasksOnly, 'agendaList', false);
+        }
+        else if (view === 'reminders') {
+            titleHeader.textContent = "Time-Based Reminders";
+            const remindersOnly = allTasks.filter(t => t.item_type === 'reminder');
+            renderTaskList(remindersOnly, 'agendaList', false);
         }
         else if (view === 'calendar') {
             titleHeader.textContent = "Monthly Schedule";
             // Uses your global calendar variables
-            renderBigCalendar(currentCalMonth, currentCalYear, allTasks);
+            renderBigCalendar(currentCalMonth, currentCalYear, allTasks.filter(t => t.status !== 'completed' && t.status !== 'deleted'));
+        }
+        else if (view === 'history') {
+            titleHeader.textContent = "Recently Completed & Deleted Tasks";
+            const historyResponse = await fetch(`http://127.0.0.1:8000/tasks/history?user_id=${userId}`);
+            if (!historyResponse.ok) throw new Error(`HTTP error! status: ${historyResponse.status}`);
+            const historyData = await historyResponse.json();
+            const historyTasks = historyData.tasks || [];
+            renderTaskList(historyTasks, 'agendaList', true); // Pass true for history view
         }
     } catch (err) {
         console.error("LoadView Error:", err);
@@ -934,6 +1247,7 @@ function renderBigCalendar(month, year, allTasks = []) {
         
         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         daySquare.dataset.date = dateStr; 
+        daySquare.addEventListener('click', () => expandDayView(dateStr, allTasks)); // Add click listener here
         daySquare.innerHTML = `<span class="day-num">${day}</span>`;
 
         // 4. Drag & Drop Listeners
@@ -948,17 +1262,21 @@ function renderBigCalendar(month, year, allTasks = []) {
         });
 
         // 5. Filter and Render Tasks
-        const dayTasks = allTasks 
-        .filter(t => t.status !== 'completed') 
-        .filter(t => (t.due_date || t.due || '').startsWith(dateStr));
+        // The allTasks array passed to renderBigCalendar is already filtered for active tasks/reminders
+        // So, we just need to filter by date here.
+        const dayTasks = allTasks
+            .filter(t => (t.due_date || t.due || '').startsWith(dateStr))
+            .sort((a, b) => new Date(a.due_date) - new Date(b.due_date)); // Sort by time
 
         dayTasks.forEach(task => {
             const taskEl = document.createElement('div');
             
             // Priority Color Logic
             const priority = String(task.priority || 'normal').toLowerCase();
+            const itemType = String(task.item_type || 'task').toLowerCase();
             let colorClass = 'blue'; 
-            if (priority === 'high') colorClass = 'pink';
+            if (itemType === 'reminder') colorClass = 'reminder';
+            else if (priority === 'high') colorClass = 'pink';
             else if (priority === 'medium') colorClass = 'amber';
             else if (priority === 'low') colorClass = 'teal';
 
@@ -971,6 +1289,10 @@ function renderBigCalendar(month, year, allTasks = []) {
             taskEl.addEventListener('dragstart', (e) => {
                 e.dataTransfer.setData('text/plain', task.task_id);
             });
+
+            // Add click listener to open expanded day view
+            // This is handled by the daySquare click listener now
+            // taskEl.addEventListener('click', (e) => { e.stopPropagation(); expandDayView(dateStr, allTasks); });
             
             daySquare.appendChild(taskEl);
         });
@@ -979,20 +1301,202 @@ function renderBigCalendar(month, year, allTasks = []) {
     }
 }
 
-function updateDisplayName(name) {
+// New function to expand a day and show hourly events
+function expandDayView(dateStr, allTasksForMonth) {
+    const modal = document.getElementById('expandedDayModal');
+    const title = document.getElementById('expandedDayTitle');
+    const hourlyContainer = document.getElementById('hourlySlotsContainer');
+    const allDayContainer = document.getElementById('allDayContainer');
+
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const targetDate = new Date(year, month - 1, day);
+    
+    title.textContent = `Schedule for ${targetDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`;
+    hourlyContainer.innerHTML = ''; // Clear previous content
+    allDayContainer.innerHTML = '';
+
+    // Create All-Day Section for untimed tasks
+    const allDaySection = document.createElement('div');
+    allDaySection.className = 'all-day-section';
+    allDaySection.innerHTML = '<h4 style="margin:0 0 10px 0; font-size:12px; color:var(--muted); text-transform:uppercase;">All Day / Untimed</h4>';
+    const allDayList = document.createElement('div');
+    allDayList.style.display = 'flex';
+    allDayList.style.flexDirection = 'column';
+    allDayList.style.gap = '5px';
+    allDaySection.appendChild(allDayList);
+
+    const dayEvents = allTasksForMonth.filter(t => {
+        if (!t.due_date) return false;
+        const start = parseWallTime(t.due_date);
+        const startsOnDay = start.getFullYear() === year && 
+                            start.getMonth() === (month - 1) && 
+                            start.getDate() === day;
+        
+        if (startsOnDay) return true;
+        if (t.end_date) {
+            const end = parseWallTime(t.end_date);
+            const startOfDay = new Date(year, month - 1, day, 0, 0, 0);
+            const endOfDay = new Date(year, month - 1, day, 23, 59, 59);
+            return (start <= endOfDay && end >= startOfDay);
+        }
+        return false;
+    });
+
+    // Render Background Hour Markers
+    for (let i = 0; i < 24; i++) {
+        const marker = document.createElement('div');
+        marker.className = 'hour-marker';
+        marker.style.top = `${i * 50}px`;
+        
+        const ampm = i >= 12 ? 'PM' : 'AM';
+        const displayHour = i % 12 || 12;
+        marker.innerHTML = `<div class="hour-label">${displayHour}:00 ${ampm}</div>`;
+        hourlyContainer.appendChild(marker);
+    }
+
+    // 2. Render Events onto the grid
+   const timedEvents = [];
+    const untimedEvents = [];
+
+    dayEvents.forEach(event => {
+        const start = parseWallTime(event.due_date);
+        const isUntimed = start.getHours() === 0 && start.getMinutes() === 0 && start.getSeconds() === 0;
+
+        if (isUntimed) untimedEvents.push(event);
+        else timedEvents.push(event);
+    });
+
+    // Sort timed events by start time
+    timedEvents.sort((a, b) => parseWallTime(a.due_date) - parseWallTime(b.due_date));
+
+    // Improved clustering: Group transitively overlapping events into blocks
+    const eventGroups = [];
+    if (timedEvents.length > 0) {
+        let currentGroup = [timedEvents[0]];
+        let groupMaxEnd = parseWallTime(timedEvents[0].due_date).getTime() + 
+                         (timedEvents[0].end_date ? (parseWallTime(timedEvents[0].end_date) - parseWallTime(timedEvents[0].due_date)) : 3600000);
+
+        for (let i = 1; i < timedEvents.length; i++) {
+            const ev = timedEvents[i];
+            const start = parseWallTime(ev.due_date).getTime();
+            const end = ev.end_date ? parseWallTime(ev.end_date).getTime() : start + 3600000;
+
+            if (start < groupMaxEnd) {
+                currentGroup.push(ev);
+                groupMaxEnd = Math.max(groupMaxEnd, end);
+            } else {
+                eventGroups.push(currentGroup);
+                currentGroup = [ev];
+                groupMaxEnd = end;
+            }
+        }
+        eventGroups.push(currentGroup);
+    }
+
+    // Render Untimed (All Day)
+    if (untimedEvents.length > 0) {
+        untimedEvents.forEach(event => {
+            const itemType = String(event.item_type || 'task').toLowerCase();
+            const priority = String(event.priority || 'normal').toLowerCase();
+            let colorClass = 'blue';
+            if (itemType === 'reminder') colorClass = 'reminder';
+            else if (priority === 'high') colorClass = 'pink';
+            else if (priority === 'medium') colorClass = 'amber';
+            else if (priority === 'low') colorClass = 'teal';
+            
+            const untimedEl = document.createElement('div');
+            untimedEl.className = `hourly-event ${colorClass}`;
+            untimedEl.style.position = 'static';
+            untimedEl.style.marginBottom = '5px';
+            untimedEl.innerHTML = `<strong>${itemType === 'reminder' ? '🔔' : '📋'}</strong> ${event.title}`;
+            allDayList.appendChild(untimedEl);
+        });
+        allDayContainer.appendChild(allDaySection);
+    }
+
+    // Render Timed Events side-by-side
+    eventGroups.forEach(group => {
+        let columns = []; // Track end times for each column to packing
+        const groupWithCols =[];
+
+        //first pass: assign columns to each event in the overlapping group
+        group.forEach((event) => {
+            const start = parseWallTime(event.due_date);
+            const end = event.end_date ? parseWallTime(event.end_date) : new Date(start.getTime() + 3600000);
+            
+            let colIdx = columns.findIndex(colEnd => colEnd <= start);
+            if (colIdx === -1) {
+                columns.push(end);
+                colIdx = columns.length - 1;
+            } else {
+                columns[colIdx] = end;
+            }
+            groupWithCols.push({ event, colIdx, start, end });
+        });
+
+        //Second pass: render with consistent widths based on total columns 
+        const totalCols = columns.length;
+        groupWithCols.forEach(({ event, colIdx, start, end }) => {
+            const priority = String(event.priority || 'normal').toLowerCase();
+            const itemType = String(event.item_type || 'task').toLowerCase();
+            let colorClass = 'blue';
+            if (itemType === 'reminder') colorClass = 'reminder';
+            else if (priority === 'high') colorClass = 'pink';
+            else if (priority === 'medium') colorClass = 'amber';
+            else if (priority === 'low') colorClass = 'teal';
+
+            const dayStart = new Date(year, month - 1, day, 0, 0, 0);
+            const startMinutes = (start - dayStart) / 60000;
+            const endMinutes = (end - dayStart) / 60000;
+
+            const top = Math.max(0, startMinutes * (50/60));
+            const bottom = Math.min(1440 * (50/60), endMinutes * (50/60));
+            const height = Math.max(25, bottom - top);
+
+            const eventEl = document.createElement('div');
+            eventEl.className = `hourly-event ${colorClass}`;
+            eventEl.style.top = `${top}px`;
+            eventEl.style.height = `${height}px`;
+            
+            // Calculate horizontal position with a small 2px gap between side-by-side items
+            const availableWidth = "calc(100% - 95px)";
+            const columnWidth = `calc((${availableWidth} / ${totalCols}))`;
+            
+            eventEl.style.width = `calc(${columnWidth} - 10px)`;
+            eventEl.style.left = `calc(85px + (${colIdx} * (${availableWidth} / ${totalCols})))`;
+
+            eventEl.innerHTML = `
+                <span style="font-weight:800; font-size:10px;">${start.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                <span style="font-weight:700;">${event.title}</span>
+            `;
+            hourlyContainer.appendChild(eventEl);
+        });
+    });
+
+modal.style.display = 'flex'; // Show the modal
+}
+
+function closeExpandedDayView() {
+    document.getElementById('expandedDayModal').style.display = 'none';
+}
+
+function updateDisplayName(name, shouldSave = true) {
     const nameToDisplay = name.trim() || "User";
+    document.getElementById('preferred-name-input').value = nameToDisplay;
     
     // Update the Top Bar
     const topBarName = document.getElementById('display-username');
     if (topBarName) topBarName.textContent = nameToDisplay;
     
-    // Update the Header (optional touch)
+    // Update the Header
     const liveHeader = document.getElementById('liveDateHeader');
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
     if (liveHeader) liveHeader.textContent = `Hello, ${nameToDisplay} | ${today}`;
+
+    if (shouldSave) saveUserSettings();
 }
 
-function toggleDarkTheme() {
+function toggleDarkTheme(shouldSave = true) {
     const isDark = document.getElementById('darkThemeToggle').checked;
     const root = document.documentElement;
 
@@ -1014,6 +1518,8 @@ function toggleDarkTheme() {
         root.style.setProperty('--shadow', '0 10px 28px rgba(79, 113, 130, .12)');
         document.body.style.background = 'radial-gradient(circle at top left, #dff5f2 0%, #eef3f5 32%, #f7f8fa 100%)';
     }
+
+    if (shouldSave) saveUserSettings();
 }
 
 // Navigation Helper for calendar
@@ -1105,11 +1611,9 @@ async function updateTaskDate(id, newDate) {
 async function handleDateChange(taskId, newFullDate) {
     if (!newFullDate) return;
 
-    // Convert the input value to the ISO format your backend prefers
-    const formattedDate = new Date(newFullDate).toISOString();
-
     try {
-        await updateTaskDate(taskId, formattedDate);
+        // Send the raw local string (YYYY-MM-DDTHH:MM) to avoid UTC shift
+        await updateTaskDate(taskId, newFullDate);
         console.log(`Task ${taskId} updated to ${newFullDate}`);
         
         // Optional: Provide visual feedback that it saved
@@ -1218,6 +1722,62 @@ if (SpeechRecognition) {
   voiceBtn.addEventListener('click', () => listening ? recognition.stop() : recognition.start());
 }
 
+// --- NOTIFICATION SYSTEM ---
+async function checkUpcomingTasks() {
+    if (!window.CURRENT_USER_ID || !window.USER_SETTINGS.notifications_enabled) return;
+
+    try {
+        const response = await fetch(`http://127.0.0.1:8000/tasks?user_id=${window.CURRENT_USER_ID}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        const tasks = data.tasks || [];
+
+        const now = new Date();
+        const soonThreshold = 30 * 60 * 1000; // 30 minutes in milliseconds
+
+        tasks.forEach(task => {
+            if (task.status === 'completed' || notifiedTasks.has(task.task_id)) return;
+
+            const dueDate = new Date(task.due_date);
+            if (isNaN(dueDate.getTime())) return;
+
+            const diff = dueDate - now;
+
+            // Notify if task is due within the next 30 minutes and hasn't passed yet
+            if (diff > 0 && diff <= soonThreshold) {
+                showNotificationToast(task);
+                notifiedTasks.add(task.task_id);
+            }
+        });
+    } catch (err) {
+        console.error("Failed to check upcoming tasks:", err);
+    }
+}
+
+function showNotificationToast(task) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = 'notification-toast';
+    toast.innerHTML = `
+        <div style="font-size: 20px;">🔔</div>
+        <div>
+            <div style="font-weight: 700; font-size: 14px; color: var(--text);">Due Soon: ${task.title}</div>
+            <div style="font-size: 12px; color: var(--muted);">${task.due_text || 'Upcoming deadline'}</div>
+        </div>
+    `;
+    container.appendChild(toast);
+
+    // Auto-remove after 8 seconds
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(20px)';
+        setTimeout(() => toast.remove(), 300);
+    }, 8000);
+}
+
+// Start the notification poller
+setInterval(checkUpcomingTasks, 60000);
+
 
 //runs AI extraction 
 processBtn.addEventListener('click', async () => {
@@ -1230,6 +1790,12 @@ processBtn.addEventListener('click', async () => {
     processBtn.innerText = "Processing...";
     processBtn.disabled = true;
 
+    // Capture local time for AI context
+    const now = new Date();
+    const offset = now.getTimezoneOffset() * 60000;
+    const localISOTime = new Date(now.getTime() - offset).toISOString().slice(0, 19);
+    const localTimeString = `${localISOTime} (Local Time)`;
+
     try {
         let response;
         
@@ -1238,6 +1804,7 @@ processBtn.addEventListener('click', async () => {
             const formData = new FormData();
             formData.append("file", fileInput.files[0]);
             formData.append("user_id", userId);
+            formData.append("local_time", localTimeString);
 
             response = await fetch('http://127.0.0.1:8000/ingest-doc', {
                 method: 'POST',
@@ -1249,7 +1816,11 @@ processBtn.addEventListener('click', async () => {
             response = await fetch('http://127.0.0.1:8000/ingest', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: text, user_id: userId })
+                body: JSON.stringify({ 
+                    content: text, 
+                    user_id: userId,
+                    local_time: localTimeString
+                })
             });
         } else {
             alert("Please enter text or select a file.");

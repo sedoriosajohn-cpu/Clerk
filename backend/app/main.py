@@ -34,6 +34,7 @@ class UserInput(BaseModel):
     content: str
     source_type: Optional[str] = "text"
     source_id: Optional[str] = None
+    local_time: Optional[str] = None
     user_id: int
 
 class TaskUpdate(BaseModel):
@@ -71,12 +72,13 @@ async def register_user(data: LoginRequest, db: Session = Depends(get_db)):
 # --- TASK INGESTION (TEXT) ---
 @app.post("/ingest")
 async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
-    return await process_and_save_tasks(data.content, data.user_id, data.source_type, db)
+    return await process_and_save_tasks(data.content, data.user_id, data.source_type, db, data.local_time)
 
 # --- NEW: TASK INGESTION (DOCUMENTS) ---
 @app.post("/ingest-doc")
 async def ingest_doc(
     user_id: int = Form(...), 
+    local_time: Optional[str] = Form(None),
     file: UploadFile = File(...), 
     db: Session = Depends(get_db)
 ):
@@ -102,14 +104,14 @@ async def ingest_doc(
             raise HTTPException(status_code=400, detail="The uploaded file appears to be empty.")
 
         # Reuse the saving logic
-        return await process_and_save_tasks(content, user_id, f"file: {file.filename}", db)
+        return await process_and_save_tasks(content, user_id, f"file: {file.filename}", db, local_time)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"File processing error: {str(e)}")
 
 # --- REUSABLE PROCESSING LOGIC ---
-async def process_and_save_tasks(text_content, user_id, source_info, db):
-    structured_tasks = extract_task_from_text(text_content)
+async def process_and_save_tasks(text_content, user_id, source_info, db, current_time=None):
+    structured_tasks = extract_task_from_text(text_content, current_time)
     
     if not structured_tasks:
         raise HTTPException(status_code=500, detail="AI Extraction failed to find any tasks.")

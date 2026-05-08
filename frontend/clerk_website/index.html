@@ -24,6 +24,10 @@
     --shadow: 0 10px 28px rgba(79, 113, 130, .12);
 }
 
+* {
+    box-sizing: border-box;
+}
+
 body {
     margin: 0;
     font-family: 'Inter', Arial, sans-serif;
@@ -239,17 +243,67 @@ body {
     align-items: center;
 }
 
-.hourly-slot {
-    border-bottom: 1px solid var(--border);
-    padding: 10px 0;
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
+#dayViewScrollContainer {
+    max-height: 60vh;
+    overflow-y: auto;
+    border-radius: 12px;
+    border: 1px solid var(--border);
 }
-.hourly-slot:last-child { border-bottom: none; }
-.hourly-time { font-weight: 700; color: var(--muted); min-width: 60px; text-align: right; flex-shrink: 0; }
-.hourly-events { flex-grow: 1; display: flex; flex-direction: column; gap: 5px; }
-.hourly-event { font-size: 0.9rem; padding: 5px 8px; border-radius: 6px; color: white; word-break: break-word; }
+
+#hourlySlotsContainer {
+    position: relative;
+    height: 1200px; /* 24 hours * 50px per hour */
+    background: var(--panel-bg);
+}
+
+.hour-marker {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 50px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    pointer-events: none;
+}
+
+.hour-label {
+    width: 70px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    text-align: right;
+    padding-right: 10px;
+    padding-top: 4px;
+    border-right: 1px solid var(--border);
+    background: rgba(127, 152, 165, 0.05);
+}
+
+.hourly-event {
+    position: absolute;
+    z-index: 10;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: white;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    border-left: 4px solid rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+}
+
+/* Priority Colors for Hourly View */
+.hourly-event.pink { background-color: #ff4b91 !important; }
+.hourly-event.amber { background-color: #ffb100 !important; }
+.hourly-event.teal { background-color: #00d7c0 !important; }
+.hourly-event.blue { background-color: #00a3ff !important; }
+.hourly-event.reminder { background-color: #a855f7 !important; }
+
+.all-day-section {
+    padding: 15px;
+    background: rgba(127, 152, 165, 0.05);
+    border-bottom: 2px dashed var(--border);
+}
 
 /* ==========================================================================
    5. COMPOSER & INPUTS
@@ -324,6 +378,7 @@ button {
     min-height: 110px;
     padding: 10px;
     color: var(--text);
+    min-width: 0; /* Ensures the cell can shrink to allow for ellipsis */
 }
 
 .cal-header {
@@ -403,18 +458,19 @@ button {
     font-size: 0.75rem;
     padding: 2px 4px;
     margin-bottom: 2px;
-    border-radius: 3px;
+    border-radius: 6px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    color: white; /* Make text white so it stands out on the color */
+    color: var(--text); /* Darker text for readability on transparent background */
+    font-weight: 500;
 }
 
-.calendar-event.pink { background-color: #ff4b91; border-left: 3px solid #d4145a; }
-.calendar-event.amber { background-color: #ffb100; border-left: 3px solid #c68a00; }
-.calendar-event.teal { background-color: #00d7c0; border-left: 3px solid #00a190; }
-.calendar-event.blue { background-color: #00a3ff; border-left: 3px solid #0077bb; }
-.calendar-event.reminder { background-color: #a855f7; border-left: 3px solid #7e22ce; } /* Purple for reminders */
+.calendar-event.pink { background-color: rgba(255, 75, 145, 0.15); border-left: 3px solid #d4145a; }
+.calendar-event.amber { background-color: rgba(255, 177, 0, 0.15); border-left: 3px solid #c68a00; }
+.calendar-event.teal { background-color: rgba(0, 215, 192, 0.15); border-left: 3px solid #00a190; }
+.calendar-event.blue { background-color: rgba(0, 163, 255, 0.15); border-left: 3px solid #0077bb; }
+.calendar-event.reminder { background-color: rgba(168, 85, 247, 0.15); border-left: 3px solid #7e22ce; } /* Purple for reminders */
 
 
 /* ==========================================================================
@@ -662,8 +718,11 @@ input:checked + .slider:before { transform: translateX(26px); }
         <div style="background:var(--panel-bg); padding:20px; border-radius:26px; width:90%; max-width:600px; max-height:90vh; overflow-y:auto; position:relative;">
             <button onclick="closeExpandedDayView()" style="position:absolute; top:15px; right:15px; background:none; border:none; font-size:24px; cursor:pointer; color:var(--muted);">✕</button>
             <h3 id="expandedDayTitle" style="color:var(--text); margin-top:0; margin-bottom:20px;"></h3>
-            <div id="hourlySlotsContainer">
-                <!-- Hourly slots will be rendered here -->
+            <div id="allDayContainer"></div>
+            <div id="dayViewScrollContainer">
+                <div id="hourlySlotsContainer">
+                    <!-- Hourly slots will be rendered here -->
+                </div>
             </div>
         </div>
     </div>
@@ -688,6 +747,32 @@ const taskPriorityPreview = document.getElementById('taskPriorityPreview');
 const taskDuePreview = document.getElementById('taskDuePreview');
 const taskConfidence = document.getElementById('taskConfidence');
 const taskDescPreview = document.getElementById('taskDescPreview');
+
+// Helper to parse dates as "Wall Time" (ignoring UTC shift)
+const parseWallTime = (isoStr) => {
+    if (!isoStr) return null;
+    // Remove 'Z' or any timezone offset if present to treat as local wall time
+    const cleanedIsoStr = isoStr.replace(/Z$|[+-]\d{2}:\d{2}$/, '');
+    
+    // Extract components manually for local construction
+    const parts = cleanedIsoStr.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+    if (parts) {
+        return new Date(
+            parseInt(parts[1], 10),      // year
+            parseInt(parts[2], 10) - 1,  // month (0-indexed)
+            parseInt(parts[3], 10),      // day
+            parseInt(parts[4], 10),      // hours
+            parseInt(parts[5], 10),      // minutes
+            parseInt(parts[6], 10)       // seconds
+        );
+    }
+    // Fallback for YYYY-MM-DD
+    if (cleanedIsoStr.length === 10) {
+        const [y, m, d] = cleanedIsoStr.split('-').map(Number);
+        return new Date(y, m - 1, d);
+    }
+    return new Date(cleanedIsoStr);
+};
 
 //global user variable 
 window.CURRENT_USER_ID = null;
@@ -854,13 +939,14 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
 
         // Format the date for the datetime-local input (YYYY-MM-DDTHH:MM)
         let displayDate = "";
-        if (task.due_date) {
-            try {
-                const d = new Date(task.due_date);
-                if (!isNaN(d.getTime())) {
-                    displayDate = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
-                }
-            } catch(e) {}
+        const dateObj = parseWallTime(task.due_date);
+        if (dateObj) {
+            const y = dateObj.getFullYear();
+            const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const d = String(dateObj.getDate()).padStart(2, '0');
+            const hh = String(dateObj.getHours()).padStart(2, '0');
+            const mm = String(dateObj.getMinutes()).padStart(2, '0');
+            displayDate = `${y}-${m}-${d}T${hh}:${mm}`;
         }
 
         let actionButtonsHtml = '';
@@ -886,7 +972,14 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
             `;
         }
 
+        // Calculate Wall Time for display
+        const startDt = parseWallTime(task.due_date);
+        const timeStr = (startDt && task.due_date.includes('T')) 
+            ? startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+            : "";
+
         item.innerHTML = `
+              <div class="time">${timeStr}</div>
               <div class="task-main ${colorClass}" style="flex-grow: 1;">
                 <div style="font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--muted); margin-bottom: 2px;">
                     ${itemType === 'reminder' ? '🔔 Reminder' : '📋 Task'}
@@ -1213,52 +1306,137 @@ function expandDayView(dateStr, allTasksForMonth) {
     const modal = document.getElementById('expandedDayModal');
     const title = document.getElementById('expandedDayTitle');
     const hourlyContainer = document.getElementById('hourlySlotsContainer');
+    const allDayContainer = document.getElementById('allDayContainer');
 
-    title.textContent = `Events for ${new Date(dateStr).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`;
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const targetDate = new Date(year, month - 1, day);
+    
+    title.textContent = `Schedule for ${targetDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`;
     hourlyContainer.innerHTML = ''; // Clear previous content
+    allDayContainer.innerHTML = '';
+
+    // Create All-Day Section for untimed tasks
+    const allDaySection = document.createElement('div');
+    allDaySection.className = 'all-day-section';
+    allDaySection.innerHTML = '<h4 style="margin:0 0 10px 0; font-size:12px; color:var(--muted); text-transform:uppercase;">All Day / Untimed</h4>';
+    const allDayList = document.createElement('div');
+    allDayList.style.display = 'flex';
+    allDayList.style.flexDirection = 'column';
+    allDayList.style.gap = '5px';
+    allDaySection.appendChild(allDayList);
 
     const dayEvents = allTasksForMonth.filter(t => {
-        const start = t.due_date ? new Date(t.due_date) : null;
-        const end = t.end_date ? new Date(t.end_date) : null;
-        const targetDate = new Date(dateStr);
+        if (!t.due_date) return false;
+        const start = parseWallTime(t.due_date);
+        const startsOnDay = start.getFullYear() === year && 
+                            start.getMonth() === (month - 1) && 
+                            start.getDate() === day;
         
-        if (!start || isNaN(start.getTime())) return false;
-        
-        // Starts on this day
-        if (start.toDateString() === targetDate.toDateString()) return true;
-        
-        // Spans across this day
-        if (end && !isNaN(end.getTime()) && start < targetDate && end >= targetDate) return true;
-        
+        if (startsOnDay) return true;
+        if (t.end_date) {
+            const end = parseWallTime(t.end_date);
+            const startOfDay = new Date(year, month - 1, day, 0, 0, 0);
+            const endOfDay = new Date(year, month - 1, day, 23, 59, 59);
+            return (start <= endOfDay && end >= startOfDay);
+        }
         return false;
     });
 
-    // Group events by hour
-    const hourlyGroupedEvents = {};
+    // Render Background Hour Markers
     for (let i = 0; i < 24; i++) {
-        hourlyGroupedEvents[i] = [];
+        const marker = document.createElement('div');
+        marker.className = 'hour-marker';
+        marker.style.top = `${i * 50}px`;
+        
+        const ampm = i >= 12 ? 'PM' : 'AM';
+        const displayHour = i % 12 || 12;
+        marker.innerHTML = `<div class="hour-label">${displayHour}:00 ${ampm}</div>`;
+        hourlyContainer.appendChild(marker);
     }
 
+    // 2. Render Events onto the grid
+   const timedEvents = [];
     const untimedEvents = [];
 
     dayEvents.forEach(event => {
-        const dueDate = event.due_date ? new Date(event.due_date) : null;
-        if (dueDate && !isNaN(dueDate.getTime())) {
-            const hour = dueDate.getHours();
-            hourlyGroupedEvents[hour].push(event);
-        } else {
-            untimedEvents.push(event); // Events without a specific time
-        }
+        const start = parseWallTime(event.due_date);
+        const isUntimed = start.getHours() === 0 && start.getMinutes() === 0 && start.getSeconds() === 0;
+
+        if (isUntimed) untimedEvents.push(event);
+        else timedEvents.push(event);
     });
 
-    // Render untimed events first
+    // Sort timed events by start time
+    timedEvents.sort((a, b) => parseWallTime(a.due_date) - parseWallTime(b.due_date));
+
+    // Improved clustering: Group transitively overlapping events into blocks
+    const eventGroups = [];
+    if (timedEvents.length > 0) {
+        let currentGroup = [timedEvents[0]];
+        let groupMaxEnd = parseWallTime(timedEvents[0].due_date).getTime() + 
+                         (timedEvents[0].end_date ? (parseWallTime(timedEvents[0].end_date) - parseWallTime(timedEvents[0].due_date)) : 3600000);
+
+        for (let i = 1; i < timedEvents.length; i++) {
+            const ev = timedEvents[i];
+            const start = parseWallTime(ev.due_date).getTime();
+            const end = ev.end_date ? parseWallTime(ev.end_date).getTime() : start + 3600000;
+
+            if (start < groupMaxEnd) {
+                currentGroup.push(ev);
+                groupMaxEnd = Math.max(groupMaxEnd, end);
+            } else {
+                eventGroups.push(currentGroup);
+                currentGroup = [ev];
+                groupMaxEnd = end;
+            }
+        }
+        eventGroups.push(currentGroup);
+    }
+
+    // Render Untimed (All Day)
     if (untimedEvents.length > 0) {
-        const untimedSlot = document.createElement('div');
-        untimedSlot.className = 'hourly-slot';
-        untimedSlot.innerHTML = `<div class="hourly-time">Untimed</div><div class="hourly-events"></div>`;
-        const eventsDiv = untimedSlot.querySelector('.hourly-events');
         untimedEvents.forEach(event => {
-            const eventEl = document.createElement('div');
+            const itemType = String(event.item_type || 'task').toLowerCase();
+            const priority = String(event.priority || 'normal').toLowerCase();
+            let colorClass = 'blue';
+            if (itemType === 'reminder') colorClass = 'reminder';
+            else if (priority === 'high') colorClass = 'pink';
+            else if (priority === 'medium') colorClass = 'amber';
+            else if (priority === 'low') colorClass = 'teal';
+            
+            const untimedEl = document.createElement('div');
+            untimedEl.className = `hourly-event ${colorClass}`;
+            untimedEl.style.position = 'static';
+            untimedEl.style.marginBottom = '5px';
+            untimedEl.innerHTML = `<strong>${itemType === 'reminder' ? '🔔' : '📋'}</strong> ${event.title}`;
+            allDayList.appendChild(untimedEl);
+        });
+        allDayContainer.appendChild(allDaySection);
+    }
+
+    // Render Timed Events side-by-side
+    eventGroups.forEach(group => {
+        let columns = []; // Track end times for each column to packing
+        const groupWithCols =[];
+
+        //first pass: assign columns to each event in the overlapping group
+        group.forEach((event) => {
+            const start = parseWallTime(event.due_date);
+            const end = event.end_date ? parseWallTime(event.end_date) : new Date(start.getTime() + 3600000);
+            
+            let colIdx = columns.findIndex(colEnd => colEnd <= start);
+            if (colIdx === -1) {
+                columns.push(end);
+                colIdx = columns.length - 1;
+            } else {
+                columns[colIdx] = end;
+            }
+            groupWithCols.push({ event, colIdx, start, end });
+        });
+
+        //Second pass: render with consistent widths based on total columns 
+        const totalCols = columns.length;
+        groupWithCols.forEach(({ event, colIdx, start, end }) => {
             const priority = String(event.priority || 'normal').toLowerCase();
             const itemType = String(event.item_type || 'task').toLowerCase();
             let colorClass = 'blue';
@@ -1266,38 +1444,36 @@ function expandDayView(dateStr, allTasksForMonth) {
             else if (priority === 'high') colorClass = 'pink';
             else if (priority === 'medium') colorClass = 'amber';
             else if (priority === 'low') colorClass = 'teal';
-            eventEl.className = `hourly-event ${colorClass}`;
-            eventEl.textContent = event.title;
-            eventsDiv.appendChild(eventEl);
-        });
-        hourlyContainer.appendChild(untimedSlot);
-    }
 
-    // Render hourly events
-    for (let i = 0; i < 24; i++) {
-        const slot = document.createElement('div');
-        slot.className = 'hourly-slot';
-        const hourText = `${String(i).padStart(2, '0')}:00`;
-        slot.innerHTML = `<div class="hourly-time">${hourText}</div><div class="hourly-events"></div>`;
-        
-        const eventsDiv = slot.querySelector('.hourly-events');
-        hourlyGroupedEvents[i].forEach(event => {
+            const dayStart = new Date(year, month - 1, day, 0, 0, 0);
+            const startMinutes = (start - dayStart) / 60000;
+            const endMinutes = (end - dayStart) / 60000;
+
+            const top = Math.max(0, startMinutes * (50/60));
+            const bottom = Math.min(1440 * (50/60), endMinutes * (50/60));
+            const height = Math.max(25, bottom - top);
+
             const eventEl = document.createElement('div');
-            const priority = String(event.priority || 'normal').toLowerCase();
-            const itemType = String(event.item_type || 'task').toLowerCase();
-            let colorClass = 'blue';
-            if (itemType === 'reminder') colorClass = 'reminder';
-            else if (priority === 'high') colorClass = 'pink';
-            else if (priority === 'medium') colorClass = 'amber';
-            else if (priority === 'low') colorClass = 'teal';
             eventEl.className = `hourly-event ${colorClass}`;
-            eventEl.textContent = event.title;
-            eventsDiv.appendChild(eventEl);
-        });
-        hourlyContainer.appendChild(slot);
-    }
+            eventEl.style.top = `${top}px`;
+            eventEl.style.height = `${height}px`;
+            
+            // Calculate horizontal position with a small 2px gap between side-by-side items
+            const availableWidth = "calc(100% - 95px)";
+            const columnWidth = `calc((${availableWidth} / ${totalCols}))`;
+            
+            eventEl.style.width = `calc(${columnWidth} - 10px)`;
+            eventEl.style.left = `calc(85px + (${colIdx} * (${availableWidth} / ${totalCols})))`;
 
-    modal.style.display = 'flex'; // Show the modal
+            eventEl.innerHTML = `
+                <span style="font-weight:800; font-size:10px;">${start.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                <span style="font-weight:700;">${event.title}</span>
+            `;
+            hourlyContainer.appendChild(eventEl);
+        });
+    });
+
+modal.style.display = 'flex'; // Show the modal
 }
 
 function closeExpandedDayView() {
@@ -1435,11 +1611,9 @@ async function updateTaskDate(id, newDate) {
 async function handleDateChange(taskId, newFullDate) {
     if (!newFullDate) return;
 
-    // Convert the input value to the ISO format your backend prefers
-    const formattedDate = new Date(newFullDate).toISOString();
-
     try {
-        await updateTaskDate(taskId, formattedDate);
+        // Send the raw local string (YYYY-MM-DDTHH:MM) to avoid UTC shift
+        await updateTaskDate(taskId, newFullDate);
         console.log(`Task ${taskId} updated to ${newFullDate}`);
         
         // Optional: Provide visual feedback that it saved
@@ -1616,6 +1790,12 @@ processBtn.addEventListener('click', async () => {
     processBtn.innerText = "Processing...";
     processBtn.disabled = true;
 
+    // Capture local time for AI context
+    const now = new Date();
+    const offset = now.getTimezoneOffset() * 60000;
+    const localISOTime = new Date(now.getTime() - offset).toISOString().slice(0, 19);
+    const localTimeString = `${localISOTime} (Local Time)`;
+
     try {
         let response;
         
@@ -1624,6 +1804,7 @@ processBtn.addEventListener('click', async () => {
             const formData = new FormData();
             formData.append("file", fileInput.files[0]);
             formData.append("user_id", userId);
+            formData.append("local_time", localTimeString);
 
             response = await fetch('http://127.0.0.1:8000/ingest-doc', {
                 method: 'POST',
@@ -1635,7 +1816,11 @@ processBtn.addEventListener('click', async () => {
             response = await fetch('http://127.0.0.1:8000/ingest', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: text, user_id: userId })
+                body: JSON.stringify({ 
+                    content: text, 
+                    user_id: userId,
+                    local_time: localTimeString
+                })
             });
         } else {
             alert("Please enter text or select a file.");

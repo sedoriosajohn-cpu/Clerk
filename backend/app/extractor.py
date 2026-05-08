@@ -14,7 +14,7 @@ client = OpenAI(api_key=api_key)
 def build_prompt(user_input: str, current_time: str) -> str:
     return f"""
     You are the core extraction engine for 'Clerk', an AI task manager.
-    Current UTC Timestamp: {current_time}
+    Current Local Timestamp: {current_time}
     
     TASK:
     Extract EVERY actionable task, reminder, assignment, or deadline from the provided text.
@@ -81,12 +81,13 @@ def extract_json(text: str) -> list:
             return [json.loads(obj_match.group(0))]
         raise ValueError("Failed to parse AI response as JSON")
 
-def extract_task_from_text(text: str) -> list:
+def extract_task_from_text(text: str, current_time: Optional[str] = None) -> list:
     if not text or not text.strip():
         return []
 
     try:
-        now_iso = datetime.now(timezone.utc).isoformat()
+        # Use provided local time or fallback to server UTC
+        now_iso = current_time if current_time else datetime.now(timezone.utc).isoformat()
         prompt = build_prompt(text, now_iso)
 
         response = client.chat.completions.create(
@@ -163,8 +164,9 @@ def format_for_frontend(task: Dict[str, Any]) -> Dict[str, Any]:
     due_dt = None
     if task.get("due_date"):
         try:
-            # Handle 'Z' or offset formats
-            clean_date = task["due_date"].replace('Z', '+00:00')
+            # Strip 'Z' or offsets to treat as "Wall Time" (local naive datetime)
+            # This ensures the backend-generated time string matches the extracted wall time
+            clean_date = re.sub(r'Z$|[+-]\d{2}:\d{2}$', '', task["due_date"])
             due_dt = datetime.fromisoformat(clean_date)
         except:
             pass

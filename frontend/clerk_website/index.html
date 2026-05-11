@@ -287,23 +287,18 @@ body {
     color: white;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     overflow: hidden;
+    opacity: 1; /* Slightly transparent */
     border-left: 4px solid rgba(0,0,0,0.2);
     display: flex;
     flex-direction: column;
 }
 
 /* Priority Colors for Hourly View */
-.hourly-event.pink { background-color: #ff4b91 !important; }
-.hourly-event.amber { background-color: #ffb100 !important; }
-.hourly-event.teal { background-color: #00d7c0 !important; }
-.hourly-event.blue { background-color: #00a3ff !important; }
-.hourly-event.reminder { background-color: #a855f7 !important; }
-
-.all-day-section {
-    padding: 15px;
-    background: rgba(127, 152, 165, 0.05);
-    border-bottom: 2px dashed var(--border);
-}
+.hourly-event.pink { background-color: #ff4b91; }
+.hourly-event.amber { background-color: #ffb100; }
+.hourly-event.teal { background-color: #00d7c0; }
+.hourly-event.blue { background-color: #00a3ff; }
+.hourly-event.reminder { background-color: #a855f7; }
 
 /* ==========================================================================
    5. COMPOSER & INPUTS
@@ -460,17 +455,40 @@ button {
     margin-bottom: 2px;
     border-radius: 6px;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     color: var(--text); /* Darker text for readability on transparent background */
     font-weight: 500;
+    position: relative;
+    height: 1.3rem;
+    line-height: 1rem;
+    z-index: 1;
 }
 
-.calendar-event.pink { background-color: rgba(255, 75, 145, 0.15); border-left: 3px solid #d4145a; }
-.calendar-event.amber { background-color: rgba(255, 177, 0, 0.15); border-left: 3px solid #c68a00; }
-.calendar-event.teal { background-color: rgba(0, 215, 192, 0.15); border-left: 3px solid #00a190; }
-.calendar-event.blue { background-color: rgba(0, 163, 255, 0.15); border-left: 3px solid #0077bb; }
-.calendar-event.reminder { background-color: rgba(168, 85, 247, 0.15); border-left: 3px solid #7e22ce; } /* Purple for reminders */
+.calendar-event.span-start { 
+    border-top-right-radius: 0; border-bottom-right-radius: 0; 
+    margin-right: -11px; width: calc(100% + 11px); 
+    overflow: hidden; text-overflow: ellipsis;
+}
+.calendar-event.span-mid { 
+    border-radius: 0; border-left: none !important; 
+    margin-left: -11px; margin-right: -11px; width: calc(100% + 22px); 
+    color: transparent; /* Hide text in middle segments to avoid clutter */
+}
+.calendar-event.span-end { 
+    border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: none !important; 
+    margin-left: -11px; width: calc(100% + 11px); 
+    color: transparent;
+}
+
+.calendar-spacer {
+    height: 1.3rem;
+    margin-bottom: 2px;
+}
+
+.calendar-event.pink { background-color: rgba(255, 75, 145, 0.25); border-left: 3px solid #d4145a; }
+.calendar-event.amber { background-color: rgba(255, 177, 0, 0.25); border-left: 3px solid #c68a00; }
+.calendar-event.teal { background-color: rgba(0, 215, 192, 0.25); border-left: 3px solid #00a190; }
+.calendar-event.blue { background-color: rgba(0, 163, 255, 0.25); border-left: 3px solid #0077bb; }
+.calendar-event.reminder { background-color: rgba(168, 85, 247, 0.25); border-left: 3px solid #7e22ce; }/* Purple for reminders */
 
 
 /* ==========================================================================
@@ -718,7 +736,6 @@ input:checked + .slider:before { transform: translateX(26px); }
         <div style="background:var(--panel-bg); padding:20px; border-radius:26px; width:90%; max-width:600px; max-height:90vh; overflow-y:auto; position:relative;">
             <button onclick="closeExpandedDayView()" style="position:absolute; top:15px; right:15px; background:none; border:none; font-size:24px; cursor:pointer; color:var(--muted);">✕</button>
             <h3 id="expandedDayTitle" style="color:var(--text); margin-top:0; margin-bottom:20px;"></h3>
-            <div id="allDayContainer"></div>
             <div id="dayViewScrollContainer">
                 <div id="hourlySlotsContainer">
                     <!-- Hourly slots will be rendered here -->
@@ -937,16 +954,20 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
         else if (priority === 'low') colorClass = 'teal';
         else if (priority === 'medium') colorClass = 'amber';
 
-        // Format the date for the datetime-local input (YYYY-MM-DDTHH:MM)
+         // Format the date for the input (date or datetime-local)
         let displayDate = "";
         const dateObj = parseWallTime(task.due_date);
         if (dateObj) {
             const y = dateObj.getFullYear();
             const m = String(dateObj.getMonth() + 1).padStart(2, '0');
             const d = String(dateObj.getDate()).padStart(2, '0');
-            const hh = String(dateObj.getHours()).padStart(2, '0');
-            const mm = String(dateObj.getMinutes()).padStart(2, '0');
-            displayDate = `${y}-${m}-${d}T${hh}:${mm}`;
+           if (task.is_all_day) {
+                displayDate = `${y}-${m}-${d}`;
+            } else {
+                const hh = String(dateObj.getHours()).padStart(2, '0');
+                const mm = String(dateObj.getMinutes()).padStart(2, '0');
+                displayDate = `${y}-${m}-${d}T${hh}:${mm}`;
+            }
         }
 
         let actionButtonsHtml = '';
@@ -958,10 +979,16 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
                 <button class="done-btn delete" onclick="dismissTask(${task.task_id})" title="Dismiss">✕</button>
             `;
             datePickerHtml = `
-                <div class="edit-due" style="margin-top: 10px; display: ${currentView === 'my tasks' ? 'flex' : 'none'}; align-items: center; gap: 10px;">
-                    <span style="font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;">Set Due:</span>
-                    <input type="datetime-local" value="${displayDate}" onchange="handleDateChange(${task.task_id}, this.value)" 
-                           style="border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; font-size: 12px; background: rgba(255,255,255,0.4); color: var(--text); outline: none;">
+                 <div class="edit-due" style="margin-top: 10px; display: ${currentView === 'my tasks' ? 'flex' : 'none'}; align-items: center; gap: 15px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;">Set Due:</span>
+                        <input type="${task.is_all_day ? 'date' : 'datetime-local'}" value="${displayDate}" onchange="handleDateChange(${task.task_id}, this.value)" 
+                               style="border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; font-size: 12px; background: rgba(255,255,255,0.4); color: var(--text); outline: none;">
+                    </div>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--muted); font-weight: 600;">
+                        <input type="checkbox" ${task.is_all_day ? 'checked' : ''} onchange="handleAllDayToggle(${task.task_id}, this.checked)" style="cursor: pointer;">
+                        <span>All Day</span>
+                    </label>
                 </div>
             `;
         } else {
@@ -974,7 +1001,7 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
 
         // Calculate Wall Time for display
         const startDt = parseWallTime(task.due_date);
-        const timeStr = (startDt && task.due_date.includes('T')) 
+        const timeStr = task.is_all_day ? "All Day" : (startDt && task.due_date.includes('T')) 
             ? startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
             : "";
 
@@ -1162,13 +1189,17 @@ async function loadView(view) {
         if (view === 'agenda') {
             titleHeader.textContent = "Today's Agenda";
             
-            // FIXED: Use local date to match your computer's clock
-            const todayStr = new Date().toLocaleDateString('en-CA'); 
+            const todayStart = new Date();
+            todayStart.setHours(0,0,0,0);
+            const todayEnd = new Date();
+            todayEnd.setHours(23,59,59,999);
             
             const todayTasks = allTasks.filter(t => {
                 if (t.item_type === 'reminder') return false; // Hide reminders from main agenda
-                const taskDate = (t.due_date || t.due || '').split('T')[0];
-                return taskDate === todayStr;
+                const start = parseWallTime(t.due_date);
+                if (!start) return false;
+                const end = t.end_date ? parseWallTime(t.end_date) : start;
+                return (start <= todayEnd && end >= todayStart);
             });
             renderTaskList(todayTasks, 'agendaList', false);
         }
@@ -1236,6 +1267,44 @@ function renderBigCalendar(month, year, allTasks = []) {
 
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    // --- Lane Alignment Logic ---
+    const lanesByDate = {}; // Maps "YYYY-MM-DD" -> array of task objects
+    
+    // Sort: Multi-day tasks first, then by earliest start
+    const sortedTasks = [...allTasks].sort((a, b) => {
+        const startA = parseWallTime(a.due_date);
+        const endA = a.end_date ? parseWallTime(a.end_date) : startA;
+        const startB = parseWallTime(b.due_date);
+        const endB = b.end_date ? parseWallTime(b.end_date) : startB;
+        return (endB - startB) - (endA - startA) || startA - startB;
+    });
+
+
+    sortedTasks.forEach(task => {
+        const start = parseWallTime(task.due_date);
+        const end = task.end_date ? parseWallTime(task.end_date) : start;
+        
+        // Find dates in range
+        let d = new Date(start); d.setHours(0,0,0,0);
+        const stop = new Date(end); stop.setHours(0,0,0,0);
+        const datesInRange = [];
+        while(d <= stop) { datesInRange.push(d.toLocaleDateString('en-CA')); d.setDate(d.getDate()+1); }
+
+        // Find lowest available lane across all dates in the span
+        let lane = 0;
+        while (true) {
+            let conflict = datesInRange.some(date => lanesByDate[date] && lanesByDate[date][lane]);
+            if (!conflict) break;
+            lane++;
+        }
+
+        // Assign task to that lane for those dates
+        datesInRange.forEach(date => {
+            if (!lanesByDate[date]) lanesByDate[date] = [];
+            lanesByDate[date][lane] = task;
+        });
+    });
 
     // Padding for empty days at start of month
     for (let i = 0; i < firstDay; i++) grid.appendChild(document.createElement('div'));
@@ -1264,11 +1333,18 @@ function renderBigCalendar(month, year, allTasks = []) {
         // 5. Filter and Render Tasks
         // The allTasks array passed to renderBigCalendar is already filtered for active tasks/reminders
         // So, we just need to filter by date here.
-        const dayTasks = allTasks
-            .filter(t => (t.due_date || t.due || '').startsWith(dateStr))
-            .sort((a, b) => new Date(a.due_date) - new Date(b.due_date)); // Sort by time
+        const dayStart = new Date(year, month, day, 0, 0, 0);
+        const dayEnd = new Date(year, month, day, 23, 59, 59);
+        // Render Tasks from lanes
+        const dayLanes = lanesByDate[dateStr] || [];
+        dayLanes.forEach((task, index) => {
+            if (!task) {
+                const spacer = document.createElement('div');
+                spacer.className = 'calendar-spacer';
+                daySquare.appendChild(spacer);
+                return;
+            }
 
-        dayTasks.forEach(task => {
             const taskEl = document.createElement('div');
             
             // Priority Color Logic
@@ -1279,51 +1355,40 @@ function renderBigCalendar(month, year, allTasks = []) {
             else if (priority === 'high') colorClass = 'pink';
             else if (priority === 'medium') colorClass = 'amber';
             else if (priority === 'low') colorClass = 'teal';
-
-            // Apply classes and make it draggable
-            taskEl.className = `calendar-event ${colorClass}`;
+            
+            // Spanning Logic
+            const taskStart = parseWallTime(task.due_date);
+            const taskEnd = task.end_date ? parseWallTime(task.end_date) : taskStart;
+            const taskStartStr = taskStart.toLocaleDateString('en-CA');
+            const taskEndStr = taskEnd.toLocaleDateString('en-CA');
+            
+            let spanClass = "";
+            if (taskStartStr !== taskEndStr) {
+                if (dateStr === taskStartStr) spanClass = "span-start";
+                else if (dateStr === taskEndStr) spanClass = "span-end";
+                else spanClass = "span-mid";
+            }
+            taskEl.className = `calendar-event ${colorClass} ${spanClass}`;
             taskEl.textContent = task.title;
             taskEl.draggable = true; 
-            
-            // Set data for dragging
-            taskEl.addEventListener('dragstart', (e) => {
-                e.dataTransfer.setData('text/plain', task.task_id);
-            });
-
-            // Add click listener to open expanded day view
-            // This is handled by the daySquare click listener now
-            // taskEl.addEventListener('click', (e) => { e.stopPropagation(); expandDayView(dateStr, allTasks); });
             
             daySquare.appendChild(taskEl);
         });
 
         grid.appendChild(daySquare);
     }
-}
+    }
 
 // New function to expand a day and show hourly events
 function expandDayView(dateStr, allTasksForMonth) {
     const modal = document.getElementById('expandedDayModal');
     const title = document.getElementById('expandedDayTitle');
     const hourlyContainer = document.getElementById('hourlySlotsContainer');
-    const allDayContainer = document.getElementById('allDayContainer');
-
     const [year, month, day] = dateStr.split('-').map(Number);
     const targetDate = new Date(year, month - 1, day);
     
     title.textContent = `Schedule for ${targetDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`;
     hourlyContainer.innerHTML = ''; // Clear previous content
-    allDayContainer.innerHTML = '';
-
-    // Create All-Day Section for untimed tasks
-    const allDaySection = document.createElement('div');
-    allDaySection.className = 'all-day-section';
-    allDaySection.innerHTML = '<h4 style="margin:0 0 10px 0; font-size:12px; color:var(--muted); text-transform:uppercase;">All Day / Untimed</h4>';
-    const allDayList = document.createElement('div');
-    allDayList.style.display = 'flex';
-    allDayList.style.flexDirection = 'column';
-    allDayList.style.gap = '5px';
-    allDaySection.appendChild(allDayList);
 
     const dayEvents = allTasksForMonth.filter(t => {
         if (!t.due_date) return false;
@@ -1354,32 +1419,41 @@ function expandDayView(dateStr, allTasksForMonth) {
         hourlyContainer.appendChild(marker);
     }
 
-    // 2. Render Events onto the grid
-   const timedEvents = [];
-    const untimedEvents = [];
+    const dayStartBoundary = new Date(year, month - 1, day, 0, 0, 0);
+    const dayEndBoundary = new Date(year, month - 1, day, 23, 59, 59);
 
-    dayEvents.forEach(event => {
-        const start = parseWallTime(event.due_date);
-        const isUntimed = start.getHours() === 0 && start.getMinutes() === 0 && start.getSeconds() === 0;
+    // Prepare events for rendering, treating all-day and multi-day spans appropriately
+    const processedEvents = dayEvents.map(event => {
+        let start = parseWallTime(event.due_date);
+        let end = event.end_date ? parseWallTime(event.end_date) : null;
+        
+        const isImplicitAllDay = start && start.getHours() === 0 && start.getMinutes() === 0 && start.getSeconds() === 0 && !event.end_date;
+        const isSpanningEntireDay = start < dayStartBoundary && end && end >= dayEndBoundary;
 
-        if (isUntimed) untimedEvents.push(event);
-        else timedEvents.push(event);
+        if (event.is_all_day || isImplicitAllDay || isSpanningEntireDay) {
+            start = dayStartBoundary;
+            end = dayEndBoundary;
+        } else {
+            if (start < dayStartBoundary) start = dayStartBoundary;
+            if (end && end > dayEndBoundary) end = dayEndBoundary;
+            if (!end) end = new Date(start.getTime() + 3600000);
+        }
+        return { ...event, _start: start, _end: end };
     });
 
-    // Sort timed events by start time
-    timedEvents.sort((a, b) => parseWallTime(a.due_date) - parseWallTime(b.due_date));
+    // Sort processed events by start time
+    processedEvents.sort((a, b) => a._start - b._start);
 
-    // Improved clustering: Group transitively overlapping events into blocks
+    // Improved clustering: Group transitively overlapping events into blocks for column layout
     const eventGroups = [];
-    if (timedEvents.length > 0) {
-        let currentGroup = [timedEvents[0]];
-        let groupMaxEnd = parseWallTime(timedEvents[0].due_date).getTime() + 
-                         (timedEvents[0].end_date ? (parseWallTime(timedEvents[0].end_date) - parseWallTime(timedEvents[0].due_date)) : 3600000);
+    if (processedEvents.length > 0) {
+        let currentGroup = [processedEvents[0]];
+        let groupMaxEnd = currentGroup[0]._end.getTime();
 
-        for (let i = 1; i < timedEvents.length; i++) {
-            const ev = timedEvents[i];
-            const start = parseWallTime(ev.due_date).getTime();
-            const end = ev.end_date ? parseWallTime(ev.end_date).getTime() : start + 3600000;
+        for (let i = 1; i < processedEvents.length; i++) {
+            const ev = processedEvents[i];
+            const start = ev._start.getTime();
+            const end = ev._end.getTime();
 
             if (start < groupMaxEnd) {
                 currentGroup.push(ev);
@@ -1393,27 +1467,6 @@ function expandDayView(dateStr, allTasksForMonth) {
         eventGroups.push(currentGroup);
     }
 
-    // Render Untimed (All Day)
-    if (untimedEvents.length > 0) {
-        untimedEvents.forEach(event => {
-            const itemType = String(event.item_type || 'task').toLowerCase();
-            const priority = String(event.priority || 'normal').toLowerCase();
-            let colorClass = 'blue';
-            if (itemType === 'reminder') colorClass = 'reminder';
-            else if (priority === 'high') colorClass = 'pink';
-            else if (priority === 'medium') colorClass = 'amber';
-            else if (priority === 'low') colorClass = 'teal';
-            
-            const untimedEl = document.createElement('div');
-            untimedEl.className = `hourly-event ${colorClass}`;
-            untimedEl.style.position = 'static';
-            untimedEl.style.marginBottom = '5px';
-            untimedEl.innerHTML = `<strong>${itemType === 'reminder' ? '🔔' : '📋'}</strong> ${event.title}`;
-            allDayList.appendChild(untimedEl);
-        });
-        allDayContainer.appendChild(allDaySection);
-    }
-
     // Render Timed Events side-by-side
     eventGroups.forEach(group => {
         let columns = []; // Track end times for each column to packing
@@ -1421,8 +1474,8 @@ function expandDayView(dateStr, allTasksForMonth) {
 
         //first pass: assign columns to each event in the overlapping group
         group.forEach((event) => {
-            const start = parseWallTime(event.due_date);
-            const end = event.end_date ? parseWallTime(event.end_date) : new Date(start.getTime() + 3600000);
+            const start = event._start;
+            const end = event._end;
             
             let colIdx = columns.findIndex(colEnd => colEnd <= start);
             if (colIdx === -1) {
@@ -1445,9 +1498,9 @@ function expandDayView(dateStr, allTasksForMonth) {
             else if (priority === 'medium') colorClass = 'amber';
             else if (priority === 'low') colorClass = 'teal';
 
-            const dayStart = new Date(year, month - 1, day, 0, 0, 0);
-            const startMinutes = (start - dayStart) / 60000;
-            const endMinutes = (end - dayStart) / 60000;
+            const dayStartMs = new Date(year, month - 1, day, 0, 0, 0).getTime();
+            const startMinutes = (start.getTime() - dayStartMs) / 60000;
+            const endMinutes = (end.getTime() - dayStartMs) / 60000;
 
             const top = Math.max(0, startMinutes * (50/60));
             const bottom = Math.min(1440 * (50/60), endMinutes * (50/60));
@@ -1458,12 +1511,13 @@ function expandDayView(dateStr, allTasksForMonth) {
             eventEl.style.top = `${top}px`;
             eventEl.style.height = `${height}px`;
             
-            // Calculate horizontal position with a small 2px gap between side-by-side items
-            const availableWidth = "calc(100% - 95px)";
-            const columnWidth = `calc((${availableWidth} / ${totalCols}))`;
-            
-            eventEl.style.width = `calc(${columnWidth} - 10px)`;
-            eventEl.style.left = `calc(85px + (${colIdx} * (${availableWidth} / ${totalCols})))`;
+            // Adjust width and left position for fixed-width columns
+            const leftOffset = 85; // Space for hour labels
+            const eventBlockWidth = 200; // Fixed width for each event block
+            const columnGap = 5; // Gap between columns
+
+            eventEl.style.left = `${leftOffset + (colIdx * (eventBlockWidth + columnGap))}px`;
+            eventEl.style.width = `${eventBlockWidth}px`;
 
             eventEl.innerHTML = `
                 <span style="font-weight:800; font-size:10px;">${start.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
@@ -1620,6 +1674,24 @@ async function handleDateChange(taskId, newFullDate) {
         // showToast("Date updated!"); 
     } catch (error) {
         alert("Failed to save new date. Please try again.");
+    }
+}
+
+async function handleAllDayToggle(taskId, isChecked) {
+    try {
+        const response = await fetch(`http://127.0.0.1:8000/tasks/${taskId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_all_day: isChecked })
+        });
+
+        if (!response.ok) throw new Error("Update failed");
+        
+        // Refresh current view to update the "All Day" label in the task list
+        loadView(currentView);
+    } catch (err) {
+        console.error("Failed to toggle All Day:", err);
+        alert("Failed to update task.");
     }
 }
 

@@ -51,6 +51,7 @@ class Task(Base):
     assignee = Column(String, default="me")
     item_type = Column(String, default="task") # 'task' or 'reminder'
     priority = Column(String, default="normal")
+    is_all_day = Column(Integer, default=0)
     confidence = Column(Float)
     status = Column(String, default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)

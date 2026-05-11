@@ -44,6 +44,7 @@ class TaskUpdate(BaseModel):
     priority: Optional[str] = None
     item_type: Optional[str] = None
     status: Optional[str] = None
+    is_all_day: Optional[bool] = None
 
 class UserSettingsUpdate(BaseModel):
     preferred_name: Optional[str] = None
@@ -136,6 +137,7 @@ async def process_and_save_tasks(text_content, user_id, source_info, db, current
                 due_text=task_data.get("due"),
                 assignee=task_data.get("assignee", "me"),
                 priority=task_data.get("priority", "normal"),
+                is_all_day=1 if task_data.get("is_all_day") else 0,
                 item_type=task_data.get("item_type", "task"),
                 confidence=task_data.get("confidence"),
                 status="pending"
@@ -214,6 +216,7 @@ async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depen
     if task_update.priority: task.priority = task_update.priority
     if task_update.item_type: task.item_type = task_update.item_type
     if task_update.status: task.status = task_update.status # This handles "completed" and "deleted"
+    if task_update.is_all_day is not None: task.is_all_day = 1 if task_update.is_all_day else 0
     if task_update.due_date:
         new_date = task_update.due_date
         if len(new_date) == 10: new_date += "T12:00:00Z" 

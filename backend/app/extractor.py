@@ -33,6 +33,7 @@ def build_prompt(user_input: str, current_time: str) -> str:
       "end_date": "ISO 8601 timestamp (YYYY-MM-DDTHH:MM:SSZ) or null",
       "assignee": "name or 'me'",
       "priority": "low | normal | high",
+      "is_all_day": boolean,
       "confidence": 0-100,
       "reasoning": "Briefly explain why this is a task"
     }}
@@ -40,7 +41,9 @@ def build_prompt(user_input: str, current_time: str) -> str:
     GUIDELINES:
     - Use 'reminder' for simple alerts (e.g., "Remind me to call Mom", "Alert me at 5pm").
     - Use 'task' for actionable work or assignments (e.g., "Finish the report", "Submit homework").
-    - If a time range is provided (e.g. "3pm to 10pm"), use the start for due_date and end for end_date.
+    - If a time range or date range is provided (e.g. "3pm to 10pm", "Monday to Wednesday"), use the start for due_date and end for end_date.
+    - IMPORTANT: Resolve relative dates (e.g., "tomorrow", "this Friday", "next Saturday") into absolute ISO 8601 dates using the provided Current Local Timestamp.
+    - If no specific time is mentioned (e.g., "Buy groceries on Friday"), set "is_all_day" to true.
     
     INPUT TEXT:
     {user_input}
@@ -65,6 +68,13 @@ def verify_with_regex(raw_text: str, extracted_date: str) -> bool:
     if target in raw_text or target.replace('-', '/') in raw_text:
         return True
     
+    # Also check if the day of the week (e.g., "Saturday") is in the text
+    try:
+        dt = datetime.fromisoformat(extracted_date.replace('Z', ''))
+        if dt.strftime('%A').lower() in raw_text.lower():
+            return True
+    except:
+        pass
     return False
 
 def extract_json(text: str) -> list:
@@ -156,6 +166,7 @@ def validate_task(task: Dict[str, Any]) -> Dict[str, Any]:
         "due_date": task.get("due_date"),
         "end_date": task.get("end_date"),
         "assignee": task.get("assignee") if task.get("assignee") else "me",
+        "is_all_day": bool(task.get("is_all_day", False)),
         "priority": p,
         "confidence": int(task.get("confidence", 70))
     }
@@ -172,5 +183,5 @@ def format_for_frontend(task: Dict[str, Any]) -> Dict[str, Any]:
             pass
             
     task["due"] = due_dt.strftime("%m/%d/%Y") if due_dt else "No due date"
-    task["time"] = due_dt.strftime("%I:%M %p") if due_dt else "No time"
+    task["time"] = "All Day" if task.get("is_all_day") else (due_dt.strftime("%I:%M %p") if due_dt else "No time")
     return task

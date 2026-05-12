@@ -6,7 +6,21 @@ from sqlalchemy.orm import Session
 from .extractor import extract_task_from_text
 from scripts.init_db import SessionLocal, Task, RawInput, User
 from datetime import datetime, timedelta
+import base64
 import fitz
+import os.path
+import json
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+
+SCOPES = [
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/calendar.events.readonly',
+    'https://www.googleapis.com/auth/classroom.courses.readonly',
+    'https://www.googleapis.com/auth/classroom.coursework.me.readonly'
+]
 
 app = FastAPI()
 
@@ -109,6 +123,105 @@ async def ingest_doc(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"File processing error: {str(e)}")
+
+# --- GMAIL SYNC ---
+def get_gmail_service():
+    creds = None
+    # token.json stores the user's access/refresh tokens
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            creds = flow.run_local_server(port=8080)
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+    return build('gmail', 'v1', credentials=creds)
+
+def get_email_body(payload):
+    """Helper to extract plain text body from Gmail payload."""
+    if 'parts' in payload:
+        for part in payload['parts']:
+            if part['mimeType'] == 'text/plain' and 'data' in part['body']:
+                return base64.urlsafe_b64decode(part['body']['data']).decode('utf-8')
+    elif 'body' in payload and 'data' in payload['body']:
+        return base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8')
+    return ""
+
+@app.get("/sync-gmail")
+async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
+    try:
+        service = get_gmail_service()
+        # Fetch the 5 most recent emails
+        results = service.users().messages().list(userId='me', maxResults=5).execute()
+        messages = results.get('messages', [])
+        
+        processed_count = 0
+        for msg in messages:
+            m = service.users().messages().get(userId='me', id=msg['id']).execute()
+            # Fetch full body instead of just the snippet
+            body = get_email_body(m.get('payload', {})) or m.get('snippet', '')
+            if body:
+                try:
+                    await process_and_save_tasks(body, user_id, f"gmail: {msg['id']}", db)
+                    processed_count += 1
+                except HTTPException:
+                    # Skip emails where no tasks were found
+                    continue
+            
+        return {"status": "success", "message": f"Scanned {len(messages)} emails and extracted tasks from {processed_count} of them."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/sync-all")
+async def sync_all(user_id: int, db: Session = Depends(get_db)):
+    service_gmail = get_gmail_service() # Uses your existing function
+    
+    # 1. Create a service for Classroom
+    creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    classroom = build('classroom', 'v1', credentials=creds)
+    calendar = build('calendar', 'v3', credentials=creds)
+
+    summary = {"classroom": 0, "calendar": 0}
+
+    # 2. Fetch Classroom Assignments
+    try:
+        courses_result = classroom.courses().list(pageSize=5).execute()
+        for course in courses_result.get('courses', []):
+            cw_result = classroom.courses().courseWork().list(courseId=course['id']).execute()
+            for item in cw_result.get('courseWork', []):
+                due = item.get('dueDate', {})
+                due_str = f"{due.get('month')}/{due.get('day')}/{due.get('year')}" if due else "No date"
+                
+                # Create a prompt-friendly string for the AI to ingest
+                content = f"Classroom Assignment: {item['title']} for {course['name']}. Due: {due_str}. Instructions: {item.get('description', '')}"
+                try:
+                    await process_and_save_tasks(content, user_id, f"classroom: {item['id']}", db)
+                    summary["classroom"] += 1
+                except: continue
+    except Exception as e:
+        print(f"Classroom sync error: {e}")
+
+    # 3. Fetch Calendar Events
+    try:
+        now = datetime.utcnow().isoformat() + 'Z'
+        cal_result = calendar.events().list(calendarId='primary', timeMin=now, maxResults=10).execute()
+        for event in cal_result.get('items', []):
+            # Only ingest actual events, not just "free" slots
+            if event.get('summary'):
+                start = event.get('start', {}).get('dateTime') or event.get('start', {}).get('date')
+                content = f"Calendar Event: {event['summary']} starting {start}. Description: {event.get('description', '')}"
+                try:
+                    await process_and_save_tasks(content, user_id, f"calendar: {event['id']}", db)
+                    summary["calendar"] += 1
+                except: continue
+    except Exception as e:
+        print(f"Calendar sync error: {e}")
+
+    return {"status": "success", "processed": summary}
 
 # --- REUSABLE PROCESSING LOGIC ---
 async def process_and_save_tasks(text_content, user_id, source_info, db, current_time=None):

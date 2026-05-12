@@ -640,6 +640,7 @@ input:checked + .slider:before { transform: translateX(26px); }
                     <div class="composer-actions">
                         <div class="left-buttons">
                             <button class="ghost" id="voiceBtn" type="button">🎙️ Voice</button>
+                            <button class="ghost" id="syncGmailBtn" type="button" onclick="syncGmail()">📧 Sync Gmail</button>
                             <button class="ghost" id="uploadBtn" type="button" onclick="document.getElementById('fileInput').click()">📎 Attach Doc</button>
                         </div>
                         <button class="primary" id="processBtn" type="button">Process Input</button>
@@ -693,8 +694,24 @@ input:checked + .slider:before { transform: translateX(26px); }
                                 <span class="slider"></span>
                             </label>
                         </div>
+                    </div>
 
-                        <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 16px; margin-top: 32px;">System (Coming Soon)</h3>
+                    <div style="margin-bottom: 32px;">
+                        <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--teal-dark); margin-bottom: 16px;">Integrations</h3>
+                        <div style="background: rgba(127, 152, 165, 0.05); border: 1px solid var(--border); padding: 20px; border-radius: 18px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <div style="display: flex; align-items: center; gap: 16px;">
+                                <div style="font-size: 24px;">📧</div>
+                                <div>
+                                    <h4 style="margin: 0; font-size: 16px; color: var(--text);">Google Account</h4>
+                                    <p style="margin: 4px 0 0; font-size: 13px; color: var(--muted);" id="google-status">Connect to sync Gmail and Calendar.</p>
+                                </div>
+                            </div>
+                            <button class="ghost" id="connectGoogleBtn" onclick="connectGoogleAccount()" style="padding: 8px 16px; font-size: 13px;">Connect</button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 16px;">System (Coming Soon)</h3>
                         <div style="display: grid; gap: 12px; opacity: 0.6;">
                             <div style="border: 1px dashed var(--border); padding: 16px; border-radius: 14px; display: flex; align-items: center; gap: 12px; color: var(--muted);">
                                 <span></span>
@@ -1590,7 +1607,57 @@ window.changeMonth = function(offset) {
     loadView('calendar'); 
 };
 
+// Gmail Sync Function
+async function syncGmail() {
+    const btn = document.getElementById('syncGmailBtn');
+    const userId = window.CURRENT_USER_ID;
+    if (!userId) return alert("Please log in first.");
 
+    btn.textContent = "⌛ Extracting...";
+    
+    try {
+        const response = await fetch(`http://127.0.0.1:8000/sync-gmail?user_id=${userId}`);
+        const data = await response.json();
+        
+        if (response.ok) {
+            btn.textContent = "✅ Done";
+            setTimeout(() => btn.textContent = "📧 Sync Gmail", 3000);
+            alert(data.message);
+            loadView(currentView); // Refresh the list to show new tasks
+        } else {
+            alert("Error: " + (data.detail || "Failed to extract emails"));
+            btn.textContent = "📧 Sync Gmail";
+        }
+    } catch (err) {
+        console.error("Gmail Sync Failed:", err);
+        alert("Failed to connect to Gmail. Make sure the backend is running.");
+        btn.textContent = "📧 Sync Gmail";
+    }
+}
+
+// Connect Google Account Logic
+async function connectGoogleAccount() {
+    const btn = document.getElementById('connectGoogleBtn');
+    const statusText = document.getElementById('google-status');
+    const userId = window.CURRENT_USER_ID;
+
+    if (!userId) return alert("Please log in first.");
+
+    btn.textContent = "⌛ Connecting...";
+
+    try {
+        // We trigger the sync endpoint which initiates the Google OAuth flow if not authenticated
+        const response = await fetch(`http://127.0.0.1:8000/sync-gmail?user_id=${userId}`);
+        if (response.ok) {
+            statusText.textContent = "Connected to Google Workspace";
+            btn.textContent = "Connected";
+            btn.disabled = true;
+        }
+    } catch (err) {
+        console.error("Connection failed:", err);
+        btn.textContent = "Connect";
+    }
+}
 
 // Toggle the user menu dropdown
 function toggleUserMenu() {

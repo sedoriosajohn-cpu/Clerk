@@ -30,6 +30,7 @@ app = FastAPI()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TOKEN_PATH = os.path.join(BASE_DIR, "..", "..", "token.json")
 CREDS_PATH = os.path.join(BASE_DIR, "..", "..", "credentials.json")
+OAUTH_STATE_PATH = os.path.join(BASE_DIR, "..", "..", ".google_oauth_state.json")
 DEFAULT_GOOGLE_REDIRECT_URI = "http://localhost:8000/auth/google/callback"
 DEFAULT_FRONTEND_URL = "http://127.0.0.1:5500/frontend/clerk_website/index.html"
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website")), name="static")
@@ -79,7 +80,7 @@ class UserSettingsUpdate(BaseModel):
 @app.get("/")
 async def read_index(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     if code or error:
-        return complete_google_oauth(code=code, error=error)
+        return complete_google_oauth(code=code, state=state, error=error)
     return FileResponse(os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website", "index.html"))
 
 # --- AUTH ROUTES ---
@@ -166,26 +167,51 @@ def get_google_redirect_uri():
 
     return DEFAULT_GOOGLE_REDIRECT_URI
 
-def build_google_flow():
+def build_google_flow(state: Optional[str] = None, code_verifier: Optional[str] = None):
+    kwargs = {"redirect_uri": get_google_redirect_uri()}
+    if state:
+        kwargs["state"] = state
+    if code_verifier:
+        kwargs["code_verifier"] = code_verifier
+
     return Flow.from_client_config(
         get_google_credentials_config(),
         scopes=SCOPES,
-        redirect_uri=get_google_redirect_uri()
+        **kwargs
     )
 
 def create_google_auth_url():
     flow = build_google_flow()
     auth_url, state = flow.authorization_url(
         access_type='offline',
-        include_granted_scopes='true',
         prompt='consent'
     )
+    save_google_oauth_state(state, flow.code_verifier)
     return auth_url
 
 def get_frontend_url():
     return os.environ.get("CLERK_FRONTEND_URL", DEFAULT_FRONTEND_URL)
 
-def complete_google_oauth(code: Optional[str] = None, error: Optional[str] = None):
+def save_google_oauth_state(state: str, code_verifier: str):
+    with open(OAUTH_STATE_PATH, "w", encoding="utf-8") as state_file:
+        json.dump({
+            "state": state,
+            "code_verifier": code_verifier,
+            "created_at": datetime.utcnow().isoformat()
+        }, state_file)
+
+def load_google_oauth_state():
+    if not os.path.exists(OAUTH_STATE_PATH):
+        return {}
+
+    with open(OAUTH_STATE_PATH, "r", encoding="utf-8-sig") as state_file:
+        return json.load(state_file)
+
+def clear_google_oauth_state():
+    if os.path.exists(OAUTH_STATE_PATH):
+        os.remove(OAUTH_STATE_PATH)
+
+def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     frontend_url = get_frontend_url()
     if error:
         return RedirectResponse(url=f"{frontend_url}?google_error={quote(error, safe='')}")
@@ -193,11 +219,19 @@ def complete_google_oauth(code: Optional[str] = None, error: Optional[str] = Non
         return RedirectResponse(url=f"{frontend_url}?google_error=missing_authorization_code")
 
     try:
-        flow = build_google_flow()
+        saved_state = load_google_oauth_state()
+        if not saved_state.get("code_verifier"):
+            return RedirectResponse(url=f"{frontend_url}?google_error=missing_code_verifier")
+        if saved_state.get("state") and state and saved_state["state"] != state:
+            return RedirectResponse(url=f"{frontend_url}?google_error=oauth_state_mismatch")
+
+        flow = build_google_flow(state=state, code_verifier=saved_state["code_verifier"])
+        os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
         flow.fetch_token(code=code)
         creds = flow.credentials
         with open(TOKEN_PATH, 'w') as token:
             token.write(creds.to_json())
+        clear_google_oauth_state()
     except Exception as exc:
         message = str(exc) or exc.__class__.__name__
         return RedirectResponse(url=f"{frontend_url}?google_error={quote(message, safe='')}")
@@ -237,7 +271,7 @@ async def get_google_auth_url():
 @app.get("/auth/google/callback")
 async def google_callback(code: Optional[str] = None, state: str = None, error: Optional[str] = None):
     """Handles the redirect from Google after the user authenticates."""
-    return complete_google_oauth(code=code, error=error)
+    return complete_google_oauth(code=code, state=state, error=error)
 
 def get_email_body(payload):
     """Helper to extract plain text body from Gmail payload."""

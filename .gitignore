@@ -15,6 +15,9 @@ dist/
 
 # For future API keys (like OpenAI or Clerk.dev)
 .env
+credentials.json
+token.json
+.google_oauth_state.json
 
 # Keeps personal VS Code settings out of the team repo
 .vscode/

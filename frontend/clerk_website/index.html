@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -597,7 +597,7 @@ input:checked + .slider:before { transform: translateX(26px); }
             <div id="user-dropdown" style="display:none; position:absolute; right:0; top:45px; background:var(--panel-bg); border:1px solid var(--border); border-radius:12px; width:160px; box-shadow: var(--shadow); z-index:1000;">
                 <ul style="list-style:none; padding:10px; margin:0;">
                     <li onclick="openSettings()" style="padding:10px; color:var(--text); cursor:pointer; border-radius:8px; font-size:14px;" onmouseover="this.style.background='var(--teal-soft)'" onmouseout="this.style.background='transparent'">⚙️ Settings</li>
-                    <li onclick="logout()" style="padding:10px; color:var(--pink); cursor:pointer; border-radius:8px; font-size:14px;" onmouseover="this.style.background='var(--teal-soft)'" onmouseout="this.style.background='transparent'">🚪 Sign Out</li>
+                    <li onclick="logout()" style="padding:10px; color:#e11d48; cursor:pointer; border-radius:8px; font-size:14px;" onmouseover="this.style.background='var(--teal-soft)'" onmouseout="this.style.background='transparent'">🚪 Sign Out</li>
                 </ul>
             </div>
         </div>
@@ -640,6 +640,7 @@ input:checked + .slider:before { transform: translateX(26px); }
                     <div class="composer-actions">
                         <div class="left-buttons">
                             <button class="ghost" id="voiceBtn" type="button">🎙️ Voice</button>
+                            <button class="ghost" id="syncGmailBtn" type="button" onclick="syncGmail()">📧 Sync Gmail</button>
                             <button class="ghost" id="uploadBtn" type="button" onclick="document.getElementById('fileInput').click()">📎 Attach Doc</button>
                         </div>
                         <button class="primary" id="processBtn" type="button">Process Input</button>
@@ -693,8 +694,24 @@ input:checked + .slider:before { transform: translateX(26px); }
                                 <span class="slider"></span>
                             </label>
                         </div>
+                    </div>
 
-                        <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 16px; margin-top: 32px;">System (Coming Soon)</h3>
+                    <div style="margin-bottom: 32px;">
+                        <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--teal-dark); margin-bottom: 16px;">Integrations</h3>
+                        <div style="background: rgba(127, 152, 165, 0.05); border: 1px solid var(--border); padding: 20px; border-radius: 18px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <div style="display: flex; align-items: center; gap: 16px;">
+                                <div style="font-size: 24px;">📧</div>
+                                <div>
+                                    <h4 style="margin: 0; font-size: 16px; color: var(--text);">Google Account</h4>
+                                    <p style="margin: 4px 0 0; font-size: 13px; color: var(--muted);" id="google-status">Connect to sync Gmail and Calendar.</p>
+                                </div>
+                            </div>
+                            <button class="ghost" id="connectGoogleBtn" onclick="connectGoogleAccount()" style="padding: 8px 16px; font-size: 13px;">Connect</button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 16px;">System (Coming Soon)</h3>
                         <div style="display: grid; gap: 12px; opacity: 0.6;">
                             <div style="border: 1px dashed var(--border); padding: 16px; border-radius: 14px; display: flex; align-items: center; gap: 12px; color: var(--muted);">
                                 <span></span>
@@ -744,26 +761,16 @@ input:checked + .slider:before { transform: translateX(26px); }
         </div>
     </div>
 
-</body>
-
 <script>
 
 
 const taskInput = document.getElementById('taskInput');
 const processBtn = document.getElementById('processBtn');
 const voiceBtn = document.getElementById('voiceBtn');
-//const agendaBtn = document.getElementById('agendaBtn');
-//const clearBtn = document.getElementById('clearBtn');
-const panelPreview = document.getElementById('panelPreview');
 const statusMsg = document.getElementById('statusMsg');
 const agendaList = document.getElementById('agendaList');
 const newTasksList = document.getElementById('newTasksList');
-
-const taskTitlePreview = document.getElementById('taskTitlePreview');
-const taskPriorityPreview = document.getElementById('taskPriorityPreview');
-const taskDuePreview = document.getElementById('taskDuePreview');
-const taskConfidence = document.getElementById('taskConfidence');
-const taskDescPreview = document.getElementById('taskDescPreview');
+const API_BASE = "http://127.0.0.1:8000";
 
 // Helper to parse dates as "Wall Time" (ignoring UTC shift)
 const parseWallTime = (isoStr) => {
@@ -795,6 +802,15 @@ const parseWallTime = (isoStr) => {
 window.CURRENT_USER_ID = null;
 window.USER_SETTINGS = { preferred_name: "User", dark_mode: false, notifications_enabled: true };
 
+const oauthParams = new URLSearchParams(window.location.search);
+if (oauthParams.has('google_error')) {
+    alert(`Google connection failed: ${oauthParams.get('google_error')}`);
+    window.history.replaceState({}, document.title, window.location.pathname);
+} else if (oauthParams.has('google_connected')) {
+    alert("Google account connected successfully.");
+    window.history.replaceState({}, document.title, window.location.pathname);
+}
+
 const notifiedTasks = new Set(); // To prevent duplicate alerts
 let currentTask = null; // This will hold the result from your FastAPI /ingest
 let currentView = 'agenda';
@@ -810,7 +826,7 @@ window.login = async function() {
     const errorMsg = document.getElementById('login-error');
 
     try {
-        const response = await fetch('http://127.0.0.1:8000/login', {
+        const response = await fetch(`${API_BASE}/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: usernameInput, password: passwordInput })
@@ -840,7 +856,7 @@ window.login = async function() {
 
 async function fetchUserSettings() {
     try {
-        const response = await fetch(`http://127.0.0.1:8000/users/${window.CURRENT_USER_ID}/settings`);
+        const response = await fetch(`${API_BASE}/users/${window.CURRENT_USER_ID}/settings`);
         if (response.ok) {
             window.USER_SETTINGS = await response.json();
             
@@ -867,7 +883,7 @@ async function saveUserSettings() {
     
     window.USER_SETTINGS = settings;
 
-    await fetch(`http://127.0.0.1:8000/users/${window.CURRENT_USER_ID}/settings`, {
+    await fetch(`${API_BASE}/users/${window.CURRENT_USER_ID}/settings`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
@@ -905,7 +921,7 @@ async function register() {
     if (!userVal || !passVal) return alert("Please fill in all fields");
 
     try {
-        const response = await fetch('http://127.0.0.1:8000/register', {
+        const response = await fetch(`${API_BASE}/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: userVal, password: passVal })
@@ -1031,7 +1047,7 @@ async function dismissTask(taskId) {
 
     try {
         // 2. Perform a soft delete (update status to 'deleted')
-        const response = await fetch(`http://127.0.0.1:8000/tasks/${taskId}`, {
+        const response = await fetch(`${API_BASE}/tasks/${taskId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'deleted' })
@@ -1057,7 +1073,7 @@ async function dismissTask(taskId) {
 
 async function restoreTask(taskId) {
     try {
-        const response = await fetch(`http://127.0.0.1:8000/tasks/${taskId}`, {
+        const response = await fetch(`${API_BASE}/tasks/${taskId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'pending' })
@@ -1078,7 +1094,7 @@ async function permanentlyDeleteTask(taskId) {
     if (!confirm("Are you sure you want to permanently delete this task? This cannot be undone.")) return;
 
     try {
-        const response = await fetch(`http://127.0.0.1:8000/tasks/${taskId}/permanent`, {
+        const response = await fetch(`${API_BASE}/tasks/${taskId}/permanent`, {
             method: 'DELETE'
         });
 
@@ -1102,7 +1118,7 @@ async function completeTask(taskId) {
 
     try {
         // 2. Update the status in the backend
-        const response = await fetch(`http://127.0.0.1:8000/tasks/${taskId}`, {
+        const response = await fetch(`${API_BASE}/tasks/${taskId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'completed' })
@@ -1176,7 +1192,7 @@ async function loadView(view) {
     }
 
     try {
-        const response = await fetch(`http://127.0.0.1:8000/tasks?user_id=${userId}`);
+        const response = await fetch(`${API_BASE}/tasks?user_id=${userId}`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
         const data = await response.json();
@@ -1227,7 +1243,7 @@ async function loadView(view) {
         }
         else if (view === 'history') {
             titleHeader.textContent = "Recently Completed & Deleted Tasks";
-            const historyResponse = await fetch(`http://127.0.0.1:8000/tasks/history?user_id=${userId}`);
+            const historyResponse = await fetch(`${API_BASE}/tasks/history?user_id=${userId}`);
             if (!historyResponse.ok) throw new Error(`HTTP error! status: ${historyResponse.status}`);
             const historyData = await historyResponse.json();
             const historyTasks = historyData.tasks || [];
@@ -1590,7 +1606,83 @@ window.changeMonth = function(offset) {
     loadView('calendar'); 
 };
 
+// Gmail Sync Function
+async function syncGmail() {
+    const btn = document.getElementById('syncGmailBtn');
+    const userId = window.CURRENT_USER_ID;
+    if (!userId) return alert("Please log in first.");
 
+    const originalText = btn.textContent;
+    btn.textContent = "Extracting...";
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch(`${API_BASE}/sync-gmail?user_id=${userId}`);
+        const data = await response.json().catch(() => ({}));
+        
+        if (data.auth_url) {
+            // Backend indicated that authentication is needed, redirect to Google OAuth
+            console.log("Redirecting to Google for authentication...");
+            window.location.href = data.auth_url;
+            return; // Stop further processing
+        }
+
+        if (response.ok && data.status === "success") {
+            btn.textContent = "Done";
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }, 3000);
+            alert(data.message);
+            loadView(currentView); // Refresh the list to show new tasks
+        } else {
+            // Handle other errors from the backend
+            alert("Error: " + (data.message || data.detail || "Failed to extract emails"));
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    } catch (err) {
+        console.error("Gmail sync failed:", err);
+        alert("Failed to sync Gmail. Make sure the backend is running and that your browser is not blocking the Google OAuth page.");
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+}
+
+// Connect Google Account Logic - This function initiates the Google OAuth flow.
+// This function is now primarily for the "Connect" button in settings,
+// which directly requests the auth URL from the backend's /auth/google endpoint.
+async function connectGoogleAccount() {
+    const btn = document.getElementById('connectGoogleBtn');
+    const statusText = document.getElementById('google-status');
+    const userId = window.CURRENT_USER_ID;
+
+    if (!userId) return alert("Please log in first.");
+
+    const originalText = btn.textContent;
+    btn.textContent = "Connecting...";
+    btn.disabled = true;
+
+    try {
+        const response = await fetch(`${API_BASE}/auth/google`);
+        const data = await response.json().catch(() => ({}));
+        if (data.auth_url) {
+            window.location.href = data.auth_url;
+            return;
+        }
+
+        const message = data.message || data.detail || "Google authentication could not be started.";
+        if (statusText) statusText.textContent = message;
+        alert(message);
+    } catch (err) {
+        console.error("Google connection failed:", err);
+        if (statusText) statusText.textContent = "Google connection failed. Check the backend and browser blockers.";
+        alert("Google connection failed. Make sure the backend is running and your browser is not blocking Google OAuth.");
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+}
 
 // Toggle the user menu dropdown
 function toggleUserMenu() {
@@ -1628,7 +1720,7 @@ async function uploadDocument(file) {
     formData.append("file", file);
     formData.append("user_id", window.CURRENT_USER_ID);
 
-    const response = await fetch("http://127.0.0.1:8000/ingest-doc", {
+    const response = await fetch(`${API_BASE}/ingest-doc`, {
         method: "POST",
         body: formData // No headers needed, the browser sets 'multipart/form-data'
     });
@@ -1651,7 +1743,7 @@ function capitalizePriority(priority) {
 
 async function updateTaskDate(id, newDate) {
     try {
-        const response = await fetch(`http://127.0.0.1:8000/tasks/${id}`, {
+        const response = await fetch(`${API_BASE}/tasks/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ due_date: newDate })
@@ -1679,7 +1771,7 @@ async function handleDateChange(taskId, newFullDate) {
 
 async function handleAllDayToggle(taskId, isChecked) {
     try {
-        const response = await fetch(`http://127.0.0.1:8000/tasks/${taskId}`, {
+        const response = await fetch(`${API_BASE}/tasks/${taskId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ is_all_day: isChecked })
@@ -1695,7 +1787,7 @@ async function handleAllDayToggle(taskId, isChecked) {
     }
 }
 
-function renderOutput(task) { //tidy up later
+function renderOutput(task) {
     // 1. Log the data so you can see exactly what the backend sent in the F12 console
     console.log("Data received from backend:", task);
 //  //refreshes the list 
@@ -1799,7 +1891,7 @@ async function checkUpcomingTasks() {
     if (!window.CURRENT_USER_ID || !window.USER_SETTINGS.notifications_enabled) return;
 
     try {
-        const response = await fetch(`http://127.0.0.1:8000/tasks?user_id=${window.CURRENT_USER_ID}`);
+        const response = await fetch(`${API_BASE}/tasks?user_id=${window.CURRENT_USER_ID}`);
         if (!response.ok) return;
         const data = await response.json();
         const tasks = data.tasks || [];
@@ -1878,14 +1970,14 @@ processBtn.addEventListener('click', async () => {
             formData.append("user_id", userId);
             formData.append("local_time", localTimeString);
 
-            response = await fetch('http://127.0.0.1:8000/ingest-doc', {
+            response = await fetch(`${API_BASE}/ingest-doc`, {
                 method: 'POST',
                 body: formData // Browser sets Content-Type to multipart/form-data automatically
             });
         } 
         // Case B: Text Input
         else if (text) {
-            response = await fetch('http://127.0.0.1:8000/ingest', {
+            response = await fetch(`${API_BASE}/ingest`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 

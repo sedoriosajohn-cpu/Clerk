@@ -12,6 +12,7 @@ import base64
 import fitz
 import os.path
 import json
+import hashlib
 from urllib.parse import quote
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -28,9 +29,9 @@ SCOPES = [
 app = FastAPI()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TOKEN_PATH = os.path.join(BASE_DIR, "..", "..", "token.json")
+GOOGLE_TOKEN_DIR = os.path.join(BASE_DIR, "..", "..", "google_tokens")
 CREDS_PATH = os.path.join(BASE_DIR, "..", "..", "credentials.json")
-OAUTH_STATE_PATH = os.path.join(BASE_DIR, "..", "..", ".google_oauth_state.json")
+OAUTH_STATE_DIR = os.path.join(BASE_DIR, "..", "..", ".google_oauth_states")
 DEFAULT_GOOGLE_REDIRECT_URI = "http://localhost:8000/auth/google/callback"
 DEFAULT_FRONTEND_URL = "http://127.0.0.1:5500/frontend/clerk_website/index.html"
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website")), name="static")
@@ -49,6 +50,12 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def ensure_user_exists(user_id: int, db: Session):
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
 
 # --- SCHEMAS ---
 class LoginRequest(BaseModel):
@@ -180,36 +187,54 @@ def build_google_flow(state: Optional[str] = None, code_verifier: Optional[str] 
         **kwargs
     )
 
-def create_google_auth_url():
+def get_google_token_path(user_id: int):
+    os.makedirs(GOOGLE_TOKEN_DIR, exist_ok=True)
+    return os.path.join(GOOGLE_TOKEN_DIR, f"user_{user_id}.json")
+
+def get_oauth_state_path(state: str):
+    os.makedirs(OAUTH_STATE_DIR, exist_ok=True)
+    state_key = hashlib.sha256(state.encode("utf-8")).hexdigest()
+    return os.path.join(OAUTH_STATE_DIR, f"{state_key}.json")
+
+def create_google_auth_url(user_id: int):
     flow = build_google_flow()
     auth_url, state = flow.authorization_url(
         access_type='offline',
         prompt='consent'
     )
-    save_google_oauth_state(state, flow.code_verifier)
+    save_google_oauth_state(state, flow.code_verifier, user_id)
     return auth_url
 
 def get_frontend_url():
     return os.environ.get("CLERK_FRONTEND_URL", DEFAULT_FRONTEND_URL)
 
-def save_google_oauth_state(state: str, code_verifier: str):
-    with open(OAUTH_STATE_PATH, "w", encoding="utf-8") as state_file:
+def save_google_oauth_state(state: str, code_verifier: str, user_id: int):
+    with open(get_oauth_state_path(state), "w", encoding="utf-8") as state_file:
         json.dump({
             "state": state,
             "code_verifier": code_verifier,
+            "user_id": user_id,
             "created_at": datetime.utcnow().isoformat()
         }, state_file)
 
-def load_google_oauth_state():
-    if not os.path.exists(OAUTH_STATE_PATH):
+def load_google_oauth_state(state: Optional[str]):
+    if not state:
         return {}
 
-    with open(OAUTH_STATE_PATH, "r", encoding="utf-8-sig") as state_file:
+    state_path = get_oauth_state_path(state)
+    if not os.path.exists(state_path):
+        return {}
+
+    with open(state_path, "r", encoding="utf-8-sig") as state_file:
         return json.load(state_file)
 
-def clear_google_oauth_state():
-    if os.path.exists(OAUTH_STATE_PATH):
-        os.remove(OAUTH_STATE_PATH)
+def clear_google_oauth_state(state: Optional[str]):
+    if not state:
+        return
+
+    state_path = get_oauth_state_path(state)
+    if os.path.exists(state_path):
+        os.remove(state_path)
 
 def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     frontend_url = get_frontend_url()
@@ -219,9 +244,11 @@ def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = Non
         return RedirectResponse(url=f"{frontend_url}?google_error=missing_authorization_code")
 
     try:
-        saved_state = load_google_oauth_state()
+        saved_state = load_google_oauth_state(state)
         if not saved_state.get("code_verifier"):
             return RedirectResponse(url=f"{frontend_url}?google_error=missing_code_verifier")
+        if not saved_state.get("user_id"):
+            return RedirectResponse(url=f"{frontend_url}?google_error=missing_google_user")
         if saved_state.get("state") and state and saved_state["state"] != state:
             return RedirectResponse(url=f"{frontend_url}?google_error=oauth_state_mismatch")
 
@@ -229,24 +256,25 @@ def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = Non
         os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
         flow.fetch_token(code=code)
         creds = flow.credentials
-        with open(TOKEN_PATH, 'w') as token:
+        with open(get_google_token_path(saved_state["user_id"]), 'w') as token:
             token.write(creds.to_json())
-        clear_google_oauth_state()
+        clear_google_oauth_state(state)
     except Exception as exc:
         message = str(exc) or exc.__class__.__name__
         return RedirectResponse(url=f"{frontend_url}?google_error={quote(message, safe='')}")
 
     return RedirectResponse(url=f"{frontend_url}?google_connected=1")
 
-def get_google_creds():
+def get_google_creds(user_id: int):
     creds = None
-    if os.path.exists(TOKEN_PATH):
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+    token_path = get_google_token_path(user_id)
+    if os.path.exists(token_path):
+        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
-            with open(TOKEN_PATH, 'w') as token:
+            with open(token_path, 'w') as token:
                 token.write(creds.to_json())
             return creds # Credentials refreshed, return them
         else:
@@ -254,8 +282,8 @@ def get_google_creds():
             return None # Indicate that credentials are not available
     return creds
 
-def get_gmail_service():
-    creds = get_google_creds()
+def get_gmail_service(user_id: int):
+    creds = get_google_creds(user_id)
     if not creds:
         # If get_google_creds returns None, it means authentication is needed.
         # We raise HTTPException here for any direct backend calls that expect a service.
@@ -264,9 +292,10 @@ def get_gmail_service():
 
 # FIX: Proper OAuth redirect flow so the browser handles auth, not run_local_server
 @app.get("/auth/google")
-async def get_google_auth_url():
+async def get_google_auth_url(user_id: int, db: Session = Depends(get_db)):
     """Returns the Google OAuth URL for the frontend to redirect to."""
-    return {"auth_url": create_google_auth_url()}
+    ensure_user_exists(user_id, db)
+    return {"auth_url": create_google_auth_url(user_id)}
 
 @app.get("/auth/google/callback")
 async def google_callback(code: Optional[str] = None, state: str = None, error: Optional[str] = None):
@@ -286,13 +315,14 @@ def get_email_body(payload):
 @app.get("/sync-gmail")
 async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
     try:
-        creds = get_google_creds()
+        ensure_user_exists(user_id, db)
+        creds = get_google_creds(user_id)
         if not creds:
             # If no credentials, return the auth URL for the frontend to redirect
             if not os.path.exists(CREDS_PATH):
                 return {"error": "credentials_missing", "message": "Google credentials.json is missing on the server."}
 
-            return {"auth_url": create_google_auth_url(), "message": "Google account not connected. Please connect via Settings."}
+            return {"auth_url": create_google_auth_url(user_id), "message": "Google account not connected. Please connect via Settings."}
         service = build('gmail', 'v1', credentials=creds)
         # Fetch the 5 most recent emails
         results = service.users().messages().list(userId='me', maxResults=5).execute()
@@ -317,10 +347,11 @@ async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
 @app.get("/sync-all")
 async def sync_all(user_id: int, db: Session = Depends(get_db)):
     try:
-        creds = get_google_creds()
+        ensure_user_exists(user_id, db)
+        creds = get_google_creds(user_id)
         if not creds:
             # If no credentials, return the auth URL for the frontend to redirect
-            return {"auth_url": create_google_auth_url(), "message": "Google account not connected. Please connect via Settings."}
+            return {"auth_url": create_google_auth_url(user_id), "message": "Google account not connected. Please connect via Settings."}
 
     except HTTPException:
         raise

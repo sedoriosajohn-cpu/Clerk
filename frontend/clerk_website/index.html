@@ -231,51 +231,27 @@ body {
 .task-main.blue { border-left: 5px solid #00a3ff; background: rgba(0, 163, 255, 0.1); }
 .task-main.reminder { border-left: 5px solid #a855f7; background: rgba(168, 85, 247, 0.1); } /* Purple for reminders */
 
-/* Styles for the expanded day view */
-#expandedDayModal {
-    display: none; /* Hidden by default */
-    position: fixed;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    background: rgba(0,0,0,0.6);
-    z-index: 10002;
-    justify-content: center;
-    align-items: center;
-}
-
-#dayViewScrollContainer {
-    max-height: 60vh;
-    overflow-y: auto;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-}
-
-#hourlySlotsContainer {
-    position: relative;
-    height: 1200px; /* 24 hours * 50px per hour */
-    background: var(--panel-bg);
-}
-
+/* Hourly calendar views */
 .hour-marker {
     position: absolute;
     left: 0;
     right: 0;
-    height: 50px;
+    height: 60px;
     border-bottom: 1px solid var(--border);
     display: flex;
     pointer-events: none;
 }
 
 .hour-label {
-    width: 70px;
-    font-size: 11px;
-    font-weight: 700;
+    width: 82px;
+    font-size: 12px;
+    font-weight: 600;
     color: var(--muted);
     text-align: right;
-    padding-right: 10px;
-    padding-top: 4px;
+    padding-right: 14px;
+    padding-top: 8px;
     border-right: 1px solid var(--border);
-    background: rgba(127, 152, 165, 0.05);
+    background: rgba(255, 255, 255, 0.84);
 }
 
 .hourly-event {
@@ -285,12 +261,13 @@ body {
     padding: 6px 10px;
     font-size: 12px;
     color: white;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    box-shadow: none;
     overflow: hidden;
-    opacity: 1; /* Slightly transparent */
-    border-left: 4px solid rgba(0,0,0,0.2);
+    opacity: 0.86;
+    border-left: 0;
     display: flex;
     flex-direction: column;
+    gap: 2px;
 }
 
 /* Priority Colors for Hourly View */
@@ -299,6 +276,36 @@ body {
 .hourly-event.teal { background-color: #00d7c0; }
 .hourly-event.blue { background-color: #00a3ff; }
 .hourly-event.reminder { background-color: #a855f7; }
+
+.current-time-line {
+    position: absolute;
+    left: 82px;
+    right: 18px;
+    height: 2px;
+    background: #ea7368;
+    z-index: 20;
+}
+
+.current-time-line::before {
+    content: "";
+    position: absolute;
+    left: -6px;
+    top: -5px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #ea7368;
+}
+
+body.dark-mode .hour-marker {
+    border-bottom-color: #303134;
+}
+
+body.dark-mode .hour-label {
+    color: #cbd5e1;
+    border-right-color: #303134;
+    background: #111315;
+}
 
 /* ==========================================================================
    5. COMPOSER & INPUTS
@@ -351,6 +358,165 @@ button {
     background: transparent;
     color: var(--teal-dark);
     border: 1px solid var(--teal-soft);
+}
+
+.cal-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.cal-nav-center {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.cal-view-select {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--panel-bg);
+    color: var(--text);
+    font-weight: 700;
+    padding: 10px 34px 10px 16px;
+    cursor: pointer;
+}
+
+.calendar-day-shell,
+.calendar-week-shell,
+.calendar-year-shell {
+    margin-top: 15px;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    overflow: hidden;
+    background: var(--panel-bg);
+}
+
+.calendar-day-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 22px;
+    border-bottom: 1px solid var(--border);
+}
+
+.calendar-all-day-row {
+    display: grid;
+    grid-template-columns: 82px 1fr;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.7);
+}
+
+.calendar-all-day-label {
+    padding: 10px 14px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+    text-align: right;
+    border-right: 1px solid var(--border);
+}
+
+.calendar-all-day-events {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 12px;
+}
+
+.calendar-all-day-event {
+    border-radius: 7px;
+    color: white;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 6px 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.calendar-all-day-event.pink { background-color: #ff4b91; }
+.calendar-all-day-event.amber { background-color: #ffb100; }
+.calendar-all-day-event.teal { background-color: #00d7c0; }
+.calendar-all-day-event.blue { background-color: #00a3ff; }
+.calendar-all-day-event.reminder { background-color: #a855f7; }
+
+.calendar-day-badge {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--teal-soft);
+    color: var(--teal-dark);
+    font-size: 28px;
+    font-weight: 700;
+}
+
+.calendar-day-body {
+    position: relative;
+    height: 960px;
+    overflow-y: auto;
+    background: rgba(255, 255, 255, 0.7);
+}
+
+body.dark-mode .calendar-day-body {
+    background: #111315;
+}
+
+body.dark-mode .calendar-all-day-row {
+    background: #111315;
+}
+
+.week-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(120px, 1fr));
+    min-height: 560px;
+}
+
+.week-day {
+    border-right: 1px solid var(--border);
+    padding: 12px;
+    min-width: 0;
+}
+
+.week-day:last-child {
+    border-right: 0;
+}
+
+.week-day-title {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
+.year-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 1px;
+    background: var(--border);
+}
+
+.year-month {
+    background: var(--panel-bg);
+    padding: 14px;
+}
+
+.year-month-title {
+    font-weight: 800;
+    margin-bottom: 10px;
+}
+
+.year-month-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
 }
 
 
@@ -450,11 +616,17 @@ button {
 }
 /* Styling for task "pills" inside calendar days */
 .calendar-event {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
     font-size: 0.75rem;
     padding: 2px 4px;
     margin-bottom: 2px;
     border-radius: 6px;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: var(--text); /* Darker text for readability on transparent background */
     font-weight: 500;
     position: relative;
@@ -748,19 +920,6 @@ input:checked + .slider:before { transform: translateX(26px); }
     </div>
     <div id="toast-container"></div>
 
-    <!-- Expanded Day Modal -->
-    <div id="expandedDayModal">
-        <div style="background:var(--panel-bg); padding:20px; border-radius:26px; width:90%; max-width:600px; max-height:90vh; overflow-y:auto; position:relative;">
-            <button onclick="closeExpandedDayView()" style="position:absolute; top:15px; right:15px; background:none; border:none; font-size:24px; cursor:pointer; color:var(--muted);">✕</button>
-            <h3 id="expandedDayTitle" style="color:var(--text); margin-top:0; margin-bottom:20px;"></h3>
-            <div id="dayViewScrollContainer">
-                <div id="hourlySlotsContainer">
-                    <!-- Hourly slots will be rendered here -->
-                </div>
-            </div>
-        </div>
-    </div>
-
 <script>
 
 
@@ -818,6 +977,8 @@ let currentView = 'agenda';
 //for the calendar, it keeps track where the user is currently looking at
 let currentCalMonth = new Date().getMonth();
 let currentCalYear = new Date().getFullYear();
+let currentCalDay = new Date().getDate();
+let currentCalendarView = 'month';
 
   //login function 
 window.login = async function() {
@@ -1255,7 +1416,162 @@ async function loadView(view) {
     }
 }
 
+function getCalendarToolbar(label) {
+    return `
+        <div class="cal-nav">
+            <button class="ghost" onclick="changeMonth(-1)">◀ Prev</button>
+            <div class="cal-nav-center">
+                <h2 style="margin:0">${label}</h2>
+                <select class="cal-view-select" onchange="changeCalendarView(this.value)" aria-label="Calendar view">
+                    <option value="day" ${currentCalendarView === 'day' ? 'selected' : ''}>Day</option>
+                    <option value="week" ${currentCalendarView === 'week' ? 'selected' : ''}>Week</option>
+                    <option value="month" ${currentCalendarView === 'month' ? 'selected' : ''}>Month</option>
+                    <option value="year" ${currentCalendarView === 'year' ? 'selected' : ''}>Year</option>
+                </select>
+            </div>
+            <button class="ghost" onclick="changeMonth(1)">Next ▶</button>
+        </div>
+    `;
+}
+
+function getTaskColorClass(task) {
+    const priority = String(task.priority || 'normal').toLowerCase();
+    const itemType = String(task.item_type || 'task').toLowerCase();
+    if (itemType === 'reminder') return 'reminder';
+    if (priority === 'high') return 'pink';
+    if (priority === 'medium') return 'amber';
+    if (priority === 'low') return 'teal';
+    return 'blue';
+}
+
+function taskOccursOnDate(task, date) {
+    if (!task.due_date) return false;
+    const start = parseWallTime(task.due_date);
+    if (!start) return false;
+    const end = task.end_date ? parseWallTime(task.end_date) : start;
+    const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0);
+    const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
+    return start <= dayEnd && end >= dayStart;
+}
+
+function isAllDayCalendarTask(task, date) {
+    if (task.is_all_day) return true;
+    if (!task.end_date || !task.due_date) return false;
+    const start = parseWallTime(task.due_date);
+    const end = parseWallTime(task.end_date);
+    const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0);
+    const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
+    return start < dayStart && end >= dayEnd;
+}
+
+function openCalendarDay(dateStr) {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    currentCalYear = year;
+    currentCalMonth = month - 1;
+    currentCalDay = day;
+    currentCalendarView = 'day';
+    loadView('calendar');
+}
+
+function renderDayCalendar(targetDate, allTasks = []) {
+    const container = document.getElementById('agendaList');
+    const label = targetDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    const weekday = targetDate.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+    const allDayEvents = allTasks.filter(task => taskOccursOnDate(task, targetDate) && isAllDayCalendarTask(task, targetDate));
+    container.innerHTML = `
+        ${getCalendarToolbar(label)}
+        <div class="calendar-day-shell">
+            <div class="calendar-day-header">
+                <div class="calendar-day-badge">${targetDate.getDate()}</div>
+                <div>
+                    <div class="week-day-title">${weekday}</div>
+                    <strong>${label}</strong>
+                </div>
+            </div>
+            ${allDayEvents.length ? `
+                <div class="calendar-all-day-row">
+                    <div class="calendar-all-day-label">All day</div>
+                    <div class="calendar-all-day-events">
+                        ${allDayEvents.map(task => `<div class="calendar-all-day-event ${getTaskColorClass(task)}">${task.title}</div>`).join('')}
+                    </div>
+                </div>
+            ` : ''}
+            <div class="calendar-day-body" id="calendarDayBody"></div>
+        </div>
+    `;
+    renderHourlySchedule(document.getElementById('calendarDayBody'), targetDate, allTasks, true);
+}
+
+function renderWeekCalendar(month, year, allTasks = []) {
+    const container = document.getElementById('agendaList');
+    const anchor = new Date(year, month, currentCalDay);
+    const weekStart = new Date(anchor);
+    weekStart.setDate(anchor.getDate() - anchor.getDay());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    const label = `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    const days = Array.from({ length: 7 }, (_, i) => {
+        const date = new Date(weekStart);
+        date.setDate(weekStart.getDate() + i);
+        return date;
+    });
+
+    container.innerHTML = `
+        ${getCalendarToolbar(label)}
+        <div class="calendar-week-shell">
+            <div class="week-grid">
+                ${days.map(date => {
+                    const dateStr = date.toLocaleDateString('en-CA');
+                    const tasks = allTasks.filter(task => taskOccursOnDate(task, date)).slice(0, 5);
+                    return `
+                        <div class="week-day" onclick="openCalendarDay('${dateStr}')">
+                            <div class="week-day-title">${date.toLocaleDateString('en-US', { weekday: 'short' })}</div>
+                            <div class="day-num">${date.getDate()}</div>
+                            ${tasks.map(task => `<div class="calendar-event ${getTaskColorClass(task)}">${task.title}</div>`).join('')}
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function renderYearCalendar(year, allTasks = []) {
+    const container = document.getElementById('agendaList');
+    const monthNames = ["January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"];
+    container.innerHTML = `
+        ${getCalendarToolbar(year)}
+        <div class="calendar-year-shell">
+            <div class="year-grid">
+                ${monthNames.map((name, monthIndex) => {
+                    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+                    const firstDay = new Date(year, monthIndex, 1).getDay();
+                    const blanks = Array.from({ length: firstDay }, () => '<span></span>').join('');
+                    const days = Array.from({ length: daysInMonth }, (_, i) => `<span>${i + 1}</span>`).join('');
+                    return `<div class="year-month"><div class="year-month-title">${name}</div><div class="year-month-grid">${blanks}${days}</div></div>`;
+                }).join('')}
+            </div>
+        </div>
+    `;
+}
+
 function renderBigCalendar(month, year, allTasks = []) {
+    window.currentCalendarTasks = allTasks;
+    const activeDate = new Date(year, month, currentCalDay);
+    if (currentCalendarView === 'day') {
+        renderDayCalendar(activeDate, allTasks);
+        return;
+    }
+    if (currentCalendarView === 'week') {
+        renderWeekCalendar(month, year, allTasks);
+        return;
+    }
+    if (currentCalendarView === 'year') {
+        renderYearCalendar(year, allTasks);
+        return;
+    }
+
     const container = document.getElementById('agendaList');
     
     const monthNames = ["January", "February", "March", "April", "May", "June",
@@ -1263,11 +1579,7 @@ function renderBigCalendar(month, year, allTasks = []) {
 
     // 1. Navigation Header
     container.innerHTML = `
-        <div class="cal-nav">
-            <button class="ghost" onclick="changeMonth(-1)">◀ Prev</button>
-            <h2 style="margin:0">${monthNames[month]} ${year}</h2>
-            <button class="ghost" onclick="changeMonth(1)">Next ▶</button>
-        </div>
+        ${getCalendarToolbar(`${monthNames[month]} ${year}`)}
         <div class="big-calendar-grid" id="bigCalGrid"></div>
     `;
 
@@ -1332,7 +1644,7 @@ function renderBigCalendar(month, year, allTasks = []) {
         
         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         daySquare.dataset.date = dateStr; 
-        daySquare.addEventListener('click', () => expandDayView(dateStr, allTasks)); // Add click listener here
+        daySquare.addEventListener('click', () => openCalendarDay(dateStr));
         daySquare.innerHTML = `<span class="day-num">${day}</span>`;
 
         // 4. Drag & Drop Listeners
@@ -1395,159 +1707,62 @@ function renderBigCalendar(month, year, allTasks = []) {
     }
     }
 
-// New function to expand a day and show hourly events
-function expandDayView(dateStr, allTasksForMonth) {
-    const modal = document.getElementById('expandedDayModal');
-    const title = document.getElementById('expandedDayTitle');
-    const hourlyContainer = document.getElementById('hourlySlotsContainer');
-    const [year, month, day] = dateStr.split('-').map(Number);
-    const targetDate = new Date(year, month - 1, day);
-    
-    title.textContent = `Schedule for ${targetDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`;
-    hourlyContainer.innerHTML = ''; // Clear previous content
+function renderHourlySchedule(container, targetDate, allTasks, showCurrentLine = true) {
+    if (!container) return;
+    container.innerHTML = '';
+    container.style.height = '1440px';
+    const year = targetDate.getFullYear();
+    const month = targetDate.getMonth();
+    const day = targetDate.getDate();
+    const hourHeight = 60;
+    const getVisibleTop = (minutes) => minutes >= 23 * 60 ? (23 * 60) + 4 : minutes * (hourHeight / 60);
 
-    const dayEvents = allTasksForMonth.filter(t => {
-        if (!t.due_date) return false;
-        const start = parseWallTime(t.due_date);
-        const startsOnDay = start.getFullYear() === year && 
-                            start.getMonth() === (month - 1) && 
-                            start.getDate() === day;
-        
-        if (startsOnDay) return true;
-        if (t.end_date) {
-            const end = parseWallTime(t.end_date);
-            const startOfDay = new Date(year, month - 1, day, 0, 0, 0);
-            const endOfDay = new Date(year, month - 1, day, 23, 59, 59);
-            return (start <= endOfDay && end >= startOfDay);
-        }
-        return false;
-    });
-
-    // Render Background Hour Markers
     for (let i = 0; i < 24; i++) {
         const marker = document.createElement('div');
         marker.className = 'hour-marker';
-        marker.style.top = `${i * 50}px`;
-        
+        marker.style.top = `${i * hourHeight}px`;
         const ampm = i >= 12 ? 'PM' : 'AM';
         const displayHour = i % 12 || 12;
-        marker.innerHTML = `<div class="hour-label">${displayHour}:00 ${ampm}</div>`;
-        hourlyContainer.appendChild(marker);
+        marker.innerHTML = `<div class="hour-label">${displayHour} ${ampm}</div>`;
+        container.appendChild(marker);
     }
 
-    const dayStartBoundary = new Date(year, month - 1, day, 0, 0, 0);
-    const dayEndBoundary = new Date(year, month - 1, day, 23, 59, 59);
-
-    // Prepare events for rendering, treating all-day and multi-day spans appropriately
-    const processedEvents = dayEvents.map(event => {
+    const dayEvents = allTasks.filter(task => taskOccursOnDate(task, targetDate));
+    const timedEvents = dayEvents.filter(event => !isAllDayCalendarTask(event, targetDate)).map(event => {
         let start = parseWallTime(event.due_date);
-        let end = event.end_date ? parseWallTime(event.end_date) : null;
-        
-        const isImplicitAllDay = start && start.getHours() === 0 && start.getMinutes() === 0 && start.getSeconds() === 0 && !event.end_date;
-        const isSpanningEntireDay = start < dayStartBoundary && end && end >= dayEndBoundary;
-
-        if (event.is_all_day || isImplicitAllDay || isSpanningEntireDay) {
-            start = dayStartBoundary;
-            end = dayEndBoundary;
-        } else {
-            if (start < dayStartBoundary) start = dayStartBoundary;
-            if (end && end > dayEndBoundary) end = dayEndBoundary;
-            if (!end) end = new Date(start.getTime() + 3600000);
-        }
+        let end = event.end_date ? parseWallTime(event.end_date) : new Date(start.getTime() + 60 * 60000);
+        const dayStart = new Date(year, month, day, 0, 0, 0);
+        const dayEnd = new Date(year, month, day, 23, 59, 59);
+        if (start < dayStart) start = dayStart;
+        if (end > dayEnd) end = dayEnd;
         return { ...event, _start: start, _end: end };
+    }).sort((a, b) => a._start - b._start);
+
+    timedEvents.forEach((event, index) => {
+        const startMinutes = (event._start - new Date(year, month, day, 0, 0, 0)) / 60000;
+        const endMinutes = (event._end - new Date(year, month, day, 0, 0, 0)) / 60000;
+        const eventEl = document.createElement('div');
+        eventEl.className = `hourly-event ${getTaskColorClass(event)}`;
+        const visibleTop = getVisibleTop(startMinutes);
+        const visibleBottom = Math.min(1440, endMinutes * (hourHeight / 60));
+        eventEl.style.top = `${visibleTop}px`;
+        eventEl.style.height = `${Math.max(30, visibleBottom - visibleTop)}px`;
+        eventEl.style.left = `${92 + (index % 3) * 176}px`;
+        eventEl.style.width = '168px';
+        eventEl.innerHTML = `
+            <span style="font-weight:800; font-size:10px;">${event._start.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})}</span>
+            <span style="font-weight:700;">${event.title}</span>
+        `;
+        container.appendChild(eventEl);
     });
 
-    // Sort processed events by start time
-    processedEvents.sort((a, b) => a._start - b._start);
-
-    // Improved clustering: Group transitively overlapping events into blocks for column layout
-    const eventGroups = [];
-    if (processedEvents.length > 0) {
-        let currentGroup = [processedEvents[0]];
-        let groupMaxEnd = currentGroup[0]._end.getTime();
-
-        for (let i = 1; i < processedEvents.length; i++) {
-            const ev = processedEvents[i];
-            const start = ev._start.getTime();
-            const end = ev._end.getTime();
-
-            if (start < groupMaxEnd) {
-                currentGroup.push(ev);
-                groupMaxEnd = Math.max(groupMaxEnd, end);
-            } else {
-                eventGroups.push(currentGroup);
-                currentGroup = [ev];
-                groupMaxEnd = end;
-            }
-        }
-        eventGroups.push(currentGroup);
+    const now = new Date();
+    if (showCurrentLine && now.toDateString() === targetDate.toDateString()) {
+        const line = document.createElement('div');
+        line.className = 'current-time-line';
+        line.style.top = `${(now.getHours() * 60 + now.getMinutes()) * (hourHeight / 60)}px`;
+        container.appendChild(line);
     }
-
-    // Render Timed Events side-by-side
-    eventGroups.forEach(group => {
-        let columns = []; // Track end times for each column to packing
-        const groupWithCols =[];
-
-        //first pass: assign columns to each event in the overlapping group
-        group.forEach((event) => {
-            const start = event._start;
-            const end = event._end;
-            
-            let colIdx = columns.findIndex(colEnd => colEnd <= start);
-            if (colIdx === -1) {
-                columns.push(end);
-                colIdx = columns.length - 1;
-            } else {
-                columns[colIdx] = end;
-            }
-            groupWithCols.push({ event, colIdx, start, end });
-        });
-
-        //Second pass: render with consistent widths based on total columns 
-        const totalCols = columns.length;
-        groupWithCols.forEach(({ event, colIdx, start, end }) => {
-            const priority = String(event.priority || 'normal').toLowerCase();
-            const itemType = String(event.item_type || 'task').toLowerCase();
-            let colorClass = 'blue';
-            if (itemType === 'reminder') colorClass = 'reminder';
-            else if (priority === 'high') colorClass = 'pink';
-            else if (priority === 'medium') colorClass = 'amber';
-            else if (priority === 'low') colorClass = 'teal';
-
-            const dayStartMs = new Date(year, month - 1, day, 0, 0, 0).getTime();
-            const startMinutes = (start.getTime() - dayStartMs) / 60000;
-            const endMinutes = (end.getTime() - dayStartMs) / 60000;
-
-            const top = Math.max(0, startMinutes * (50/60));
-            const bottom = Math.min(1440 * (50/60), endMinutes * (50/60));
-            const height = Math.max(25, bottom - top);
-
-            const eventEl = document.createElement('div');
-            eventEl.className = `hourly-event ${colorClass}`;
-            eventEl.style.top = `${top}px`;
-            eventEl.style.height = `${height}px`;
-            
-            // Adjust width and left position for fixed-width columns
-            const leftOffset = 85; // Space for hour labels
-            const eventBlockWidth = 200; // Fixed width for each event block
-            const columnGap = 5; // Gap between columns
-
-            eventEl.style.left = `${leftOffset + (colIdx * (eventBlockWidth + columnGap))}px`;
-            eventEl.style.width = `${eventBlockWidth}px`;
-
-            eventEl.innerHTML = `
-                <span style="font-weight:800; font-size:10px;">${start.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                <span style="font-weight:700;">${event.title}</span>
-            `;
-            hourlyContainer.appendChild(eventEl);
-        });
-    });
-
-modal.style.display = 'flex'; // Show the modal
-}
-
-function closeExpandedDayView() {
-    document.getElementById('expandedDayModal').style.display = 'none';
 }
 
 function updateDisplayName(name, shouldSave = true) {
@@ -1569,6 +1784,7 @@ function updateDisplayName(name, shouldSave = true) {
 function toggleDarkTheme(shouldSave = true) {
     const isDark = document.getElementById('darkThemeToggle').checked;
     const root = document.documentElement;
+    document.body.classList.toggle('dark-mode', isDark);
 
     if (isDark) {
         root.style.setProperty('--bg', '#0f172a'); 
@@ -1594,6 +1810,22 @@ function toggleDarkTheme(shouldSave = true) {
 
 // Navigation Helper for calendar
 window.changeMonth = function(offset) {
+    if (currentCalendarView === 'day' || currentCalendarView === 'week') {
+        const activeDate = new Date(currentCalYear, currentCalMonth, currentCalDay);
+        activeDate.setDate(activeDate.getDate() + (currentCalendarView === 'week' ? offset * 7 : offset));
+        currentCalYear = activeDate.getFullYear();
+        currentCalMonth = activeDate.getMonth();
+        currentCalDay = activeDate.getDate();
+        loadView('calendar');
+        return;
+    }
+
+    if (currentCalendarView === 'year') {
+        currentCalYear += offset;
+        loadView('calendar');
+        return;
+    }
+
     currentCalMonth += offset;
     
     if (currentCalMonth > 11) {
@@ -1605,6 +1837,25 @@ window.changeMonth = function(offset) {
     }
     loadView('calendar'); 
 };
+
+window.changeCalendarView = function(view) {
+    currentCalendarView = view;
+    loadView('calendar');
+};
+
+window.addEventListener('keydown', (e) => {
+    const target = e.target;
+    const isTyping = target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+    if (isTyping || e.ctrlKey || e.metaKey || e.altKey) return;
+
+    const shortcuts = { d: 'day', w: 'week', m: 'month', y: 'year' };
+    const view = shortcuts[e.key.toLowerCase()];
+    if (!view) return;
+
+    e.preventDefault();
+    currentCalendarView = view;
+    loadView('calendar');
+});
 
 // Gmail Sync Function
 async function syncGmail() {
@@ -1664,7 +1915,7 @@ async function connectGoogleAccount() {
     btn.disabled = true;
 
     try {
-        const response = await fetch(`${API_BASE}/auth/google`);
+        const response = await fetch(`${API_BASE}/auth/google?user_id=${userId}`);
         const data = await response.json().catch(() => ({}));
         if (data.auth_url) {
             window.location.href = data.auth_url;

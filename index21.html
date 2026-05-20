@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clerk OS Pro Extended</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-gradient-to-tr from-slate-950 via-slate-900 to-indigo-950 text-slate-100 font-sans antialiased select-none">
+
+<div class="flex min-h-screen">
+  <div class="w-72 bg-slate-950/80 backdrop-blur-3xl border-r border-slate-800/60 p-6 flex flex-col justify-between h-screen sticky top-0">
+    <div class="flex flex-col gap-6">
+      <div class="flex items-center gap-3 px-2">
+        <div class="h-9 w-9 rounded-xl bg-gradient-to-tr from-cyan-500 via-indigo-500 to-purple-500 flex items-center justify-center font-black text-white text-lg shadow-lg">C</div>
+        <div>
+          <h1 class="text-xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">Clerk OS Ultra</h1>
+          <p class="text-[10px] uppercase tracking-widest text-cyan-400 font-bold">X-Platform Engine</p>
+        </div>
+      </div>
+      
+      <div class="px-2">
+        <input type="text" id="quick-search" oninput="handleSearch(this.value)" placeholder="🔍 Quick search index..." class="w-full bg-slate-900/60 text-xs border border-slate-800 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 text-slate-300">
+      </div>
+
+      <nav class="flex flex-col gap-1.5">
+        <button onclick="switchPage('dashboard')" id="nav-dashboard" class="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium transition-all">
+          <div class="flex items-center gap-3"><span>📊</span> Workspace</div>
+          <span id="badge-count" class="bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs px-2 py-0.5 rounded-full font-bold hidden">0</span>
+        </button>
+        <button onclick="switchPage('input')" id="nav-input" class="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium transition-all">
+          <div class="flex items-center gap-3"><span>✨</span> Create Task</div>
+        </button>
+        <button onclick="switchPage('calendar')" id="nav-calendar" class="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium transition-all">
+          <div class="flex items-center gap-3"><span>📅</span> Smart Matrix</div>
+        </button>
+        <button onclick="switchPage('audio')" id="nav-audio" class="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium transition-all">
+          <div class="flex items-center gap-3"><span>🎙️</span> AI Voice</div>
+        </button>
+        <button onclick="switchPage('analytics')" id="nav-analytics" class="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium transition-all">
+          <div class="flex items-center gap-3"><span>📈</span> Analytics Node</div>
+        </button>
+        <button onclick="switchPage('notepad')" id="nav-notepad" class="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium transition-all">
+          <div class="flex items-center gap-3"><span>📝</span> Scratchpad</div>
+        </button>
+      </nav>
+
+      <div class="bg-slate-900/40 border border-slate-800/80 rounded-xl p-3 space-y-2 text-[11px]">
+        <div class="flex justify-between"><span class="text-slate-500">System Load:</span><span class="text-emerald-400 font-mono" id="sys-load">Optimal</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Focus Timer:</span><span class="text-indigo-400 font-mono cursor-pointer hover:underline" onclick="togglePomodoro()" id="pomo-display">25:00 (Start)</span></div>
+      </div>
+    </div>
+
+    <div class="border-t border-slate-800/60 pt-4 flex flex-col gap-2">
+      <button onclick="exportData()" class="text-left text-[11px] text-slate-500 hover:text-slate-300 transition-colors">📦 Backup System State (.json)</button>
+      <p class="text-[10px] text-slate-600 text-center">Engine Alpha Build • Offline Secured</p>
+    </div>
+  </div>
+
+  <main class="flex-1 p-10 max-w-7xl mx-auto w-full overflow-y-auto" id="main-content"></main>
+</div>
+
+<script>
+// ---------- APP STATE CORE ----------
+let tasks = [];
+let scratchpadText = "";
+let currentPage = 'dashboard';
+let searchQuery = '';
+let pomodoroInterval = null;
+let pomodoroSecondsLeft = 1500; 
+
+// Initial State Bootstrap
+try {
+  const savedTasks = localStorage.getItem('clerk_ultra_tasks');
+  const savedNotes = localStorage.getItem('clerk_ultra_notes');
+  tasks = savedTasks ? JSON.parse(savedTasks) : [
+    { id: 1, title: 'Map system deployment layout parameters', date: new Date().toISOString().split('T')[0], time: '10:00 AM', priority: 'High', completed: false, category: 'Engineering' },
+    { id: 2, title: 'Review structural canvas layouts', date: new Date().toISOString().split('T')[0], time: '02:00 PM', priority: 'Medium', completed: true, category: 'Design' }
+  ];
+  scratchpadText = savedNotes ? savedNotes : "Write runtime developer ideas down here...";
+} catch (e) {
+  tasks = [];
+}
+
+function saveState() {
+  localStorage.setItem('clerk_ultra_tasks', JSON.stringify(tasks));
+  localStorage.setItem('clerk_ultra_notes', scratchpadText);
+  updateSidebarBadge();
+}
+
+// ---------- TIMER MODULE ----------
+function togglePomodoro() {
+  if (pomodoroInterval) {
+    clearInterval(pomodoroInterval);
+    pomodoroInterval = null;
+    document.getElementById('pomo-display').innerText = formatPomoTime() + " (Paused)";
+  } else {
+    pomodoroInterval = setInterval(() => {
+      if (pomodoroSecondsLeft > 0) {
+        pomodoroSecondsLeft--;
+        document.getElementById('pomo-display').innerText = formatPomoTime() + " (Run)";
+      } else {
+        clearInterval(pomodoroInterval);
+        pomodoroInterval = null;
+        alert("🚨 Focus Cycle complete! Take a step away.");
+        pomodoroSecondsLeft = 1500;
+        document.getElementById('pomo-display').innerText = "25:00 (Reset)";
+      }
+    }, 1000);
+  }
+}
+
+function formatPomoTime() {
+  const mins = Math.floor(pomodoroSecondsLeft / 60);
+  const secs = pomodoroSecondsLeft % 60;
+  return (mins < 10 ? '0' : '') + mins + ':' + (secs < 10 ? '0' : '') + secs;
+}
+
+// ---------- EXPORT SYSTEM ----------
+function exportData() {
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tasks, null, 2));
+  const dlAnchor = document.createElement('a');
+  dlAnchor.setAttribute("href", dataStr);
+  dlAnchor.setAttribute("download", "clerk_system_backup.json");
+  dlAnchor.click();
+}
+
+// ---------- SEARCH HANDLER ----------
+function handleSearch(val) {
+  searchQuery = val.toLowerCase();
+  if (currentPage === 'dashboard') {
+    renderDashboard(document.getElementById('main-content'));
+  }
+}
+
+// ---------- NAVIGATION CONTROLLER ----------
+function switchPage(pageName) {
+  currentPage = pageName;
+  ['dashboard', 'input', 'calendar', 'audio', 'analytics', 'notepad'].forEach(id => {
+    const btn = document.getElementById('nav-' + id);
+    if (!btn) return;
+    if (id === pageName || (id === 'dashboard' && pageName.startsWith('task-'))) {
+      btn.className = "w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium bg-gradient-to-r from-indigo-500/10 to-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-lg shadow-cyan-500/5";
+    } else {
+      btn.className = "w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-900/50 border border-transparent";
+    }
+  });
+
+  const main = document.getElementById('main-content');
+  if (pageName === 'dashboard') renderDashboard(main);
+  else if (pageName === 'input') renderInput(main);
+  else if (pageName === 'calendar') renderCalendar(main);
+  else if (pageName === 'audio') renderAudio(main);
+  else if (pageName === 'analytics') renderAnalytics(main);
+  else if (pageName === 'notepad') renderNotepad(main);
+  else if (pageName.startsWith('task-')) renderTaskDetail(main, pageName.split('-')[1]);
+}
+
+function updateSidebarBadge() {
+  const activeCount = tasks.filter(t => !t.completed).length;
+  const badge = document.getElementById('badge-count');
+  if (activeCount > 0) {
+    badge.innerText = activeCount;
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+// ---------- RENDER VIEWS ----------
+function renderDashboard(target) {
+  const filteredTasks = tasks.filter(t => t.title.toLowerCase().includes(searchQuery));
+  let taskGridHTML = '';
+  
+  if (filteredTasks.length === 0) {
+    taskGridHTML = `<div class="bg-slate-900/30 border border-slate-800/60 border-dashed rounded-2xl p-16 text-center text-slate-500 text-sm">No matched system objectives found index records.</div>`;
+  } else {
+    taskGridHTML = `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">`;
+    filteredTasks.forEach(t => {
+      const pColor = t.priority === 'High' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : (t.priority === 'Low' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20');
+      
+      taskGridHTML += `
+        <div draggable="true" ondragstart="handleDrag(event, ${t.id})" class="cursor-grab active:cursor-grabbing transition-all duration-300 transform hover:-translate-y-1">
+          <div class="bg-slate-900/40 backdrop-blur-xl border border-slate-800/60 rounded-2xl p-6 flex flex-col justify-between h-full ${t.completed ? 'opacity-40 bg-emerald-950/5 border-emerald-500/10' : ''}">
+            <div>
+              <div class="flex justify-between items-start gap-2 mb-3">
+                <div class="flex gap-1.5">
+                  <span class="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${pColor}">${t.priority || 'Medium'}</span>
+                  <span class="text-[9px] font-mono bg-slate-800 border border-slate-700/50 text-slate-400 px-1.5 py-0.5 rounded">${t.category || 'General'}</span>
+                </div>
+                <input type="checkbox" ${t.completed ? 'checked' : ''} onclick="handleToggleComplete(${t.id})" class="w-4 h-4 rounded border-slate-700 text-cyan-500 bg-slate-800 cursor-pointer focus:ring-0">
+              </div>
+              <h3 class="font-bold text-base text-slate-200 tracking-tight leading-snug ${t.completed ? 'line-through text-slate-500' : ''}">${t.title}</h3>
+            </div>
+            <div class="mt-6 pt-3 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+              <div class="text-slate-400 font-mono">📅 ${t.date || 'TBD'}</div>
+              <button onclick="switchPage('task-${t.id}')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition-all">Inspect</button>
+            </div>
+          </div>
+        </div>`;
+    });
+    taskGridHTML += `</div>`;
+  }
+
+  target.innerHTML = `
+    <div class="space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-2xl font-bold tracking-tight text-white">Operational Deck</h2>
+          <p class="text-slate-400 text-xs mt-0.5">Real-time status overview of live matrix tasks.</p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="clearCompleted()" class="px-3 py-2 rounded-xl border border-slate-800 text-xs font-medium text-slate-400 hover:bg-slate-900 transition-all">Clear Finished</button>
+          <button onclick="switchPage('input')" class="px-4 py-2 rounded-xl font-medium text-xs bg-gradient-to-r from-cyan-500 to-indigo-500 text-white shadow-lg transform active:scale-95 transition-all">✨ Deploy Task</button>
+        </div>
+      </div>
+      ${taskGridHTML}
+    </div>`;
+}
+
+function renderInput(target) {
+  target.innerHTML = `
+    <div class="max-w-xl mx-auto mt-4">
+      <div class="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 shadow-2xl">
+        <h2 class="text-xl font-bold text-white mb-5">Compile New Entry</h2>
+        <div class="space-y-4">
+          <div>
+            <label class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1.5">Task Description</label>
+            <input id="input-title" class="bg-slate-950/60 border border-slate-800 rounded-xl p-3 w-full text-slate-200 focus:outline-none focus:border-cyan-500 text-sm" placeholder="Input execution path details...">
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1.5">Target Date</label>
+              <input type="date" id="input-date" class="bg-slate-950/60 border border-slate-800 rounded-xl p-3 w-full text-slate-200 text-xs focus:outline-none" value="${new Date().toISOString().split('T')[0]}">
+            </div>
+            <div>
+              <label class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1.5">Priority</label>
+              <select id="input-priority" class="bg-slate-950/60 border border-slate-800 rounded-xl p-3 w-full text-slate-200 text-xs focus:outline-none">
+                <option value="Low">Low</option>
+                <option value="Medium" selected>Medium</option>
+                <option value="High">High</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1.5">Category Tag</label>
+              <select id="input-category" class="bg-slate-950/60 border border-slate-800 rounded-xl p-3 w-full text-slate-200 text-xs focus:outline-none">
+                <option value="Engineering">Engineering</option>
+                <option value="Design">Design</option>
+                <option value="Operations">Operations</option>
+                <option value="Personal">Personal</option>
+              </select>
+            </div>
+          </div>
+          <button onclick="handleSubmitTask()" class="w-full mt-4 px-4 py-2.5 rounded-xl font-semibold text-xs bg-gradient-to-r from-cyan-500 via-indigo-500 to-purple-500 text-white shadow-lg transition-all transform active:scale-95">Compile To Core Array</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderCalendar(target) {
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    days.push(d.toISOString().split('T')[0]);
+  }
+
+  let daysHTML = '';
+  days.forEach(date => {
+    const dayTasks = tasks.filter(t => t.date === date);
+    const dayName = new Date(date).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
+
+    let dayTasksHTML = '';
+    if (dayTasks.length === 0) {
+      dayTasksHTML = `<div class="flex-1 flex items-center justify-center border border-dashed border-slate-800/40 rounded-xl p-4 text-[10px] text-slate-700 font-mono uppercase">Idle</div>`;
+    } else {
+      dayTasks.forEach(t => {
+        dayTasksHTML += `<div class="p-2 bg-slate-900 border border-slate-800 rounded-xl text-[11px] text-slate-300 font-medium truncate ${t.completed ? 'opacity-30' : ''}">${t.title}</div>`;
+      });
+    }
+
+    daysHTML += `
+      <div ondragover="event.preventDefault(); this.style.borderColor='#06b6d4';" ondragleave="this.style.borderColor='';" ondrop="handleDrop(event, '${date}'); this.style.borderColor='';" class="min-h-[220px] rounded-2xl p-4 flex flex-col border border-slate-800/80 bg-slate-900/20 transition-colors">
+        <div class="border-b border-slate-800/40 pb-2 mb-2 text-center text-[11px] font-bold text-slate-400 uppercase">${dayName}</div>
+        <div class="flex-1 flex flex-col gap-1.5">${dayTasksHTML}</div>
+      </div>`;
+  });
+
+  target.innerHTML = `
+    <div class="space-y-6">
+      <div>
+        <h2 class="text-2xl font-bold text-white">Smart Matrix Calendar</h2>
+        <p class="text-slate-400 text-xs mt-0.5">Drag-and-drop orchestration architecture mapping timelines dynamically.</p>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-4">${daysHTML}</div>
+    </div>`;
+}
+
+function renderAudio(target) {
+  target.innerHTML = `
+    <div class="max-w-xl mx-auto mt-6 text-center space-y-6">
+      <div class="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-10">
+        <button id="voice-btn" onclick="handleVoiceCapture()" class="px-5 py-3 rounded-xl font-semibold text-xs bg-gradient-to-r from-cyan-500 via-indigo-500 to-purple-500 text-white shadow-lg transition-transform transform active:scale-95">🎙️ Boot Voice Recognition Pipeline</button>
+        <div id="transcript-container" class="hidden mt-6 p-4 bg-slate-950 rounded-xl text-left text-xs font-mono border border-slate-800 text-slate-400">
+          <div class="text-[9px] text-cyan-400 font-bold uppercase mb-1">Incoming Stream Payload:</div>
+          <p id="transcript-text" class="italic"></p>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderAnalytics(target) {
+  const total = tasks.length;
+  const done = tasks.filter(t => t.completed).length;
+  const pending = total - done;
+  const highPriority = tasks.filter(t => t.priority === 'High' && !t.completed).length;
+  const rate = total > 0 ? Math.round((done / total) * 100) : 0;
+
+  target.innerHTML = `
+    <div class="space-y-6">
+      <div>
+        <h2 class="text-2xl font-bold text-white">Telemetry Analytics</h2>
+        <p class="text-slate-400 text-xs mt-0.5">Real-time array diagnostics and load data metrics.</p>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-slate-900/40 border border-slate-800 p-5 rounded-xl"><div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total Registers</div><div class="text-2xl font-bold text-white mt-1 font-mono">${total}</div></div>
+        <div class="bg-slate-900/40 border border-slate-800 p-5 rounded-xl"><div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Resolved Vectors</div><div class="text-2xl font-bold text-emerald-400 mt-1 font-mono">${done}</div></div>
+        <div class="bg-slate-900/40 border border-slate-800 p-5 rounded-xl"><div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Pending Loads</div><div class="text-2xl font-bold text-amber-400 mt-1 font-mono">${pending}</div></div>
+        <div class="bg-slate-900/40 border border-slate-800 p-5 rounded-xl"><div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">High Threat Level</div><div class="text-2xl font-bold text-rose-400 mt-1 font-mono">${highPriority}</div></div>
+      </div>
+      <div class="bg-slate-900/40 border border-slate-800 p-6 rounded-xl">
+        <div class="flex justify-between items-center mb-2"><span class="text-xs text-slate-400 font-bold uppercase">Efficiency Ratio</span><span class="text-sm font-mono text-cyan-400 font-bold">${rate}%</span></div>
+        <div class="w-full bg-slate-950 h-3 border border-slate-800 rounded-full overflow-hidden"><div class="bg-gradient-to-r from-cyan-500 to-indigo-500 h-full rounded-full transition-all duration-500" style="width: ${rate}%"></div></div>
+      </div>
+    </div>`;
+}
+
+function renderNotepad(target) {
+  target.innerHTML = `
+    <div class="space-y-4 h-[calc(100vh-140px)] flex flex-col">
+      <div>
+        <h2 class="text-2xl font-bold text-white">System Scratchpad</h2>
+        <p class="text-slate-400 text-xs mt-0.5">Ephemeral raw text storage field auto-cached on keystroke cycles.</p>
+      </div>
+      <textarea id="scratchpad-area" oninput="handleNotepadInput(this.value)" class="w-full flex-1 bg-slate-900/30 border border-slate-800/80 rounded-2xl p-6 focus:outline-none focus:border-indigo-500 font-mono text-xs text-slate-300 leading-relaxed resize-none">${scratchpadText}</textarea>
+    </div>`;
+}
+
+function renderTaskDetail(target, id) {
+  const task = tasks.find(t => t.id == id);
+  if (!task) return;
+  target.innerHTML = `
+    <div class="max-w-xl mx-auto mt-12">
+      <div class="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6">
+        <div class="flex justify-between items-center mb-6"><span class="text-xs text-cyan-400 font-mono uppercase tracking-widest">Index Node #${task.id}</span><button onclick="switchPage('dashboard')" class="px-3 py-1 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">← Retract</button></div>
+        <h2 class="text-2xl font-bold text-white mb-2">${task.title}</h2>
+        <p class="text-xs text-slate-400 mb-6">Execution Sector: <span class="text-indigo-400 font-mono">${task.category || 'General'}</span> Target Block: <span class="text-cyan-400 font-mono">${task.date}</span></p>
+        <div class="flex gap-3 justify-end">
+          <button onclick="handleDeleteTask(${task.id})" class="px-4 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-rose-500 to-red-600 text-white">Purge Record</button>
+          <button onclick="handleCompleteTask(${task.id})" class="px-4 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-emerald-500 to-teal-600 text-white">Resolve Core</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ---------- SYSTEM LOGIC / ROUTING CONTROLLERS ----------
+function handleDrag(e, id) { e.dataTransfer.setData('id', id); }
+function handleDrop(e, date) { const id = e.dataTransfer.getData('id'); tasks = tasks.map(t => t.id == id ? { ...t, date } : t); saveState(); renderCalendar(document.getElementById('main-content')); }
+function handleToggleComplete(id) { tasks = tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t); saveState(); switchPage(currentPage); }
+function handleNotepadInput(val) { scratchpadText = val; saveState(); }
+function clearCompleted() { tasks = tasks.filter(t => !t.completed); saveState(); switchPage('dashboard'); }
+function handleDeleteTask(id) { tasks = tasks.filter(t => t.id !== id); saveState(); switchPage('dashboard'); }
+function handleCompleteTask(id) { tasks = tasks.map(t => t.id === id ? { ...t, completed: true } : t); saveState(); switchPage('dashboard'); }
+
+function handleSubmitTask() {
+  const title = document.getElementById('input-title').value;
+  const date = document.getElementById('input-date').value;
+  const priority = document.getElementById('input-priority').value;
+  const category = document.getElementById('input-category').value;
+  if (!title || !date) return;
+  tasks.push({ id: Date.now(), title, date, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), priority, category, completed: false });
+  saveState();
+  switchPage('dashboard');
+}
+
+function handleVoiceCapture() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) { alert("API missing from platform configuration profile."); return; }
+  const btn = document.getElementById('voice-btn');
+  const rec = new SpeechRecognition();
+  rec.onstart = () => { btn.innerText = '🛑 Capturing Audio Array Stream...'; btn.className = "px-5 py-3 rounded-xl font-semibold text-xs bg-red-600 text-white animate-pulse"; };
+  rec.onend = () => { btn.innerText = '🎙️ Boot Voice Recognition Pipeline'; btn.className = "px-5 py-3 rounded-xl font-semibold text-xs bg-gradient-to-r from-cyan-500 via-indigo-500 to-purple-500 text-white"; };
+  rec.onresult = (e) => {
+    const text = e.results[0][0].transcript;
+    document.getElementById('transcript-container').classList.remove('hidden');
+    document.getElementById('transcript-text').innerText = text;
+    tasks.push({ id: Date.now(), title: "Voice payload: " + text, date: new Date().toISOString().split('T')[0], time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), priority: 'Medium', category: 'Operations', completed: false });
+    saveState();
+  };
+  rec.start();
+}
+
+// Global Core Startup Engine Cycle Execution
+switchPage('dashboard');
+updateSidebarBadge();
+</script>
+</body>
+</html>

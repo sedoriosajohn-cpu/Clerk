@@ -52,6 +52,7 @@ def build_prompt(user_input: str, current_time: str) -> str:
       "due_date": "ISO 8601 timestamp (YYYY-MM-DDTHH:MM:SSZ) or null",
       "end_date": "ISO 8601 timestamp (YYYY-MM-DDTHH:MM:SSZ) or null",
       "assignee": "name or 'me'",
+      "assigner": "Who assigned or sent this task. For Google Classroom use 'Course Name: Teacher Name'. For email/docs use only the person or people names, not a course/prefix.",
       "priority": "low | normal | high",
       "is_all_day": boolean,
       "confidence": 0-100,
@@ -61,6 +62,9 @@ def build_prompt(user_input: str, current_time: str) -> str:
     GUIDELINES:
     - Use 'reminder' for simple alerts (e.g., "Remind me to call Mom", "Alert me at 5pm").
     - Use 'task' for actionable work or assignments (e.g., "Finish the report", "Submit homework").
+    - Extract the assigner separately from the assignee. The assignee is who should do the work; the assigner is who gave/sent the task.
+    - For Google Classroom content, format assigner as "Class/Course Name: Teacher Name" when both are available.
+    - For emails or uploaded documents, if an assigner appears as "Label: Person", remove the label and keep only "Person". If multiple assigners appear, join their names with commas.
     - If a time range or date range is provided (e.g. "3pm to 10pm", "Monday to Wednesday"), use the start for due_date and end for end_date.
     - IMPORTANT: Resolve relative dates (e.g., "tomorrow", "this Friday", "next Saturday") into absolute ISO 8601 dates using the provided Current Local Timestamp.
     - If no specific time is mentioned (e.g., "Buy groceries on Friday"), set "is_all_day" to true.
@@ -311,6 +315,7 @@ def validate_task(task: Dict[str, Any]) -> Dict[str, Any]:
         "due_date": task.get("due_date"),
         "end_date": task.get("end_date"),
         "assignee": task.get("assignee") if task.get("assignee") else "me",
+        "assigner": task.get("assigner") or task.get("assigned_by") or task.get("teacher") or task.get("sender"),
         "is_all_day": bool(task.get("is_all_day", False)),
         "priority": p,
         "confidence": int(task.get("confidence", 70))

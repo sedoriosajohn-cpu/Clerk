@@ -16,6 +16,7 @@ import os.path
 import json
 import hashlib
 import time
+import re
 from urllib.parse import quote
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -344,6 +345,110 @@ def get_email_body(payload):
         return base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8')
     return ""
 
+def get_email_sender(payload):
+    headers = payload.get("headers", [])
+    sender = next((h.get("value", "") for h in headers if h.get("name", "").lower() == "from"), "")
+    if not sender:
+        return None
+    name_match = re.match(r'\s*"?([^"<]+?)"?\s*(?:<[^>]+>)?\s*$', sender)
+    if name_match:
+        return name_match.group(1).strip()
+    return sender.strip()
+
+def clean_assigner_label(value: Optional[str], source_info: str) -> str:
+    if not value:
+        return "me"
+
+    assigner = re.sub(r'\s+', ' ', str(value)).strip()
+    if not assigner:
+        return "me"
+
+    source = (source_info or "").lower()
+    if source.startswith("classroom"):
+        return assigner
+
+    # Email/doc inputs should not keep labels like "US History II: Mr. Teacher".
+    parts = [part.strip() for part in re.split(r',|;|\band\b', assigner) if part.strip()]
+    cleaned_parts = []
+    for part in parts or [assigner]:
+        if ":" in part:
+            part = part.split(":")[-1].strip()
+        part = re.sub(r'^(from|sender|assigned by|assigner|teacher)\s*[:\-]\s*', '', part, flags=re.IGNORECASE).strip()
+        if part and part.lower() not in {"none", "null", "me"}:
+            cleaned_parts.append(part)
+
+    return ", ".join(cleaned_parts) if cleaned_parts else "me"
+
+def infer_assigner_from_text(text_content: str, source_info: str) -> Optional[str]:
+    source = (source_info or "").lower()
+    patterns = []
+    if source.startswith("classroom"):
+        patterns = [
+            r'Assigned By:\s*([^\n.]+)',
+            r'for\s+([^.\n]+?)\.\s*Assigned By:\s*([^\n.]+)',
+            r'Classroom Assignment:\s*.*?\s+for\s+([^.\n]+)'
+        ]
+    elif source.startswith("gmail"):
+        patterns = [r'Email From:\s*([^\n]+)']
+    else:
+        patterns = [
+            r'(?:Assigned By|Assigner|Teacher|From):\s*([^\n.]+)',
+            r'\b[A-Z][\w &.-]{2,}:\s*([A-Z][^\n.]+)'
+        ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text_content, re.IGNORECASE)
+        if not match:
+            continue
+        return match.group(match.lastindex or 1).strip()
+    return None
+
+def normalize_task_assigner(task_data, text_content: str, source_info: str) -> str:
+    raw_assigner = (
+        task_data.get("assigner")
+        or task_data.get("assigned_by")
+        or task_data.get("teacher")
+        or task_data.get("sender")
+        or infer_assigner_from_text(text_content, source_info)
+        or task_data.get("assignee")
+    )
+    return clean_assigner_label(raw_assigner, source_info)
+
+def normalize_title_for_match(title: Optional[str]) -> str:
+    text = re.sub(r'[^a-z0-9\s]', ' ', str(title or "").lower())
+    text = re.sub(
+        r'\b(google classroom|classroom|assignment|new|posted|assigned|due|please|reminder|notification)\b',
+        ' ',
+        text
+    )
+    return re.sub(r'\s+', ' ', text).strip()
+
+def due_day_key(due_date: Optional[str]) -> str:
+    if not due_date:
+        return ""
+    match = re.search(r'\d{4}-\d{2}-\d{2}', str(due_date))
+    return match.group(0) if match else str(due_date)
+
+def find_duplicate_task(db: Session, user_id: int, task_data) -> Optional[Task]:
+    title_key = normalize_title_for_match(task_data.get("title"))
+    due_key = due_day_key(task_data.get("due_date"))
+    if not title_key:
+        return None
+
+    existing_tasks = db.query(Task).filter(
+        Task.owner_id == user_id,
+        Task.status != "deleted"
+    ).all()
+
+    for existing in existing_tasks:
+        if normalize_title_for_match(existing.title) != title_key:
+            continue
+        if due_key and due_day_key(existing.due_date) != due_key:
+            continue
+        return existing
+
+    return None
+
 @app.get("/sync-gmail")
 async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
     try:
@@ -364,8 +469,11 @@ async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
             m = service.users().messages().get(userId='me', id=msg['id']).execute()
             # Fetch full body instead of just the snippet
             body = get_email_body(m.get('payload', {})) or m.get('snippet', '')
+            sender = get_email_sender(m.get('payload', {}))
             if body:
                 try:
+                    if sender:
+                        body = f"Email From: {sender}\n{body}"
                     await process_and_save_tasks(body, user_id, f"gmail: {msg['id']}", db)
                     processed_count += 1
                 except HTTPException:
@@ -399,9 +507,18 @@ async def sync_all(user_id: int, db: Session = Depends(get_db)):
             for item in cw_result.get('courseWork', []):
                 due = item.get('dueDate', {})
                 due_str = f"{due.get('month')}/{due.get('day')}/{due.get('year')}" if due else "No date"
+                teacher_name = None
+                creator_id = item.get("creatorUserId") or course.get("teacherGroupEmail")
+                if creator_id:
+                    try:
+                        profile = classroom.userProfiles().get(userId=creator_id).execute()
+                        teacher_name = profile.get("name", {}).get("fullName") or profile.get("emailAddress")
+                    except Exception:
+                        teacher_name = None
+                assigner = f"{course['name']}: {teacher_name}" if teacher_name else course["name"]
 
                 # Create a prompt-friendly string for the AI to ingest
-                content = f"Classroom Assignment: {item['title']} for {course['name']}. Due: {due_str}. Instructions: {item.get('description', '')}"
+                content = f"Classroom Assignment: {item['title']} for {course['name']}. Assigned By: {assigner}. Due: {due_str}. Instructions: {item.get('description', '')}"
                 try:
                     await process_and_save_tasks(content, user_id, f"classroom: {item['id']}", db)
                     summary["classroom"] += 1
@@ -446,6 +563,14 @@ async def process_and_save_tasks(text_content, user_id, source_info, db, current
 
         task_ids = []
         for task_data in structured_tasks:
+            normalized_assigner = normalize_task_assigner(task_data, text_content, source_info)
+            duplicate = find_duplicate_task(db, user_id, task_data)
+            if duplicate:
+                if normalized_assigner != "me" and (not duplicate.assignee or duplicate.assignee == "me"):
+                    duplicate.assignee = normalized_assigner
+                task_ids.append(duplicate.task_id)
+                continue
+
             new_task = Task(
                 owner_id=user_id,
                 raw_id=new_raw.raw_id,
@@ -453,7 +578,7 @@ async def process_and_save_tasks(text_content, user_id, source_info, db, current
                 due_date=task_data.get("due_date"), # Store None if not provided, not "None" string
                 end_date=task_data.get("end_date"),
                 due_text=task_data.get("due"),
-                assignee=task_data.get("assignee", "me"),
+                assignee=normalized_assigner,
                 priority=task_data.get("priority", "normal"),
                 is_all_day=1 if task_data.get("is_all_day") else 0,
                 item_type=task_data.get("item_type", "task"),
@@ -475,6 +600,25 @@ async def process_and_save_tasks(text_content, user_id, source_info, db, current
 @app.get("/tasks")
 async def get_tasks(user_id: int, db: Session = Depends(get_db)):
     tasks = db.query(Task).filter(Task.owner_id == user_id).all()
+    changed = False
+    for task in tasks:
+        if task.assignee and task.assignee != "me":
+            continue
+        if not task.raw_id:
+            continue
+
+        raw = db.query(RawInput).filter(RawInput.raw_id == task.raw_id).first()
+        if not raw:
+            continue
+
+        inferred_assigner = normalize_task_assigner({}, raw.content, raw.source_type)
+        if inferred_assigner != "me":
+            task.assignee = inferred_assigner
+            changed = True
+
+    if changed:
+        db.commit()
+
     return {"tasks": tasks}
 
 @app.get("/users/{user_id}/settings")

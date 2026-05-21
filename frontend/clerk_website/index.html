@@ -1343,6 +1343,7 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
         const timeStr = task.is_all_day ? "All Day" : (startDt && task.due_date.includes('T')) 
             ? startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
             : "";
+        const assignerText = task.assignee && task.assignee !== 'me' ? `Assigned by ${task.assignee}` : '';
 
         item.innerHTML = `
               <div class="time">${timeStr}</div>
@@ -1351,7 +1352,7 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
                     ${itemType === 'reminder' ? '🔔 Reminder' : '📋 Task'}
                 </div>
                 <div class="task-title">${task.title}</div>
-                <div class="task-sub">${task.description || ''}</div>
+                <div class="task-sub">${[assignerText, task.description || ''].filter(Boolean).join(' • ')}</div>
                 ${datePickerHtml}
             </div>
             <div class="task-actions">

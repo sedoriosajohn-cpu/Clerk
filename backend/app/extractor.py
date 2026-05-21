@@ -1,7 +1,7 @@
 import os
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -9,7 +9,27 @@ from dotenv import load_dotenv
 load_dotenv()
 
 api_key = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=api_key)
+client = OpenAI(api_key=api_key) if api_key else None
+
+ACTION_WORDS = {
+    "add", "answer", "bring", "buy", "call", "check", "complete", "create",
+    "do", "draft", "email", "finish", "fix", "implement", "make", "meet",
+    "prepare", "read", "remind", "review", "schedule", "send", "study",
+    "submit", "turn in", "update", "write"
+}
+
+MONTHS = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7,
+    "july": 7, "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12,
+    "december": 12
+}
+
+WEEKDAYS = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6
+}
 
 def build_prompt(user_input: str, current_time: str) -> str:
     return f"""
@@ -91,17 +111,142 @@ def extract_json(text: str) -> list:
             return [json.loads(obj_match.group(0))]
         raise ValueError("Failed to parse AI response as JSON")
 
+def parse_current_time(current_time: Optional[str]) -> datetime:
+    if not current_time:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    cleaned = current_time.replace("(Local Time)", "").strip()
+    cleaned = cleaned.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(cleaned)
+        return parsed.replace(tzinfo=None)
+    except ValueError:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+def parse_time_fragment(text: str):
+    match = re.search(r'\b(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b', text, re.IGNORECASE)
+    if not match:
+        return 12, 0, True
+
+    hour = int(match.group(1))
+    minute = int(match.group(2) or 0)
+    suffix = match.group(3).lower()
+    if suffix == "pm" and hour != 12:
+        hour += 12
+    if suffix == "am" and hour == 12:
+        hour = 0
+    return hour, minute, False
+
+def parse_due_date(text: str, now: datetime):
+    lowered = text.lower()
+    hour, minute, is_all_day = parse_time_fragment(lowered)
+    target = None
+
+    if re.search(r'\btoday\b', lowered):
+        target = now
+    elif re.search(r'\btomorrow\b', lowered):
+        target = now + timedelta(days=1)
+    else:
+        next_weekday = re.search(r'\bnext\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', lowered)
+        weekday = next_weekday or re.search(r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', lowered)
+        if weekday:
+            desired = WEEKDAYS[weekday.group(1)]
+            days_ahead = desired - now.weekday()
+            if days_ahead <= 0 or next_weekday:
+                days_ahead += 7
+            target = now + timedelta(days=days_ahead)
+
+    numeric = re.search(r'\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b', lowered)
+    if numeric:
+        month = int(numeric.group(1))
+        day = int(numeric.group(2))
+        year = int(numeric.group(3) or now.year)
+        if year < 100:
+            year += 2000
+        target = datetime(year, month, day)
+
+    month_name = re.search(
+        r'\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:,\s*(\d{4}))?\b',
+        lowered
+    )
+    if month_name:
+        target = datetime(
+            int(month_name.group(3) or now.year),
+            MONTHS[month_name.group(1)],
+            int(month_name.group(2))
+        )
+
+    if not target:
+        return None, None, True
+
+    due = target.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return due.strftime("%Y-%m-%dT%H:%M:%SZ"), None, is_all_day
+
+def clean_task_title(text: str) -> str:
+    title = re.sub(r'\b(?:by|due|on|at)\s+.*$', '', text, flags=re.IGNORECASE).strip()
+    title = re.sub(r'^(please\s+|remind me to\s+|remind me\s+|i need to\s+|need to\s+)', '', title, flags=re.IGNORECASE)
+    return title[:1].upper() + title[1:] if title else "New Task"
+
+def local_nlp_extract_tasks(text: str, current_time: Optional[str] = None) -> List[Dict[str, Any]]:
+    now = parse_current_time(current_time)
+    candidates = []
+    for chunk in re.split(r'[\n;]+|(?<=[.!?])\s+', text):
+        candidate = chunk.strip(" -\t\r\n")
+        if len(candidate) < 3:
+            continue
+        lowered = candidate.lower()
+        if not any(word in lowered for word in ACTION_WORDS) and not re.search(r'\b(due|deadline|tomorrow|today|next\s+\w+)\b', lowered):
+            continue
+        candidates.append(candidate)
+
+    if not candidates and text.strip():
+        candidates = [text.strip()]
+
+    tasks = []
+    for candidate in candidates:
+        lowered = candidate.lower()
+        due_date, end_date, is_all_day = parse_due_date(candidate, now)
+        item_type = "reminder" if "remind" in lowered or "alert" in lowered else "task"
+        priority = "normal"
+        if re.search(r'\b(urgent|asap|important|must|deadline)\b', lowered):
+            priority = "high"
+        elif re.search(r'\b(optional|low priority|when you can)\b', lowered):
+            priority = "low"
+
+        confidence = 74
+        if due_date:
+            confidence += 10
+        if any(word in lowered for word in ACTION_WORDS):
+            confidence += 8
+
+        tasks.append(format_for_frontend({
+            "item_type": item_type,
+            "title": clean_task_title(candidate),
+            "description": "Parsed locally when AI extraction was unavailable.",
+            "due_date": due_date,
+            "end_date": end_date,
+            "assignee": "me",
+            "is_all_day": is_all_day,
+            "priority": priority,
+            "confidence": min(confidence, 92)
+        }))
+
+    return tasks
+
 def extract_task_from_text(text: str, current_time: Optional[str] = None) -> list:
     if not text or not text.strip():
         return []
 
     try:
+        if not client:
+            return local_nlp_extract_tasks(text, current_time)
+
         # Use provided local time or fallback to server UTC
         now_iso = current_time if current_time else datetime.now(timezone.utc).isoformat()
         prompt = build_prompt(text, now_iso)
 
         response = client.chat.completions.create(
-            model="gpt-5.4",
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
@@ -129,7 +274,7 @@ def extract_task_from_text(text: str, current_time: Optional[str] = None) -> lis
         
     except Exception as e:
         print(f"EXTRACTION ERROR: {e}")
-        return []
+        return local_nlp_extract_tasks(text, current_time)
 
 def adjust_confidence(user_input: str, task: Dict[str, Any]) -> Dict[str, Any]:
     text = user_input.lower()

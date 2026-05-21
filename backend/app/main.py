@@ -1,18 +1,21 @@
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from .extractor import extract_task_from_text
-from scripts.init_db import SessionLocal, Task, RawInput, User
+try:
+    from backend.scripts.init_db import SessionLocal, Task, RawInput, User
+except ImportError:
+    from scripts.init_db import SessionLocal, Task, RawInput, User
 from datetime import datetime, timedelta
 import base64
-import fitz
 import os.path
 import json
 import hashlib
+import time
 from urllib.parse import quote
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -27,6 +30,8 @@ SCOPES = [
 ]
 
 app = FastAPI()
+SYNC_THROTTLE_SECONDS = int(os.environ.get("SYNC_THROTTLE_SECONDS", "30"))
+sync_request_log = {}
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 GOOGLE_TOKEN_DIR = os.path.join(BASE_DIR, "..", "..", "google_tokens")
@@ -43,6 +48,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def throttle_expensive_sync_routes(request: Request, call_next):
+    if request.url.path not in {"/sync-gmail", "/sync-all"}:
+        return await call_next(request)
+
+    user_id = request.query_params.get("user_id") or request.client.host
+    key = (request.url.path, user_id)
+    now = time.monotonic()
+    last_seen = sync_request_log.get(key, 0)
+    retry_after = SYNC_THROTTLE_SECONDS - (now - last_seen)
+
+    if retry_after > 0:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"Please wait {int(retry_after) + 1} seconds before syncing again."},
+            headers={"Retry-After": str(int(retry_after) + 1)}
+        )
+
+    sync_request_log[key] = now
+    return await call_next(request)
 
 def get_db():
     db = SessionLocal()
@@ -127,6 +153,13 @@ async def ingest_doc(
 
     try:
         if file_type == "application/pdf":
+            try:
+                import fitz
+            except ModuleNotFoundError:
+                raise HTTPException(
+                    status_code=500,
+                    detail="PDF support is not installed correctly. Reinstall PyMuPDF to upload PDF documents."
+                )
             # Read PDF bytes
             pdf_bytes = await file.read()
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -290,7 +323,6 @@ def get_gmail_service(user_id: int):
         raise HTTPException(status_code=401, detail="Google account not connected. Please connect via Settings.")
     return build('gmail', 'v1', credentials=creds)
 
-# FIX: Proper OAuth redirect flow so the browser handles auth, not run_local_server
 @app.get("/auth/google")
 async def get_google_auth_url(user_id: int, db: Session = Depends(get_db)):
     """Returns the Google OAuth URL for the frontend to redirect to."""
@@ -318,7 +350,6 @@ async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
         ensure_user_exists(user_id, db)
         creds = get_google_creds(user_id)
         if not creds:
-            # If no credentials, return the auth URL for the frontend to redirect
             if not os.path.exists(CREDS_PATH):
                 return {"error": "credentials_missing", "message": "Google credentials.json is missing on the server."}
 
@@ -338,7 +369,6 @@ async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
                     await process_and_save_tasks(body, user_id, f"gmail: {msg['id']}", db)
                     processed_count += 1
                 except HTTPException:
-                    # Skip emails where no tasks were found
                     continue
         return {"status": "success", "message": f"Scanned {len(messages)} emails and extracted tasks from {processed_count} of them."}
     except Exception as e:

@@ -242,6 +242,30 @@ body {
     pointer-events: none;
 }
 
+.skeleton-list {
+    display: grid;
+    gap: 12px;
+    padding: 12px 0;
+}
+
+.skeleton-card {
+    height: 76px;
+    border-radius: 14px;
+    background: linear-gradient(90deg, rgba(148, 163, 184, .16), rgba(148, 163, 184, .34), rgba(148, 163, 184, .16));
+    background-size: 220% 100%;
+    animation: skeletonPulse 1.1s ease-in-out infinite;
+}
+
+@keyframes skeletonPulse {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+}
+
+.inline-error {
+    color: #fb7185;
+    padding: 20px;
+}
+
 .hour-label {
     width: 82px;
     font-size: 12px;
@@ -477,8 +501,10 @@ body.dark-mode .calendar-all-day-row {
 
 .week-day {
     border-right: 1px solid var(--border);
-    padding: 12px;
+    padding: 14px 0;
     min-width: 0;
+    overflow: hidden;
+    cursor: pointer;
 }
 
 .week-day:last-child {
@@ -490,7 +516,16 @@ body.dark-mode .calendar-all-day-row {
     font-size: 12px;
     font-weight: 800;
     text-transform: uppercase;
-    margin-bottom: 8px;
+    margin: 0 14px 8px;
+}
+
+.week-day .day-num {
+    margin: 0 14px 14px;
+}
+
+.week-empty-lane {
+    height: 1.6rem;
+    margin: 0 10px 4px;
 }
 
 .year-grid {
@@ -519,6 +554,45 @@ body.dark-mode .calendar-all-day-row {
     text-align: center;
 }
 
+.year-day {
+    min-height: 30px;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 2px;
+    border-radius: 7px;
+    cursor: pointer;
+}
+
+.year-day:hover {
+    background: rgba(94, 234, 212, 0.12);
+}
+
+.year-task-dots {
+    display: flex;
+    justify-content: center;
+    gap: 2px;
+    min-height: 4px;
+}
+
+.year-task-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+}
+
+.year-task-more {
+    width: 11px;
+    height: 4px;
+    border-radius: 999px;
+}
+
+.year-task-dot.pink, .year-task-more.pink { background: #d4145a; }
+.year-task-dot.amber, .year-task-more.amber { background: #c68a00; }
+.year-task-dot.teal, .year-task-more.teal { background: #00a190; }
+.year-task-dot.blue, .year-task-more.blue { background: #3478bd; }
+.year-task-dot.reminder, .year-task-more.reminder { background: #7e22ce; }
+
 
 /* ==========================================================================
    6. CALENDAR GRID (BIG)
@@ -536,10 +610,11 @@ body.dark-mode .calendar-all-day-row {
 
 .cal-day {
     background: var(--panel-bg); /* Matches the rest of the app */
-    min-height: 110px;
-    padding: 10px;
+    min-height: 126px;
+    padding: 10px 0 10px;
     color: var(--text);
     min-width: 0; /* Ensures the cell can shrink to allow for ellipsis */
+    overflow: hidden;
 }
 
 .cal-header {
@@ -556,7 +631,8 @@ body.dark-mode .calendar-all-day-row {
     font-size: 0.8rem;
     font-weight: 700;
     color: var(--muted);
-    margin-bottom: 8px;
+    display: block;
+    margin: 0 10px 8px;
 }
 
 /* ==========================================================================
@@ -616,44 +692,63 @@ body.dark-mode .calendar-all-day-row {
 }
 /* Styling for task "pills" inside calendar days */
 .calendar-event {
-    display: block;
-    width: 100%;
-    max-width: 100%;
+    display: flex;
+    align-items: center;
+    width: calc(100% - 20px);
+    max-width: calc(100% - 20px);
     box-sizing: border-box;
     font-size: 0.75rem;
-    padding: 2px 4px;
-    margin-bottom: 2px;
+    padding: 0 10px;
+    margin: 0 10px 4px;
     border-radius: 6px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     color: var(--text); /* Darker text for readability on transparent background */
-    font-weight: 500;
+    font-weight: 700;
     position: relative;
-    height: 1.3rem;
-    line-height: 1rem;
+    height: 1.6rem;
+    line-height: 1.6rem;
     z-index: 1;
 }
 
 .calendar-event.span-start { 
-    border-top-right-radius: 0; border-bottom-right-radius: 0; 
-    margin-right: -11px; width: calc(100% + 11px); 
+    border-top-right-radius: 0; border-bottom-right-radius: 0;
+    margin-right: 0; width: calc(100% - 10px); max-width: calc(100% - 10px);
     overflow: hidden; text-overflow: ellipsis;
 }
 .calendar-event.span-mid { 
-    border-radius: 0; border-left: none !important; 
-    margin-left: -11px; margin-right: -11px; width: calc(100% + 22px); 
-    color: transparent; /* Hide text in middle segments to avoid clutter */
+    border-radius: 0; border-left: none !important;
+    margin-left: 0; margin-right: 0; width: 100%; max-width: 100%;
+    color: transparent;
 }
 .calendar-event.span-end { 
-    border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: none !important; 
-    margin-left: -11px; width: calc(100% + 11px); 
+    border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: none !important;
+    margin-left: 0; width: calc(100% - 10px); max-width: calc(100% - 10px);
     color: transparent;
 }
 
+.calendar-event.week-start {
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+    border-left-width: 4px !important;
+    margin-left: 10px;
+    width: calc(100% - 10px);
+    max-width: calc(100% - 10px);
+    color: var(--text);
+}
+
+.calendar-event.week-end {
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+    margin-right: 10px;
+    width: calc(100% - 10px);
+    max-width: calc(100% - 10px);
+}
+
 .calendar-spacer {
-    height: 1.3rem;
-    margin-bottom: 2px;
+    height: 1.6rem;
+    margin: 0 10px 4px;
 }
 
 .calendar-event.pink { background-color: rgba(255, 75, 145, 0.25); border-left: 3px solid #d4145a; }
@@ -929,7 +1024,52 @@ const voiceBtn = document.getElementById('voiceBtn');
 const statusMsg = document.getElementById('statusMsg');
 const agendaList = document.getElementById('agendaList');
 const newTasksList = document.getElementById('newTasksList');
-const API_BASE = "http://127.0.0.1:8000";
+let API_BASE = window.location.port === "8000" ? window.location.origin : "http://127.0.0.1:8000";
+const REQUEST_TIMEOUT_MS = 12000;
+const requestBucket = new Map();
+
+function renderSkeleton(count = 4) {
+    return `<div class="skeleton-list">${Array.from({ length: count }, () => '<div class="skeleton-card"></div>').join('')}</div>`;
+}
+
+function getFriendlyApiError(error) {
+    if (error && error.name === 'AbortError') return "The server took too long to respond.";
+    if (error && error.message) return error.message;
+    return "Connection failed. Make sure the FastAPI backend is running on port 8000.";
+}
+
+async function apiFetch(url, options = {}) {
+    const method = (options.method || 'GET').toUpperCase();
+    const throttleKey = options.throttleKey || `${method}:${url}`;
+    const minInterval = options.minInterval || 0;
+    const now = Date.now();
+    const lastRun = requestBucket.get(throttleKey) || 0;
+
+    if (minInterval && now - lastRun < minInterval) {
+        throw new Error("Please wait a moment before trying that again.");
+    }
+
+    requestBucket.set(throttleKey, now);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), options.timeout || REQUEST_TIMEOUT_MS);
+
+    try {
+        try {
+            return await fetch(url, { ...options, signal: controller.signal });
+        } catch (error) {
+            if (API_BASE.endsWith(':8000') && String(url).startsWith(API_BASE)) {
+                const fallbackBase = API_BASE.replace(':8000', ':8001');
+                const fallbackUrl = String(url).replace(API_BASE, fallbackBase);
+                const fallbackResponse = await fetch(fallbackUrl, { ...options, signal: controller.signal });
+                API_BASE = fallbackBase;
+                return fallbackResponse;
+            }
+            throw error;
+        }
+    } finally {
+        clearTimeout(timer);
+    }
+}
 
 // Helper to parse dates as "Wall Time" (ignoring UTC shift)
 const parseWallTime = (isoStr) => {
@@ -956,6 +1096,24 @@ const parseWallTime = (isoStr) => {
     }
     return new Date(cleanedIsoStr);
 };
+
+function formatDateKey(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function startOfLocalDay(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0);
+}
+
+function escapeHTML(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[char]));
+}
 
 //global user variable 
 window.CURRENT_USER_ID = null;
@@ -987,10 +1145,12 @@ window.login = async function() {
     const errorMsg = document.getElementById('login-error');
 
     try {
-        const response = await fetch(`${API_BASE}/login`, {
+        const response = await apiFetch(`${API_BASE}/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: usernameInput, password: passwordInput })
+            body: JSON.stringify({ username: usernameInput, password: passwordInput }),
+            throttleKey: 'login',
+            minInterval: 1000
         });
         
 
@@ -1010,14 +1170,14 @@ window.login = async function() {
         }
     } catch (err) {
         console.error("Login Error:", err);
-        errorMsg.textContent = "Server connection failed";
+        errorMsg.textContent = getFriendlyApiError(err);
         errorMsg.style.display = 'block';
     }
 };
 
 async function fetchUserSettings() {
     try {
-        const response = await fetch(`${API_BASE}/users/${window.CURRENT_USER_ID}/settings`);
+        const response = await apiFetch(`${API_BASE}/users/${window.CURRENT_USER_ID}/settings`);
         if (response.ok) {
             window.USER_SETTINGS = await response.json();
             
@@ -1044,7 +1204,7 @@ async function saveUserSettings() {
     
     window.USER_SETTINGS = settings;
 
-    await fetch(`${API_BASE}/users/${window.CURRENT_USER_ID}/settings`, {
+    await apiFetch(`${API_BASE}/users/${window.CURRENT_USER_ID}/settings`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
@@ -1082,10 +1242,12 @@ async function register() {
     if (!userVal || !passVal) return alert("Please fill in all fields");
 
     try {
-        const response = await fetch(`${API_BASE}/register`, {
+        const response = await apiFetch(`${API_BASE}/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: userVal, password: passVal })
+            body: JSON.stringify({ username: userVal, password: passVal }),
+            throttleKey: 'register',
+            minInterval: 1000
         });
 
         if (response.ok) {
@@ -1097,7 +1259,7 @@ async function register() {
             errorMsg.style.display = 'block';
         }
     } catch (err) {
-        alert("Server connection failed");
+        alert(getFriendlyApiError(err));
     }
 }
 
@@ -1208,7 +1370,7 @@ async function dismissTask(taskId) {
 
     try {
         // 2. Perform a soft delete (update status to 'deleted')
-        const response = await fetch(`${API_BASE}/tasks/${taskId}`, {
+        const response = await apiFetch(`${API_BASE}/tasks/${taskId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'deleted' })
@@ -1234,7 +1396,7 @@ async function dismissTask(taskId) {
 
 async function restoreTask(taskId) {
     try {
-        const response = await fetch(`${API_BASE}/tasks/${taskId}`, {
+        const response = await apiFetch(`${API_BASE}/tasks/${taskId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'pending' })
@@ -1255,7 +1417,7 @@ async function permanentlyDeleteTask(taskId) {
     if (!confirm("Are you sure you want to permanently delete this task? This cannot be undone.")) return;
 
     try {
-        const response = await fetch(`${API_BASE}/tasks/${taskId}/permanent`, {
+        const response = await apiFetch(`${API_BASE}/tasks/${taskId}/permanent`, {
             method: 'DELETE'
         });
 
@@ -1279,7 +1441,7 @@ async function completeTask(taskId) {
 
     try {
         // 2. Update the status in the backend
-        const response = await fetch(`${API_BASE}/tasks/${taskId}`, {
+        const response = await apiFetch(`${API_BASE}/tasks/${taskId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'completed' })
@@ -1340,7 +1502,7 @@ async function loadView(view) {
     }
     
     // 4. Loading State
-    agendaList.innerHTML = '<p style="padding:20px; color:var(--muted);">Loading tasks...</p>';
+    agendaList.innerHTML = renderSkeleton();
 
     // 5. Fetch data with type-safe User ID
     // We check window.CURRENT_USER_ID because that's what your login function sets
@@ -1353,7 +1515,10 @@ async function loadView(view) {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/tasks?user_id=${userId}`);
+        const response = await apiFetch(`${API_BASE}/tasks?user_id=${userId}`, {
+            throttleKey: `tasks:${userId}`,
+            minInterval: 350
+        });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
         const data = await response.json();
@@ -1404,7 +1569,10 @@ async function loadView(view) {
         }
         else if (view === 'history') {
             titleHeader.textContent = "Recently Completed & Deleted Tasks";
-            const historyResponse = await fetch(`${API_BASE}/tasks/history?user_id=${userId}`);
+            const historyResponse = await apiFetch(`${API_BASE}/tasks/history?user_id=${userId}`, {
+                throttleKey: `history:${userId}`,
+                minInterval: 350
+            });
             if (!historyResponse.ok) throw new Error(`HTTP error! status: ${historyResponse.status}`);
             const historyData = await historyResponse.json();
             const historyTasks = historyData.tasks || [];
@@ -1412,7 +1580,7 @@ async function loadView(view) {
         }
     } catch (err) {
         console.error("LoadView Error:", err);
-        agendaList.innerHTML = '<p style="color:pink; padding:20px;">Connection Error: Check if FastAPI is running.</p>';
+        agendaList.innerHTML = `<p class="inline-error">${getFriendlyApiError(err)}</p>`;
     }
 }
 
@@ -1449,7 +1617,7 @@ function taskOccursOnDate(task, date) {
     const start = parseWallTime(task.due_date);
     if (!start) return false;
     const end = task.end_date ? parseWallTime(task.end_date) : start;
-    const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0);
+    const dayStart = startOfLocalDay(date);
     const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
     return start <= dayEnd && end >= dayStart;
 }
@@ -1459,9 +1627,75 @@ function isAllDayCalendarTask(task, date) {
     if (!task.end_date || !task.due_date) return false;
     const start = parseWallTime(task.due_date);
     const end = parseWallTime(task.end_date);
-    const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0);
+    const dayStart = startOfLocalDay(date);
     const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
     return start < dayStart && end >= dayEnd;
+}
+
+function buildTaskLanes(tasks) {
+    const lanesByDate = {};
+    let maxLane = -1;
+
+    const sortedTasks = [...tasks].sort((a, b) => {
+        const startA = parseWallTime(a.due_date);
+        const endA = a.end_date ? parseWallTime(a.end_date) : startA;
+        const startB = parseWallTime(b.due_date);
+        const endB = b.end_date ? parseWallTime(b.end_date) : startB;
+        if (!startA || !startB) return startA ? -1 : 1;
+        return (endB - startB) - (endA - startA) || startA - startB;
+    });
+
+    sortedTasks.forEach(task => {
+        const start = parseWallTime(task.due_date);
+        if (!start) return;
+
+        const end = task.end_date ? parseWallTime(task.end_date) : start;
+        let date = startOfLocalDay(start);
+        const stop = startOfLocalDay(end || start);
+        const datesInRange = [];
+
+        while (date <= stop) {
+            datesInRange.push(formatDateKey(date));
+            date.setDate(date.getDate() + 1);
+        }
+
+        let lane = 0;
+        while (datesInRange.some(dateKey => lanesByDate[dateKey] && lanesByDate[dateKey][lane])) {
+            lane++;
+        }
+
+        datesInRange.forEach(dateKey => {
+            if (!lanesByDate[dateKey]) lanesByDate[dateKey] = [];
+            lanesByDate[dateKey][lane] = task;
+        });
+        maxLane = Math.max(maxLane, lane);
+    });
+
+    return { lanesByDate, maxLane };
+}
+
+function getCalendarSpanMeta(task, date, rangeEndDate) {
+    const taskStart = parseWallTime(task.due_date);
+    const taskEnd = task.end_date ? parseWallTime(task.end_date) : taskStart;
+    const dateStr = formatDateKey(date);
+    const taskStartStr = formatDateKey(taskStart);
+    const taskEndStr = formatDateKey(taskEnd);
+    const dayOfWeek = date.getDay();
+    const rangeEndStr = formatDateKey(rangeEndDate);
+
+    let spanClass = "";
+    let showTitle = true;
+    if (taskStartStr !== taskEndStr) {
+        const startsSegment = dateStr === taskStartStr || dayOfWeek === 0 || date.getDate() === 1;
+        const endsSegment = dateStr === taskEndStr || dayOfWeek === 6 || dateStr === rangeEndStr;
+        if (startsSegment && endsSegment) spanClass = "week-start week-end";
+        else if (startsSegment) spanClass = "span-start week-start";
+        else if (endsSegment) spanClass = "span-end week-end";
+        else spanClass = "span-mid";
+        showTitle = startsSegment;
+    }
+
+    return { spanClass, showTitle };
 }
 
 function openCalendarDay(dateStr) {
@@ -1515,19 +1749,31 @@ function renderWeekCalendar(month, year, allTasks = []) {
         date.setDate(weekStart.getDate() + i);
         return date;
     });
+    const weekTasks = allTasks.filter(task => days.some(date => taskOccursOnDate(task, date)));
+    const { lanesByDate, maxLane } = buildTaskLanes(weekTasks);
+
+    const renderWeekLane = (date, laneIndex) => {
+        const task = (lanesByDate[formatDateKey(date)] || [])[laneIndex];
+        if (!task) return '<div class="week-empty-lane"></div>';
+        const { spanClass, showTitle } = getCalendarSpanMeta(task, date, weekEnd);
+        return `
+            <div class="calendar-event ${getTaskColorClass(task)} ${spanClass}" draggable="true" title="${escapeHTML(task.title)}">
+                ${showTitle ? escapeHTML(task.title) : ''}
+            </div>
+        `;
+    };
 
     container.innerHTML = `
         ${getCalendarToolbar(label)}
         <div class="calendar-week-shell">
             <div class="week-grid">
                 ${days.map(date => {
-                    const dateStr = date.toLocaleDateString('en-CA');
-                    const tasks = allTasks.filter(task => taskOccursOnDate(task, date)).slice(0, 5);
+                    const dateStr = formatDateKey(date);
                     return `
                         <div class="week-day" onclick="openCalendarDay('${dateStr}')">
                             <div class="week-day-title">${date.toLocaleDateString('en-US', { weekday: 'short' })}</div>
                             <div class="day-num">${date.getDate()}</div>
-                            ${tasks.map(task => `<div class="calendar-event ${getTaskColorClass(task)}">${task.title}</div>`).join('')}
+                            ${Array.from({ length: Math.max(maxLane + 1, 1) }, (_, laneIndex) => renderWeekLane(date, laneIndex)).join('')}
                         </div>
                     `;
                 }).join('')}
@@ -1540,6 +1786,25 @@ function renderYearCalendar(year, allTasks = []) {
     const container = document.getElementById('agendaList');
     const monthNames = ["January", "February", "March", "April", "May", "June",
         "July", "August", "September", "October", "November", "December"];
+
+    const renderYearDay = (monthIndex, day) => {
+        const date = new Date(year, monthIndex, day);
+        const dateStr = formatDateKey(date);
+        const dayTasks = allTasks.filter(task => taskOccursOnDate(task, date));
+        const dots = dayTasks.slice(0, 3).map((task, index) => {
+            const className = dayTasks.length > 3 && index === 2 ? `year-task-more ${getTaskColorClass(task)}` : `year-task-dot ${getTaskColorClass(task)}`;
+            return `<span class="${className}"></span>`;
+        }).join('');
+        const taskLabel = dayTasks.length ? `${dayTasks.length} task${dayTasks.length === 1 ? '' : 's'}` : '';
+
+        return `
+            <span class="year-day" onclick="openCalendarDay('${dateStr}')" title="${taskLabel}">
+                <span>${day}</span>
+                <span class="year-task-dots">${dots}</span>
+            </span>
+        `;
+    };
+
     container.innerHTML = `
         ${getCalendarToolbar(year)}
         <div class="calendar-year-shell">
@@ -1548,7 +1813,7 @@ function renderYearCalendar(year, allTasks = []) {
                     const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
                     const firstDay = new Date(year, monthIndex, 1).getDay();
                     const blanks = Array.from({ length: firstDay }, () => '<span></span>').join('');
-                    const days = Array.from({ length: daysInMonth }, (_, i) => `<span>${i + 1}</span>`).join('');
+                    const days = Array.from({ length: daysInMonth }, (_, i) => renderYearDay(monthIndex, i + 1)).join('');
                     return `<div class="year-month"><div class="year-month-title">${name}</div><div class="year-month-grid">${blanks}${days}</div></div>`;
                 }).join('')}
             </div>
@@ -1598,6 +1863,7 @@ function renderBigCalendar(month, year, allTasks = []) {
     
     // --- Lane Alignment Logic ---
     const lanesByDate = {}; // Maps "YYYY-MM-DD" -> array of task objects
+    let maxCalendarLane = -1;
     
     // Sort: Multi-day tasks first, then by earliest start
     const sortedTasks = [...allTasks].sort((a, b) => {
@@ -1614,10 +1880,12 @@ function renderBigCalendar(month, year, allTasks = []) {
         const end = task.end_date ? parseWallTime(task.end_date) : start;
         
         // Find dates in range
-        let d = new Date(start); d.setHours(0,0,0,0);
-        const stop = new Date(end); stop.setHours(0,0,0,0);
+        if (!start) return;
+
+        let d = startOfLocalDay(start);
+        const stop = startOfLocalDay(end || start);
         const datesInRange = [];
-        while(d <= stop) { datesInRange.push(d.toLocaleDateString('en-CA')); d.setDate(d.getDate()+1); }
+        while(d <= stop) { datesInRange.push(formatDateKey(d)); d.setDate(d.getDate()+1); }
 
         // Find lowest available lane across all dates in the span
         let lane = 0;
@@ -1632,6 +1900,7 @@ function renderBigCalendar(month, year, allTasks = []) {
             if (!lanesByDate[date]) lanesByDate[date] = [];
             lanesByDate[date][lane] = task;
         });
+        maxCalendarLane = Math.max(maxCalendarLane, lane);
     });
 
     // Padding for empty days at start of month
@@ -1661,16 +1930,15 @@ function renderBigCalendar(month, year, allTasks = []) {
         // 5. Filter and Render Tasks
         // The allTasks array passed to renderBigCalendar is already filtered for active tasks/reminders
         // So, we just need to filter by date here.
-        const dayStart = new Date(year, month, day, 0, 0, 0);
-        const dayEnd = new Date(year, month, day, 23, 59, 59);
         // Render Tasks from lanes
         const dayLanes = lanesByDate[dateStr] || [];
-        dayLanes.forEach((task, index) => {
+        for (let index = 0; index <= maxCalendarLane; index++) {
+            const task = dayLanes[index];
             if (!task) {
                 const spacer = document.createElement('div');
                 spacer.className = 'calendar-spacer';
                 daySquare.appendChild(spacer);
-                return;
+                continue;
             }
 
             const taskEl = document.createElement('div');
@@ -1687,21 +1955,28 @@ function renderBigCalendar(month, year, allTasks = []) {
             // Spanning Logic
             const taskStart = parseWallTime(task.due_date);
             const taskEnd = task.end_date ? parseWallTime(task.end_date) : taskStart;
-            const taskStartStr = taskStart.toLocaleDateString('en-CA');
-            const taskEndStr = taskEnd.toLocaleDateString('en-CA');
+            const taskStartStr = formatDateKey(taskStart);
+            const taskEndStr = formatDateKey(taskEnd);
+            const dayOfWeek = new Date(year, month, day).getDay();
             
             let spanClass = "";
+            let showTitle = true;
             if (taskStartStr !== taskEndStr) {
-                if (dateStr === taskStartStr) spanClass = "span-start";
-                else if (dateStr === taskEndStr) spanClass = "span-end";
+                const startsSegment = dateStr === taskStartStr || dayOfWeek === 0 || day === 1;
+                const endsSegment = dateStr === taskEndStr || dayOfWeek === 6 || day === daysInMonth;
+                if (startsSegment && endsSegment) spanClass = "week-start week-end";
+                else if (startsSegment) spanClass = "span-start week-start";
+                else if (endsSegment) spanClass = "span-end week-end";
                 else spanClass = "span-mid";
+                showTitle = startsSegment;
             }
             taskEl.className = `calendar-event ${colorClass} ${spanClass}`;
-            taskEl.textContent = task.title;
+            taskEl.textContent = showTitle ? task.title : "";
+            taskEl.title = task.title;
             taskEl.draggable = true; 
             
             daySquare.appendChild(taskEl);
-        });
+        }
 
         grid.appendChild(daySquare);
     }
@@ -1868,7 +2143,11 @@ async function syncGmail() {
     btn.disabled = true;
     
     try {
-        const response = await fetch(`${API_BASE}/sync-gmail?user_id=${userId}`);
+        const response = await apiFetch(`${API_BASE}/sync-gmail?user_id=${userId}`, {
+            throttleKey: `sync-gmail:${userId}`,
+            minInterval: 30000,
+            timeout: 45000
+        });
         const data = await response.json().catch(() => ({}));
         
         if (data.auth_url) {
@@ -1894,7 +2173,7 @@ async function syncGmail() {
         }
     } catch (err) {
         console.error("Gmail sync failed:", err);
-        alert("Failed to sync Gmail. Make sure the backend is running and that your browser is not blocking the Google OAuth page.");
+        alert(getFriendlyApiError(err));
         btn.textContent = originalText;
         btn.disabled = false;
     }
@@ -1915,7 +2194,10 @@ async function connectGoogleAccount() {
     btn.disabled = true;
 
     try {
-        const response = await fetch(`${API_BASE}/auth/google?user_id=${userId}`);
+        const response = await apiFetch(`${API_BASE}/auth/google?user_id=${userId}`, {
+            throttleKey: `connect-google:${userId}`,
+            minInterval: 2000
+        });
         const data = await response.json().catch(() => ({}));
         if (data.auth_url) {
             window.location.href = data.auth_url;
@@ -1927,8 +2209,9 @@ async function connectGoogleAccount() {
         alert(message);
     } catch (err) {
         console.error("Google connection failed:", err);
-        if (statusText) statusText.textContent = "Google connection failed. Check the backend and browser blockers.";
-        alert("Google connection failed. Make sure the backend is running and your browser is not blocking Google OAuth.");
+        const message = getFriendlyApiError(err);
+        if (statusText) statusText.textContent = message;
+        alert(message);
     } finally {
         btn.textContent = originalText;
         btn.disabled = false;
@@ -1971,9 +2254,10 @@ async function uploadDocument(file) {
     formData.append("file", file);
     formData.append("user_id", window.CURRENT_USER_ID);
 
-    const response = await fetch(`${API_BASE}/ingest-doc`, {
+    const response = await apiFetch(`${API_BASE}/ingest-doc`, {
         method: "POST",
-        body: formData // No headers needed, the browser sets 'multipart/form-data'
+        body: formData,
+        timeout: 45000
     });
 }
 
@@ -1994,7 +2278,7 @@ function capitalizePriority(priority) {
 
 async function updateTaskDate(id, newDate) {
     try {
-        const response = await fetch(`${API_BASE}/tasks/${id}`, {
+        const response = await apiFetch(`${API_BASE}/tasks/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ due_date: newDate })
@@ -2022,7 +2306,7 @@ async function handleDateChange(taskId, newFullDate) {
 
 async function handleAllDayToggle(taskId, isChecked) {
     try {
-        const response = await fetch(`${API_BASE}/tasks/${taskId}`, {
+        const response = await apiFetch(`${API_BASE}/tasks/${taskId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ is_all_day: isChecked })
@@ -2142,7 +2426,10 @@ async function checkUpcomingTasks() {
     if (!window.CURRENT_USER_ID || !window.USER_SETTINGS.notifications_enabled) return;
 
     try {
-        const response = await fetch(`${API_BASE}/tasks?user_id=${window.CURRENT_USER_ID}`);
+        const response = await apiFetch(`${API_BASE}/tasks?user_id=${window.CURRENT_USER_ID}`, {
+            throttleKey: `notifications:${window.CURRENT_USER_ID}`,
+            minInterval: 30000
+        });
         if (!response.ok) return;
         const data = await response.json();
         const tasks = data.tasks || [];
@@ -2221,21 +2508,27 @@ processBtn.addEventListener('click', async () => {
             formData.append("user_id", userId);
             formData.append("local_time", localTimeString);
 
-            response = await fetch(`${API_BASE}/ingest-doc`, {
+            response = await apiFetch(`${API_BASE}/ingest-doc`, {
                 method: 'POST',
-                body: formData // Browser sets Content-Type to multipart/form-data automatically
+                body: formData,
+                throttleKey: `ingest-doc:${userId}`,
+                minInterval: 1000,
+                timeout: 60000
             });
         } 
         // Case B: Text Input
         else if (text) {
-            response = await fetch(`${API_BASE}/ingest`, {
+            response = await apiFetch(`${API_BASE}/ingest`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     content: text, 
                     user_id: userId,
                     local_time: localTimeString
-                })
+                }),
+                throttleKey: `ingest:${userId}`,
+                minInterval: 1000,
+                timeout: 45000
             });
         } else {
             alert("Please enter text or select a file.");
@@ -2254,6 +2547,7 @@ processBtn.addEventListener('click', async () => {
         }
     } catch (error) {
         console.error("Connection failed:", error);
+        alert(getFriendlyApiError(error));
     } finally {
         resetBtn();
     }

@@ -125,6 +125,63 @@ async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return {"user_id": user.user_id, "username": user.username}
 
+@app.get("/insights")
+async def get_ai_insights(user_id: int, db: Session = Depends(get_db)):
+    tasks = db.query(Task).filter(Task.owner_id == user_id).all()
+
+    task_data = [
+        {
+            "title": task.title,
+            "due_date": task.due_date,
+            "priority": task.priority,
+            "confidence": task.confidence,
+            "status": task.status
+        }
+        for task in tasks
+    ]
+
+    prompt = f"""
+You are Clerk Insights, an AI productivity assistant.
+
+Analyze this user's tasks and generate 3-5 useful insights.
+Focus on:
+- workload analysis
+- possible schedule conflicts
+- urgent or high-priority tasks
+- low-confidence tasks
+- missing deadlines
+- recommended next actions
+
+Return ONLY valid JSON in this exact format:
+[
+  {{
+    "type": "success | info | warning | danger",
+    "label": "Short category",
+    "title": "Short title",
+    "body": "One helpful sentence"
+  }}
+]
+
+Tasks:
+{json.dumps(task_data, indent=2)}
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3
+        )
+
+        raw_text = response.choices[0].message.content.strip()
+        insights = json.loads(raw_text)
+
+        return {"insights": insights}
+
+    except Exception as e:
+        print(f"AI Insights Error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate AI insights")
+
 @app.post("/register")
 async def register_user(data: LoginRequest, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(User.username == data.username).first()

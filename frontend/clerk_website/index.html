@@ -1087,6 +1087,150 @@ let API_BASE = window.location.port === "8000" ? window.location.origin : "http:
 const REQUEST_TIMEOUT_MS = 12000;
 const requestBucket = new Map();
 
+function getCurrentUserId() {
+    const savedUser = JSON.parse(localStorage.getItem("clerk_current_user") || "null");
+    return savedUser?.user_id || window.CURRENT_USER_ID;
+}
+
+async function loadClerkInsights() {
+    const userId = getCurrentUserId();
+
+    if (!userId) {
+        document.getElementById("insightsGrid").innerHTML =
+            `<p class="muted">Please log in to view Clerk Insights.</p>`;
+        return;
+    }
+
+    const response = await fetch(`${API_BASE}/tasks?user_id=${userId}`);
+    const data = await response.json();
+    const tasks = data.tasks || [];
+
+    const insights = [
+        ...analyzeWorkload(tasks),
+        ...detectTaskConflicts(tasks)
+    ];
+
+    renderInsights(insights);
+}
+
+function analyzeWorkload(tasks) {
+    const insights = [];
+    const todayStr = new Date().toLocaleDateString("en-CA");
+
+    const todayTasks = tasks.filter(task =>
+        String(task.due_date || "").startsWith(todayStr)
+    );
+
+    const highPriorityToday = todayTasks.filter(task =>
+        String(task.priority || "").toLowerCase() === "high"
+    );
+
+    if (todayTasks.length === 0) {
+        insights.push({
+            type: "success",
+            label: "Workload",
+            title: "Clear schedule today",
+            body: "You do not have any tasks scheduled for today."
+        });
+    } else if (todayTasks.length <= 3) {
+        insights.push({
+            type: "success",
+            label: "Workload",
+            title: "Manageable workload",
+            body: `You have ${todayTasks.length} task(s) scheduled today.`
+        });
+    } else if (todayTasks.length <= 6) {
+        insights.push({
+            type: "warning",
+            label: "Workload",
+            title: "Moderate workload",
+            body: `You have ${todayTasks.length} task(s) due today. Prioritize the most important ones.`
+        });
+    } else {
+        insights.push({
+            type: "danger",
+            label: "Workload",
+            title: "Heavy workload today",
+            body: `You have ${todayTasks.length} task(s) due today. Consider moving lower-priority work.`
+        });
+    }
+
+    if (highPriorityToday.length > 0) {
+        insights.push({
+            type: "danger",
+            label: "Priority",
+            title: "High-priority tasks today",
+            body: `${highPriorityToday.length} high-priority task(s) are scheduled today.`
+        });
+    }
+
+    return insights;
+}
+
+function detectTaskConflicts(tasks) {
+    const insights = [];
+
+    const datedTasks = tasks
+        .filter(task => task.due_date && !isNaN(new Date(task.due_date).getTime()))
+        .map(task => ({
+            ...task,
+            dateObj: new Date(task.due_date)
+        }))
+        .sort((a, b) => a.dateObj - b.dateObj);
+
+    const conflicts = [];
+
+    for (let i = 0; i < datedTasks.length; i++) {
+        for (let j = i + 1; j < datedTasks.length; j++) {
+            const diffMinutes =
+                Math.abs(datedTasks[j].dateObj - datedTasks[i].dateObj) / 60000;
+
+            if (diffMinutes <= 30) {
+                conflicts.push({
+                    taskA: datedTasks[i],
+                    taskB: datedTasks[j],
+                    diffMinutes: Math.round(diffMinutes)
+                });
+            }
+        }
+    }
+
+    if (conflicts.length === 0) {
+        insights.push({
+            type: "success",
+            label: "Conflicts",
+            title: "No major conflicts detected",
+            body: "Your scheduled task times do not appear to overlap."
+        });
+    } else {
+        conflicts.slice(0, 3).forEach(conflict => {
+            insights.push({
+                type: "danger",
+                label: "Conflict",
+                title: "Possible scheduling conflict",
+                body: `"${conflict.taskA.title}" and "${conflict.taskB.title}" are scheduled within ${conflict.diffMinutes} minute(s) of each other.`
+            });
+        });
+    }
+
+    return insights;
+}
+
+function renderInsights(insights) {
+    const grid = document.getElementById("insightsGrid");
+    if (!grid) return;
+
+    grid.innerHTML = insights.map(insight => `
+        <div class="insight-card insight-${insight.type}">
+            <div class="insight-label">${insight.label}</div>
+            <div class="insight-title">${insight.title}</div>
+            <div class="insight-body">${insight.body}</div>
+        </div>
+    `).join("");
+}
+
+window.addEventListener("DOMContentLoaded", loadClerkInsights);
+
 function renderSkeleton(count = 4) {
     return `<div class="skeleton-list">${Array.from({ length: count }, () => '<div class="skeleton-card"></div>').join('')}</div>`;
 }

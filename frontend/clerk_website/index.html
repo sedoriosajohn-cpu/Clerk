@@ -1101,7 +1101,7 @@ async function loadClerkInsights() {
         return;
     }
 
-    const response = await fetch(`${API_BASE}/tasks?user_id=${userId}`);
+    const response = await fetch(`http://127.0.0.1:8000/insights?user_id=${userId}`);
     const data = await response.json();
     const tasks = data.tasks || [];
 
@@ -1110,7 +1110,7 @@ async function loadClerkInsights() {
         ...detectTaskConflicts(tasks)
     ];
 
-    renderInsights(insights);
+    renderInsights(data.insights || []);
 }
 
 function analyzeWorkload(tasks) {

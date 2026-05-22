@@ -6,6 +6,57 @@
 <title>Clerk</title>
 
 <style>
+
+.insights-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+    margin-top: 20px;
+}
+
+.insight-card {
+    background: var(--panel-bg, rgba(255,255,255,.85));
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 18px;
+    padding: 18px;
+    box-shadow: var(--shadow, 0 10px 28px rgba(79,113,130,.12));
+}
+
+.insight-label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted, #7f98a5);
+    font-weight: 800;
+}
+
+.insight-title {
+    font-size: 18px;
+    font-weight: 800;
+    margin: 8px 0;
+}
+
+.insight-body {
+    font-size: 14px;
+    color: var(--muted, #7f98a5);
+    line-height: 1.5;
+}
+
+.insight-success {
+    border-left: 5px solid #00d7c0;
+}
+
+.insight-warning {
+    border-left: 5px solid #ffb100;
+}
+
+.insight-danger {
+    border-left: 5px solid #ff4b91;
+}
+
+.muted {
+    color: var(--muted, #7f98a5);
+}
 /* ==========================================================================
    1. VARIABLES & RESET
    ========================================================================== */
@@ -841,6 +892,14 @@ input:checked + .slider:before { transform: translateX(26px); }
 </head>
 
 <body>
+
+<section class="panel">
+    <h2>Clerk Insights</h2>
+    <p class="muted">Smart analysis of your workload and schedule conflicts.</p>
+
+    <div class="insights-grid" id="insightsGrid"></div>
+</section>
+
     <header class="topbar">
         <div class="brand">
             <img src="logo.png" alt="Clerk logo">

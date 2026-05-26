@@ -504,6 +504,11 @@ def find_duplicate_task(duplicate_index: dict, task_data) -> Optional[Task]:
 
     return None
 
+def has_google_due_time(due_time: Optional[dict]) -> bool:
+    if not due_time:
+        return False
+    return any(due_time.get(key) is not None for key in ("hours", "minutes", "seconds", "nanos"))
+
 def google_due_to_iso(due: dict, due_time: Optional[dict] = None) -> Optional[str]:
     if not due:
         return None
@@ -514,13 +519,17 @@ def google_due_to_iso(due: dict, due_time: Optional[dict] = None) -> Optional[st
     if not year or not month or not day:
         return None
 
+    if not has_google_due_time(due_time):
+        return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
     hour = 12
     minute = 0
-    if due_time:
-        hour = due_time.get("hours", hour)
-        minute = due_time.get("minutes", minute)
+    second = 0
+    hour = due_time.get("hours", hour)
+    minute = due_time.get("minutes", minute)
+    second = due_time.get("seconds", second)
 
-    return datetime(int(year), int(month), int(day), int(hour), int(minute)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime(int(year), int(month), int(day), int(hour), int(minute), int(second)).strftime("%Y-%m-%dT%H:%M:%S")
 
 def format_due_for_frontend(due_date: Optional[str], is_all_day: bool = True) -> dict:
     if not due_date:
@@ -576,6 +585,19 @@ CLASSROOM_REFERENCE_ONLY_RE = re.compile(
     re.IGNORECASE
 )
 
+CLASSROOM_DAY_ONLY_TITLE_RE = re.compile(
+    r'^\s*(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)?\s*'
+    r'(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|'
+    r'jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|'
+    r'dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?\s*$',
+    re.IGNORECASE
+)
+
+CLASSROOM_MINIMAL_DESCRIPTION_RE = re.compile(
+    r'^\s*(?:\.|n/?a|none|no description)?\s*$',
+    re.IGNORECASE
+)
+
 ACTIONABLE_CLASSROOM_WORK_TYPES = {
     "ASSIGNMENT",
     "SHORT_ANSWER_QUESTION",
@@ -595,7 +617,12 @@ def is_actionable_classroom_item(item: dict) -> bool:
     text = f"{title}\n{description}"
     has_due_date = bool(item.get("dueDate"))
     has_action_language = bool(CLASSROOM_TASK_WORD_RE.search(text))
+    has_meaningful_description = not CLASSROOM_MINIMAL_DESCRIPTION_RE.match(description)
+    is_day_only_post = bool(CLASSROOM_DAY_ONLY_TITLE_RE.match(title)) and not has_meaningful_description
     looks_reference_only = bool(CLASSROOM_REFERENCE_ONLY_RE.search(title)) and not has_due_date
+
+    if is_day_only_post:
+        return False
 
     if looks_reference_only:
         return False
@@ -622,12 +649,13 @@ def classroom_item_to_entry(classroom, course: dict, item: dict):
     assigner = f"{course['name']}: {teacher_name}" if teacher_name else course["name"]
     content = f"Classroom Assignment: {item['title']} for {course['name']}. Assigned By: {assigner}. Due: {due_str}. Instructions: {item.get('description', '')}"
     due_date = google_due_to_iso(item.get("dueDate", {}), item.get("dueTime"))
+    is_all_day = not has_google_due_time(item.get("dueTime"))
     task = make_structured_task(
         title=item.get("title", "Classroom Assignment"),
         description=item.get("description", ""),
         due_date=due_date,
         assigner=assigner,
-        is_all_day=not bool(item.get("dueTime")),
+        is_all_day=is_all_day,
         confidence=98 if due_date else 88
     )
     return task, content, f"classroom: {item['id']}"

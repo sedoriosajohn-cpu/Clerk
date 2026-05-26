@@ -106,6 +106,9 @@ class TaskUpdate(BaseModel):
     status: Optional[str] = None
     is_all_day: Optional[bool] = None
 
+class BulkTaskAction(BaseModel):
+    task_ids: List[int]
+
 class UserSettingsUpdate(BaseModel):
     preferred_name: Optional[str] = None
     dark_mode: Optional[bool] = None
@@ -504,6 +507,11 @@ def find_duplicate_task(duplicate_index: dict, task_data) -> Optional[Task]:
 
     return None
 
+def has_google_due_time(due_time: Optional[dict]) -> bool:
+    if not due_time:
+        return False
+    return any(due_time.get(key) is not None for key in ("hours", "minutes", "seconds", "nanos"))
+
 def google_due_to_iso(due: dict, due_time: Optional[dict] = None) -> Optional[str]:
     if not due:
         return None
@@ -514,13 +522,17 @@ def google_due_to_iso(due: dict, due_time: Optional[dict] = None) -> Optional[st
     if not year or not month or not day:
         return None
 
+    if not has_google_due_time(due_time):
+        return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
     hour = 12
     minute = 0
-    if due_time:
-        hour = due_time.get("hours", hour)
-        minute = due_time.get("minutes", minute)
+    second = 0
+    hour = due_time.get("hours", hour)
+    minute = due_time.get("minutes", minute)
+    second = due_time.get("seconds", second)
 
-    return datetime(int(year), int(month), int(day), int(hour), int(minute)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime(int(year), int(month), int(day), int(hour), int(minute), int(second)).strftime("%Y-%m-%dT%H:%M:%S")
 
 def format_due_for_frontend(due_date: Optional[str], is_all_day: bool = True) -> dict:
     if not due_date:
@@ -563,6 +575,32 @@ def make_structured_task(
     task.update(format_due_for_frontend(due_date, is_all_day))
     return task
 
+def source_marker(user_id: int, source_info: str) -> str:
+    return f"{user_id}:{source_info}"
+
+def source_already_scanned(db: Session, user_id: int, source_info: str) -> bool:
+    marker = source_marker(user_id, source_info)
+    if db.query(RawInput).filter(RawInput.source_id == marker).first():
+        return True
+
+    # Backward compatibility for rows created before source_id was populated.
+    return db.query(Task).join(RawInput, Task.raw_id == RawInput.raw_id).filter(
+        Task.owner_id == user_id,
+        RawInput.source_type == source_info
+    ).first() is not None
+
+def mark_source_scanned(db: Session, user_id: int, source_info: str, content: str = ""):
+    if source_already_scanned(db, user_id, source_info):
+        return
+
+    db.add(RawInput(
+        content=(content or f"Scanned {source_info}")[:500],
+        source_type=source_info,
+        source_id=source_marker(user_id, source_info),
+        received_at=datetime.now()
+    ))
+    db.commit()
+
 CLASSROOM_TASK_WORD_RE = re.compile(
     r'\b(submit|turn\s+in|complete|finish|answer|write|draft|create|make|'
     r'prepare|read|study|review|upload|attach|respond|do|assignment|homework|'
@@ -573,6 +611,19 @@ CLASSROOM_TASK_WORD_RE = re.compile(
 CLASSROOM_REFERENCE_ONLY_RE = re.compile(
     r'\b(example|sample|template|reference|resource|announcement|notes?|slides?|'
     r'materials?|rubric|practice|optional|copy of)\b',
+    re.IGNORECASE
+)
+
+CLASSROOM_DAY_ONLY_TITLE_RE = re.compile(
+    r'^\s*(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)?\s*'
+    r'(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|'
+    r'jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|'
+    r'dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?\s*$',
+    re.IGNORECASE
+)
+
+CLASSROOM_MINIMAL_DESCRIPTION_RE = re.compile(
+    r'^\s*(?:\.|n/?a|none|no description)?\s*$',
     re.IGNORECASE
 )
 
@@ -595,7 +646,12 @@ def is_actionable_classroom_item(item: dict) -> bool:
     text = f"{title}\n{description}"
     has_due_date = bool(item.get("dueDate"))
     has_action_language = bool(CLASSROOM_TASK_WORD_RE.search(text))
+    has_meaningful_description = not CLASSROOM_MINIMAL_DESCRIPTION_RE.match(description)
+    is_day_only_post = bool(CLASSROOM_DAY_ONLY_TITLE_RE.match(title)) and not has_meaningful_description
     looks_reference_only = bool(CLASSROOM_REFERENCE_ONLY_RE.search(title)) and not has_due_date
+
+    if is_day_only_post:
+        return False
 
     if looks_reference_only:
         return False
@@ -622,26 +678,33 @@ def classroom_item_to_entry(classroom, course: dict, item: dict):
     assigner = f"{course['name']}: {teacher_name}" if teacher_name else course["name"]
     content = f"Classroom Assignment: {item['title']} for {course['name']}. Assigned By: {assigner}. Due: {due_str}. Instructions: {item.get('description', '')}"
     due_date = google_due_to_iso(item.get("dueDate", {}), item.get("dueTime"))
+    is_all_day = not has_google_due_time(item.get("dueTime"))
     task = make_structured_task(
         title=item.get("title", "Classroom Assignment"),
         description=item.get("description", ""),
         due_date=due_date,
         assigner=assigner,
-        is_all_day=not bool(item.get("dueTime")),
+        is_all_day=is_all_day,
         confidence=98 if due_date else 88
     )
     return task, content, f"classroom: {item['id']}"
 
-def collect_classroom_entries(classroom):
-    summary = {"classroom": 0, "skipped": 0}
+def collect_classroom_entries(classroom, db: Session, user_id: int):
+    summary = {"classroom": 0, "skipped": 0, "already_scanned": 0}
     sync_entries = []
 
     courses_result = classroom.courses().list(pageSize=5).execute()
     for course in courses_result.get('courses', []):
         cw_result = classroom.courses().courseWork().list(courseId=course['id']).execute()
         for item in cw_result.get('courseWork', []):
+            source_info = f"classroom: {item['id']}"
+            if source_already_scanned(db, user_id, source_info):
+                summary["already_scanned"] += 1
+                continue
+
             if not is_actionable_classroom_item(item):
                 summary["skipped"] += 1
+                mark_source_scanned(db, user_id, source_info, f"Skipped Classroom post: {item.get('title', '')}")
                 continue
 
             try:
@@ -649,6 +712,7 @@ def collect_classroom_entries(classroom):
                 summary["classroom"] += 1
             except Exception:
                 summary["skipped"] += 1
+                mark_source_scanned(db, user_id, source_info, f"Skipped Classroom post: {item.get('title', '')}")
 
     return sync_entries, summary
 
@@ -668,7 +732,13 @@ async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
         messages = results.get('messages', [])
 
         processed_count = 0
+        skipped_count = 0
         for msg in messages:
+            source_info = f"gmail: {msg['id']}"
+            if source_already_scanned(db, user_id, source_info):
+                skipped_count += 1
+                continue
+
             m = service.users().messages().get(userId='me', id=msg['id']).execute()
             # Fetch full body instead of just the snippet
             body = get_email_body(m.get('payload', {})) or m.get('snippet', '')
@@ -677,11 +747,13 @@ async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
                 try:
                     if sender:
                         body = f"Email From: {sender}\n{body}"
-                    await process_and_save_tasks(body, user_id, f"gmail: {msg['id']}", db)
+                    result = await process_and_save_tasks(body, user_id, source_info, db)
+                    if not result.get("task_ids"):
+                        mark_source_scanned(db, user_id, source_info, body)
                     processed_count += 1
                 except HTTPException:
                     continue
-        return {"status": "success", "message": f"Scanned {len(messages)} emails and extracted tasks from {processed_count} of them."}
+        return {"status": "success", "message": f"Scanned {processed_count} new emails, skipped {skipped_count} already scanned emails."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -694,14 +766,14 @@ async def sync_classroom(user_id: int, db: Session = Depends(get_db)):
             return google_auth_required_response(user_id)
 
         classroom = build('classroom', 'v1', credentials=creds)
-        sync_entries, summary = collect_classroom_entries(classroom)
+        sync_entries, summary = collect_classroom_entries(classroom, db, user_id)
         if sync_entries:
             await save_structured_task_entries(sync_entries, user_id, db)
 
         return {
             "status": "success",
             "processed": summary,
-            "message": f"Added {summary['classroom']} Classroom tasks and skipped {summary['skipped']} non-task posts."
+            "message": f"Added {summary['classroom']} Classroom tasks, skipped {summary['skipped']} non-task posts, and ignored {summary['already_scanned']} already scanned posts."
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -726,7 +798,7 @@ async def sync_all(user_id: int, db: Session = Depends(get_db)):
 
     # 2. Fetch Classroom Assignments
     try:
-        classroom_entries, classroom_summary = collect_classroom_entries(classroom)
+        classroom_entries, classroom_summary = collect_classroom_entries(classroom, db, user_id)
         sync_entries.extend(classroom_entries)
         summary["classroom"] = classroom_summary["classroom"]
         summary["classroom_skipped"] = classroom_summary["skipped"]
@@ -791,6 +863,7 @@ async def save_structured_task_entries(entries, user_id, db):
             new_raw = RawInput(
                 content=text_content[:500], # Save snippet to avoid DB bloat
                 source_type=source_info,
+                source_id=source_marker(user_id, source_info),
                 received_at=datetime.now()
             )
             db.add(new_raw)
@@ -926,6 +999,32 @@ async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depen
 
     db.commit()
     return {"message": "Updated successfully"}
+
+@app.patch("/tasks/bulk/update")
+async def bulk_update_tasks(action: BulkTaskAction, status: str = "deleted", db: Session = Depends(get_db)):
+    if status not in {"deleted", "completed", "pending"}:
+        raise HTTPException(status_code=400, detail="Unsupported bulk status.")
+
+    task_ids = list(dict.fromkeys(action.task_ids or []))
+    if not task_ids:
+        raise HTTPException(status_code=400, detail="No tasks selected.")
+
+    updated = db.query(Task).filter(Task.task_id.in_(task_ids)).update(
+        {Task.status: status},
+        synchronize_session=False
+    )
+    db.commit()
+    return {"message": f"Updated {updated} tasks.", "updated": updated}
+
+@app.delete("/tasks/bulk/permanent")
+async def bulk_permanent_delete_tasks(action: BulkTaskAction, db: Session = Depends(get_db)):
+    task_ids = list(dict.fromkeys(action.task_ids or []))
+    if not task_ids:
+        raise HTTPException(status_code=400, detail="No tasks selected.")
+
+    deleted = db.query(Task).filter(Task.task_id.in_(task_ids)).delete(synchronize_session=False)
+    db.commit()
+    return {"message": f"Permanently deleted {deleted} tasks.", "deleted": deleted}
 
 @app.delete("/tasks/{task_id}/permanent")
 async def permanent_delete_task(task_id: int, db: Session = Depends(get_db)):

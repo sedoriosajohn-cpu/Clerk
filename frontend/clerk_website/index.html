@@ -1141,6 +1141,8 @@ if (oauthParams.has('google_error')) {
 const notifiedTasks = new Set(); // To prevent duplicate alerts
 let currentTask = null; // This will hold the result from your FastAPI /ingest
 let currentView = 'agenda';
+let selectedTaskIds = new Set();
+let lastRenderedTaskIds = [];
 
 //for the calendar, it keeps track where the user is currently looking at
 let currentCalMonth = new Date().getMonth();
@@ -1279,8 +1281,11 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
     container.innerHTML = '';
 
     const tasksToShow = isHistoryView ? tasks : tasks.filter(t => t.status !== 'completed' && t.status !== 'deleted');
+    lastRenderedTaskIds = tasksToShow.map(task => Number(task.task_id));
+    selectedTaskIds = new Set([...selectedTaskIds].filter(id => lastRenderedTaskIds.includes(id)));
 
     if (tasksToShow.length === 0) {
+        selectedTaskIds.clear();
         if (isHistoryView) {
             container.innerHTML = '<p style="color:var(--muted); padding:20px;">No history yet!</p>';
         } else {
@@ -1288,6 +1293,23 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
         }
         return;
     }
+
+    const bulkBar = document.createElement('div');
+    bulkBar.className = 'bulk-actions';
+    bulkBar.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 14px; margin-bottom:10px; border:1px solid var(--border); border-radius:12px; background:rgba(127,152,165,0.06); flex-wrap:wrap;';
+    bulkBar.innerHTML = `
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:700; color:var(--text); cursor:pointer;">
+            <input type="checkbox" id="selectAllTasks" onchange="toggleSelectAllTasks(this.checked)">
+            <span>Select all</span>
+        </label>
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <span id="bulkSelectionCount" style="font-size:12px; color:var(--muted);">0 selected</span>
+            <button class="ghost" id="bulkDeleteBtn" type="button" onclick="bulkDeleteSelected(${isHistoryView})" disabled style="padding:6px 12px; font-size:12px;">
+                ${isHistoryView ? 'Delete Permanently' : 'Delete Selected'}
+            </button>
+        </div>
+    `;
+    container.appendChild(bulkBar);
 
     tasksToShow.forEach(task => {
         const item = document.createElement('div');
@@ -1356,6 +1378,9 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
         const assignerText = task.assignee && task.assignee !== 'me' ? `Assigned by ${task.assignee}` : '';
 
         item.innerHTML = `
+              <div style="display:flex; align-items:center; padding-right:4px;">
+                <input type="checkbox" class="task-select-checkbox" data-task-id="${task.task_id}" ${selectedTaskIds.has(Number(task.task_id)) ? 'checked' : ''} onchange="toggleTaskSelection(${task.task_id}, this.checked)" style="cursor:pointer;">
+              </div>
               <div class="time">${timeStr}</div>
               <div class="task-main ${colorClass}" style="flex-grow: 1;">
                 <div style="font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--muted); margin-bottom: 2px;">
@@ -1371,6 +1396,60 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
         `;
         container.appendChild(item);
     });
+    updateBulkToolbar();
+}
+
+function toggleTaskSelection(taskId, isSelected) {
+    const id = Number(taskId);
+    if (isSelected) selectedTaskIds.add(id);
+    else selectedTaskIds.delete(id);
+    updateBulkToolbar();
+}
+
+function toggleSelectAllTasks(isSelected) {
+    selectedTaskIds = isSelected ? new Set(lastRenderedTaskIds) : new Set();
+    document.querySelectorAll('.task-select-checkbox').forEach(checkbox => {
+        checkbox.checked = isSelected;
+    });
+    updateBulkToolbar();
+}
+
+function updateBulkToolbar() {
+    const count = selectedTaskIds.size;
+    const countEl = document.getElementById('bulkSelectionCount');
+    const deleteBtn = document.getElementById('bulkDeleteBtn');
+    const selectAll = document.getElementById('selectAllTasks');
+
+    if (countEl) countEl.textContent = `${count} selected`;
+    if (deleteBtn) deleteBtn.disabled = count === 0;
+    if (selectAll) {
+        selectAll.checked = count > 0 && count === lastRenderedTaskIds.length;
+        selectAll.indeterminate = count > 0 && count < lastRenderedTaskIds.length;
+    }
+}
+
+async function bulkDeleteSelected(permanent = false) {
+    const taskIds = [...selectedTaskIds];
+    if (!taskIds.length) return alert("Select at least one task first.");
+
+    const label = permanent ? "permanently delete" : "delete";
+    if (!confirm(`Are you sure you want to ${label} ${taskIds.length} selected task${taskIds.length === 1 ? '' : 's'}?`)) return;
+
+    try {
+        const response = await apiFetch(`${API_BASE}/${permanent ? 'tasks/bulk/permanent' : 'tasks/bulk/update?status=deleted'}`, {
+            method: permanent ? 'DELETE' : 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task_ids: taskIds })
+        });
+
+        if (!response.ok) throw new Error("Bulk delete failed");
+
+        selectedTaskIds.clear();
+        loadView(currentView);
+    } catch (err) {
+        console.error("Bulk delete failed:", err);
+        alert("Failed to delete selected tasks.");
+    }
 }
 
 async function dismissTask(taskId) {

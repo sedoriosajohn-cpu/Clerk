@@ -53,7 +53,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def throttle_expensive_sync_routes(request: Request, call_next):
-    if request.url.path not in {"/sync-gmail", "/sync-all"}:
+    if request.url.path not in {"/sync-gmail", "/sync-classroom", "/sync-all"}:
         return await call_next(request)
 
     user_id = request.query_params.get("user_id") or request.client.host
@@ -563,6 +563,95 @@ def make_structured_task(
     task.update(format_due_for_frontend(due_date, is_all_day))
     return task
 
+CLASSROOM_TASK_WORD_RE = re.compile(
+    r'\b(submit|turn\s+in|complete|finish|answer|write|draft|create|make|'
+    r'prepare|read|study|review|upload|attach|respond|do|assignment|homework|'
+    r'project|essay|quiz|test|exam|worksheet|reflection|presentation|deadline|due)\b',
+    re.IGNORECASE
+)
+
+CLASSROOM_REFERENCE_ONLY_RE = re.compile(
+    r'\b(example|sample|template|reference|resource|announcement|notes?|slides?|'
+    r'materials?|rubric|practice|optional|copy of)\b',
+    re.IGNORECASE
+)
+
+ACTIONABLE_CLASSROOM_WORK_TYPES = {
+    "ASSIGNMENT",
+    "SHORT_ANSWER_QUESTION",
+    "MULTIPLE_CHOICE_QUESTION"
+}
+
+def is_actionable_classroom_item(item: dict) -> bool:
+    if item.get("state") and item.get("state") != "PUBLISHED":
+        return False
+
+    work_type = item.get("workType")
+    if work_type and work_type not in ACTIONABLE_CLASSROOM_WORK_TYPES:
+        return False
+
+    title = str(item.get("title") or "")
+    description = str(item.get("description") or "")
+    text = f"{title}\n{description}"
+    has_due_date = bool(item.get("dueDate"))
+    has_action_language = bool(CLASSROOM_TASK_WORD_RE.search(text))
+    looks_reference_only = bool(CLASSROOM_REFERENCE_ONLY_RE.search(title)) and not has_due_date
+
+    if looks_reference_only:
+        return False
+
+    # Posts like "Project example" with only an attachment and no due date are
+    # usually resources/examples, not new work Clerk should create.
+    if not has_due_date and not has_action_language:
+        return False
+
+    return True
+
+def classroom_item_to_entry(classroom, course: dict, item: dict):
+    due = item.get('dueDate', {})
+    due_str = f"{due.get('month')}/{due.get('day')}/{due.get('year')}" if due else "No date"
+    teacher_name = None
+    creator_id = item.get("creatorUserId") or course.get("teacherGroupEmail")
+    if creator_id:
+        try:
+            profile = classroom.userProfiles().get(userId=creator_id).execute()
+            teacher_name = profile.get("name", {}).get("fullName") or profile.get("emailAddress")
+        except Exception:
+            teacher_name = None
+
+    assigner = f"{course['name']}: {teacher_name}" if teacher_name else course["name"]
+    content = f"Classroom Assignment: {item['title']} for {course['name']}. Assigned By: {assigner}. Due: {due_str}. Instructions: {item.get('description', '')}"
+    due_date = google_due_to_iso(item.get("dueDate", {}), item.get("dueTime"))
+    task = make_structured_task(
+        title=item.get("title", "Classroom Assignment"),
+        description=item.get("description", ""),
+        due_date=due_date,
+        assigner=assigner,
+        is_all_day=not bool(item.get("dueTime")),
+        confidence=98 if due_date else 88
+    )
+    return task, content, f"classroom: {item['id']}"
+
+def collect_classroom_entries(classroom):
+    summary = {"classroom": 0, "skipped": 0}
+    sync_entries = []
+
+    courses_result = classroom.courses().list(pageSize=5).execute()
+    for course in courses_result.get('courses', []):
+        cw_result = classroom.courses().courseWork().list(courseId=course['id']).execute()
+        for item in cw_result.get('courseWork', []):
+            if not is_actionable_classroom_item(item):
+                summary["skipped"] += 1
+                continue
+
+            try:
+                sync_entries.append(classroom_item_to_entry(classroom, course, item))
+                summary["classroom"] += 1
+            except Exception:
+                summary["skipped"] += 1
+
+    return sync_entries, summary
+
 @app.get("/sync-gmail")
 async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
     try:
@@ -596,6 +685,27 @@ async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/sync-classroom")
+async def sync_classroom(user_id: int, db: Session = Depends(get_db)):
+    try:
+        ensure_user_exists(user_id, db)
+        creds = get_google_creds(user_id)
+        if not creds:
+            return google_auth_required_response(user_id)
+
+        classroom = build('classroom', 'v1', credentials=creds)
+        sync_entries, summary = collect_classroom_entries(classroom)
+        if sync_entries:
+            await save_structured_task_entries(sync_entries, user_id, db)
+
+        return {
+            "status": "success",
+            "processed": summary,
+            "message": f"Added {summary['classroom']} Classroom tasks and skipped {summary['skipped']} non-task posts."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/sync-all")
 async def sync_all(user_id: int, db: Session = Depends(get_db)):
     try:
@@ -616,35 +726,10 @@ async def sync_all(user_id: int, db: Session = Depends(get_db)):
 
     # 2. Fetch Classroom Assignments
     try:
-        courses_result = classroom.courses().list(pageSize=5).execute()
-        for course in courses_result.get('courses', []):
-            cw_result = classroom.courses().courseWork().list(courseId=course['id']).execute()
-            for item in cw_result.get('courseWork', []):
-                due = item.get('dueDate', {})
-                due_str = f"{due.get('month')}/{due.get('day')}/{due.get('year')}" if due else "No date"
-                teacher_name = None
-                creator_id = item.get("creatorUserId") or course.get("teacherGroupEmail")
-                if creator_id:
-                    try:
-                        profile = classroom.userProfiles().get(userId=creator_id).execute()
-                        teacher_name = profile.get("name", {}).get("fullName") or profile.get("emailAddress")
-                    except Exception:
-                        teacher_name = None
-                assigner = f"{course['name']}: {teacher_name}" if teacher_name else course["name"]
-
-                content = f"Classroom Assignment: {item['title']} for {course['name']}. Assigned By: {assigner}. Due: {due_str}. Instructions: {item.get('description', '')}"
-                try:
-                    due_date = google_due_to_iso(item.get("dueDate", {}), item.get("dueTime"))
-                    task = make_structured_task(
-                        title=item.get("title", "Classroom Assignment"),
-                        description=item.get("description", ""),
-                        due_date=due_date,
-                        assigner=assigner,
-                        is_all_day=not bool(item.get("dueTime"))
-                    )
-                    sync_entries.append((task, content, f"classroom: {item['id']}"))
-                    summary["classroom"] += 1
-                except: continue
+        classroom_entries, classroom_summary = collect_classroom_entries(classroom)
+        sync_entries.extend(classroom_entries)
+        summary["classroom"] = classroom_summary["classroom"]
+        summary["classroom_skipped"] = classroom_summary["skipped"]
     except Exception as e:
         print(f"Classroom sync error: {e}")
 

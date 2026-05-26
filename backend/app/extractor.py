@@ -9,7 +9,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 api_key = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=api_key) if api_key else None
+client = OpenAI(
+    api_key=api_key,
+    timeout=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "45")),
+    max_retries=int(os.getenv("OPENAI_MAX_RETRIES", "1"))
+) if api_key else None
+
+MAX_AI_INPUT_CHARS = int(os.getenv("EXTRACTOR_MAX_AI_INPUT_CHARS", "18000"))
+MAX_AI_CHUNKS = int(os.getenv("EXTRACTOR_MAX_AI_CHUNKS", "3"))
+CHUNK_OVERLAP_CHARS = 500
 
 ACTION_WORDS = {
     "add", "answer", "bring", "buy", "call", "check", "complete", "create",
@@ -17,6 +25,48 @@ ACTION_WORDS = {
     "prepare", "read", "remind", "review", "schedule", "send", "study",
     "submit", "turn in", "update", "write"
 }
+
+TASK_HINT_RE = re.compile(
+    r'\b('
+    r'add|answer|bring|buy|call|check|complete|create|do|draft|email|finish|fix|'
+    r'implement|make|meet|prepare|read|remind|review|schedule|send|study|submit|'
+    r'turn\s+in|update|write|assignment|homework|project|quiz|test|exam|essay|'
+    r'presentation|deadline|due|today|tomorrow|next\s+\w+|monday|tuesday|'
+    r'wednesday|thursday|friday|saturday|sunday|jan(?:uary)?|feb(?:ruary)?|'
+    r'mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|'
+    r'oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|\d{1,2}[/-]\d{1,2}'
+    r')\b',
+    re.IGNORECASE
+)
+
+NOISE_LINE_RE = re.compile(
+    r'^\s*(?:page\s+\d+|\d+|copyright|table of contents|references)\s*$',
+    re.IGNORECASE
+)
+
+STRONG_ACTION_RE = re.compile(
+    r'\b(submit|finish|complete|turn\s+in|write|create|prepare|review|send|'
+    r'schedule|call|email|buy|bring|read|study|fix|implement|make)\b',
+    re.IGNORECASE
+)
+
+DEADLINE_RE = re.compile(r'\b(due|deadline|by|before|no later than)\b', re.IGNORECASE)
+AMBIGUITY_RE = re.compile(
+    r'\b(maybe|might|possibly|probably|optional|if you can|when you can|sometime|'
+    r'eventually|consider|think about|maybe later)\b',
+    re.IGNORECASE
+)
+EXPLICIT_TIME_RE = re.compile(
+    r'\b(?:at\s*)?\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b',
+    re.IGNORECASE
+)
+DATE_REFERENCE_RE = re.compile(
+    r'\b(today|tomorrow|next\s+\w+|monday|tuesday|wednesday|thursday|friday|'
+    r'saturday|sunday|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|'
+    r'jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|'
+    r'nov(?:ember)?|dec(?:ember)?|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\b',
+    re.IGNORECASE
+)
 
 MONTHS = {
     "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
@@ -114,6 +164,103 @@ def extract_json(text: str) -> list:
         if obj_match:
             return [json.loads(obj_match.group(0))]
         raise ValueError("Failed to parse AI response as JSON")
+
+def clamp_score(score: float) -> int:
+    return int(max(0, min(100, round(score))))
+
+def parse_task_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        cleaned = re.sub(r'Z$|[+-]\d{2}:\d{2}$', '', str(value))
+        return datetime.fromisoformat(cleaned)
+    except ValueError:
+        return None
+
+def title_terms(title: Optional[str]) -> List[str]:
+    terms = re.findall(r'[a-z0-9]{3,}', str(title or "").lower())
+    stop_words = {"the", "and", "for", "with", "task", "new", "due", "assignment"}
+    return [term for term in terms if term not in stop_words]
+
+def evidence_window(source_text: str, task: Dict[str, Any], radius: int = 500) -> str:
+    if not source_text:
+        return ""
+
+    lowered = source_text.lower()
+    candidates = title_terms(task.get("title"))
+    for term in candidates[:5]:
+        index = lowered.find(term)
+        if index >= 0:
+            start = max(0, index - radius)
+            end = min(len(source_text), index + radius)
+            return source_text[start:end]
+
+    due_date = due_day_key_from_iso(task.get("due_date"))
+    if due_date:
+        index = lowered.find(due_date.lower())
+        if index >= 0:
+            start = max(0, index - radius)
+            end = min(len(source_text), index + radius)
+            return source_text[start:end]
+
+    return source_text[: min(len(source_text), radius * 2)]
+
+def due_day_key_from_iso(due_date: Optional[str]) -> str:
+    if not due_date:
+        return ""
+    match = re.search(r'\d{4}-\d{2}-\d{2}', str(due_date))
+    return match.group(0) if match else ""
+
+def compact_text_for_extraction(text: str, max_chars: int = MAX_AI_INPUT_CHARS) -> str:
+    if len(text) <= max_chars:
+        return text
+
+    normalized = re.sub(r'[ \t]+', ' ', text)
+    lines = [line.strip() for line in normalized.splitlines()]
+    kept = []
+    seen = set()
+
+    for index, line in enumerate(lines):
+        if not line or NOISE_LINE_RE.match(line):
+            continue
+        if not TASK_HINT_RE.search(line):
+            continue
+
+        start = max(0, index - 1)
+        end = min(len(lines), index + 2)
+        segment = " ".join(part for part in lines[start:end] if part and not NOISE_LINE_RE.match(part))
+        segment = re.sub(r'\s+', ' ', segment).strip()
+        if segment and segment not in seen:
+            seen.add(segment)
+            kept.append(segment)
+
+    if kept:
+        compacted = "\n".join(kept)
+        chunk_budget = max_chars * MAX_AI_CHUNKS
+        if len(compacted) <= chunk_budget:
+            return compacted
+        return compacted[:chunk_budget]
+
+    # Keep the beginning and end when no hints are found; syllabi often put
+    # summary instructions up front and late-semester deadlines near the end.
+    half = max_chars // 2
+    return f"{text[:half]}\n\n{text[-half:]}"
+
+def split_text_for_ai(text: str) -> List[str]:
+    compacted = compact_text_for_extraction(text)
+    if len(compacted) <= MAX_AI_INPUT_CHARS:
+        return [compacted]
+
+    chunks = []
+    start = 0
+    chunk_size = MAX_AI_INPUT_CHARS
+    while start < len(compacted) and len(chunks) < MAX_AI_CHUNKS:
+        end = min(len(compacted), start + chunk_size)
+        chunks.append(compacted[start:end])
+        if end == len(compacted):
+            break
+        start = max(end - CHUNK_OVERLAP_CHARS, start + 1)
+    return chunks
 
 def parse_current_time(current_time: Optional[str]) -> datetime:
     if not current_time:
@@ -217,13 +364,7 @@ def local_nlp_extract_tasks(text: str, current_time: Optional[str] = None) -> Li
         elif re.search(r'\b(optional|low priority|when you can)\b', lowered):
             priority = "low"
 
-        confidence = 74
-        if due_date:
-            confidence += 10
-        if any(word in lowered for word in ACTION_WORDS):
-            confidence += 8
-
-        tasks.append(format_for_frontend({
+        task = {
             "item_type": item_type,
             "title": clean_task_title(candidate),
             "description": "Parsed locally when AI extraction was unavailable.",
@@ -232,8 +373,11 @@ def local_nlp_extract_tasks(text: str, current_time: Optional[str] = None) -> Li
             "assignee": "me",
             "is_all_day": is_all_day,
             "priority": priority,
-            "confidence": min(confidence, 92)
-        }))
+            "confidence": 68
+        }
+        tasks.append(format_for_frontend(
+            adjust_confidence(candidate, task, current_time=current_time, date_verified=True)
+        ))
 
     return tasks
 
@@ -245,31 +389,35 @@ def extract_task_from_text(text: str, current_time: Optional[str] = None) -> lis
         if not client:
             return local_nlp_extract_tasks(text, current_time)
 
-        # Use provided local time or fallback to server UTC
+        # Use provided local time or fallback to server UTC. Long documents are
+        # condensed first so extraction time is based on likely task content,
+        # not every policy paragraph or page footer in the source.
         now_iso = current_time if current_time else datetime.now(timezone.utc).isoformat()
-        prompt = build_prompt(text, now_iso)
+        raw_tasks = []
+        for chunk in split_text_for_ai(text):
+            prompt = build_prompt(chunk, now_iso)
+            response = client.chat.completions.create(
+                model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                max_tokens=int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "2500"))
+            )
 
-        response = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-
-        raw_content = response.choices[0].message.content
-        raw_tasks = extract_json(raw_content)
+            raw_content = response.choices[0].message.content
+            raw_tasks.extend(extract_json(raw_content))
         
         processed_tasks = []
         for t in raw_tasks:
             valid = validate_task(t)
             
-            # Hybrid Confidence Check
-            # 1. Keyword Heuristics
-            with_conf = adjust_confidence(text, valid)
-            
-            # 2. Regex Anchor Verification (Fact-Checking)
             is_verified = verify_with_regex(text, valid.get("due_date"))
-            if not is_verified:
-                with_conf["confidence"] = int(with_conf["confidence"] * 0.5) # Penalty for hallucination risk
+            with_conf = adjust_confidence(
+                text,
+                valid,
+                current_time=current_time,
+                date_verified=is_verified
+            )
+            if valid.get("due_date") and not is_verified:
                 with_conf["description"] += " (Warning: Date not explicitly found in source)"
                 
             processed_tasks.append(format_for_frontend(with_conf))
@@ -280,21 +428,106 @@ def extract_task_from_text(text: str, current_time: Optional[str] = None) -> lis
         print(f"EXTRACTION ERROR: {e}")
         return local_nlp_extract_tasks(text, current_time)
 
-def adjust_confidence(user_input: str, task: Dict[str, Any]) -> Dict[str, Any]:
-    text = user_input.lower()
-    score = task["confidence"]
-    
-    # Intent keywords
-    if any(word in text for word in ["submit", "must", "due", "deadline", "assignment"]):
-        score += 10
-    if any(word in text for word in ["maybe", "might", "probably", "optional"]):
-        score -= 20
-        
-    # Document-specific grounding
-    if "syllabus" in text or "course" in text:
+def adjust_confidence(
+    user_input: str,
+    task: Dict[str, Any],
+    current_time: Optional[str] = None,
+    date_verified: bool = True
+) -> Dict[str, Any]:
+    model_score = max(0, min(100, int(task.get("confidence", 70))))
+    score = 42 + (model_score * 0.32)
+    evidence = evidence_window(user_input, task)
+    evidence_lower = evidence.lower()
+    title = str(task.get("title") or "").strip()
+    description = str(task.get("description") or "").strip()
+
+    # Action clarity: strong verbs and explicit deadline language are more
+    # reliable than vague nouns that merely look task-like.
+    if STRONG_ACTION_RE.search(f"{title} {description}") or STRONG_ACTION_RE.search(evidence):
+        score += 13
+    elif any(word in evidence_lower for word in ACTION_WORDS):
+        score += 7
+
+    if DEADLINE_RE.search(evidence):
+        score += 7
+    if DATE_REFERENCE_RE.search(evidence):
         score += 5
-        
-    task["confidence"] = max(0, min(100, score))
+
+    # Field completeness and source grounding.
+    meaningful_title_terms = title_terms(title)
+    if len(meaningful_title_terms) >= 2:
+        score += 6
+    elif title and title.lower() not in {"new task", "untitled task"}:
+        score += 3
+    else:
+        score -= 16
+
+    if description and description.lower() not in {"none", "null"}:
+        score += 3
+    if task.get("assigner") and str(task.get("assigner")).lower() not in {"none", "null", "me"}:
+        score += 4
+
+    matched_terms = sum(1 for term in meaningful_title_terms[:5] if term in evidence_lower)
+    if matched_terms >= 2:
+        score += 8
+    elif meaningful_title_terms:
+        score -= 4
+
+    # Time quality: a task with a precise, future due time is much safer than
+    # a guessed all-day date or a date that has already passed.
+    now = parse_current_time(current_time)
+    due_dt = parse_task_datetime(task.get("due_date"))
+    end_dt = parse_task_datetime(task.get("end_date"))
+    if due_dt:
+        score += 10
+        if task.get("is_all_day"):
+            score += 2
+        else:
+            score += 7
+            if EXPLICIT_TIME_RE.search(evidence):
+                score += 5
+            else:
+                score -= 3
+
+        days_until_due = (due_dt - now).total_seconds() / 86400
+        if days_until_due < -1:
+            score -= 22
+        elif days_until_due < 0:
+            score -= 8
+        elif days_until_due <= 14:
+            score += 5
+        elif days_until_due <= 180:
+            score += 2
+        elif days_until_due > 730:
+            score -= 10
+
+        if date_verified:
+            score += 8
+        else:
+            score -= 24
+    else:
+        if task.get("item_type") == "reminder":
+            score -= 8
+        else:
+            score -= 4
+
+    if end_dt:
+        score += 4
+        if due_dt and end_dt < due_dt:
+            score -= 18
+
+    # Ambiguous language and low-priority optionality are real uncertainty,
+    # not just lower urgency.
+    ambiguity_hits = len(AMBIGUITY_RE.findall(evidence))
+    if ambiguity_hits:
+        score -= min(24, 10 + (ambiguity_hits * 5))
+
+    if task.get("priority") == "high" and DEADLINE_RE.search(evidence):
+        score += 3
+    elif task.get("priority") == "low" and ambiguity_hits:
+        score -= 4
+
+    task["confidence"] = clamp_score(score)
     return task
 
 def validate_task(task: Dict[str, Any]) -> Dict[str, Any]:

@@ -164,8 +164,7 @@ async def ingest_doc(
             # Read PDF bytes
             pdf_bytes = await file.read()
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-            for page in doc:
-                content += page.get_text()
+            content = "\n".join(page.get_text() for page in doc)
             doc.close()
         elif file_type in ["text/plain", "text/markdown"]:
             # Read Text bytes
@@ -429,25 +428,104 @@ def due_day_key(due_date: Optional[str]) -> str:
     match = re.search(r'\d{4}-\d{2}-\d{2}', str(due_date))
     return match.group(0) if match else str(due_date)
 
-def find_duplicate_task(db: Session, user_id: int, task_data) -> Optional[Task]:
+def task_match_key(task_data) -> Optional[tuple]:
     title_key = normalize_title_for_match(task_data.get("title"))
     due_key = due_day_key(task_data.get("due_date"))
     if not title_key:
         return None
+    return title_key, due_key
 
+def build_duplicate_index(db: Session, user_id: int) -> dict:
     existing_tasks = db.query(Task).filter(
         Task.owner_id == user_id,
         Task.status != "deleted"
     ).all()
 
-    for existing in existing_tasks:
-        if normalize_title_for_match(existing.title) != title_key:
-            continue
-        if due_key and due_day_key(existing.due_date) != due_key:
-            continue
-        return existing
+    duplicate_index = {}
+    for task in existing_tasks:
+        key = task_match_key({"title": task.title, "due_date": task.due_date})
+        if key:
+            duplicate_index[key] = task
+
+    return duplicate_index
+
+def find_duplicate_task(duplicate_index: dict, task_data) -> Optional[Task]:
+    key = task_match_key(task_data)
+    if not key:
+        return None
+
+    exact_match = duplicate_index.get(key)
+    if exact_match:
+        return exact_match
+
+    title_key, due_key = key
+    if due_key:
+        return None
+
+    for (existing_title, _existing_due), existing in duplicate_index.items():
+        if existing_title == title_key:
+            return existing
 
     return None
+
+def google_due_to_iso(due: dict, due_time: Optional[dict] = None) -> Optional[str]:
+    if not due:
+        return None
+
+    year = due.get("year")
+    month = due.get("month")
+    day = due.get("day")
+    if not year or not month or not day:
+        return None
+
+    hour = 12
+    minute = 0
+    if due_time:
+        hour = due_time.get("hours", hour)
+        minute = due_time.get("minutes", minute)
+
+    return datetime(int(year), int(month), int(day), int(hour), int(minute)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def format_due_for_frontend(due_date: Optional[str], is_all_day: bool = True) -> dict:
+    if not due_date:
+        return {"due": "No due date", "time": "All Day" if is_all_day else "No time"}
+
+    try:
+        clean_date = re.sub(r'Z$|[+-]\d{2}:\d{2}$', '', due_date)
+        due_dt = datetime.fromisoformat(clean_date)
+    except Exception:
+        return {"due": "No due date", "time": "All Day" if is_all_day else "No time"}
+
+    return {
+        "due": due_dt.strftime("%m/%d/%Y"),
+        "time": "All Day" if is_all_day else due_dt.strftime("%I:%M %p")
+    }
+
+def make_structured_task(
+    title: str,
+    description: str = "",
+    due_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    assigner: Optional[str] = None,
+    item_type: str = "task",
+    priority: str = "normal",
+    is_all_day: bool = True,
+    confidence: int = 96
+) -> dict:
+    task = {
+        "item_type": item_type,
+        "title": title,
+        "description": description,
+        "due_date": due_date,
+        "end_date": end_date,
+        "assignee": "me",
+        "assigner": assigner,
+        "is_all_day": is_all_day,
+        "priority": priority,
+        "confidence": confidence
+    }
+    task.update(format_due_for_frontend(due_date, is_all_day))
+    return task
 
 @app.get("/sync-gmail")
 async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
@@ -498,6 +576,7 @@ async def sync_all(user_id: int, db: Session = Depends(get_db)):
     calendar = build('calendar', 'v3', credentials=creds)
 
     summary = {"classroom": 0, "calendar": 0}
+    sync_entries = []
 
     # 2. Fetch Classroom Assignments
     try:
@@ -517,10 +596,17 @@ async def sync_all(user_id: int, db: Session = Depends(get_db)):
                         teacher_name = None
                 assigner = f"{course['name']}: {teacher_name}" if teacher_name else course["name"]
 
-                # Create a prompt-friendly string for the AI to ingest
                 content = f"Classroom Assignment: {item['title']} for {course['name']}. Assigned By: {assigner}. Due: {due_str}. Instructions: {item.get('description', '')}"
                 try:
-                    await process_and_save_tasks(content, user_id, f"classroom: {item['id']}", db)
+                    due_date = google_due_to_iso(item.get("dueDate", {}), item.get("dueTime"))
+                    task = make_structured_task(
+                        title=item.get("title", "Classroom Assignment"),
+                        description=item.get("description", ""),
+                        due_date=due_date,
+                        assigner=assigner,
+                        is_all_day=not bool(item.get("dueTime"))
+                    )
+                    sync_entries.append((task, content, f"classroom: {item['id']}"))
                     summary["classroom"] += 1
                 except: continue
     except Exception as e:
@@ -534,37 +620,63 @@ async def sync_all(user_id: int, db: Session = Depends(get_db)):
             # Only ingest actual events, not just "free" slots
             if event.get('summary'):
                 start = event.get('start', {}).get('dateTime') or event.get('start', {}).get('date')
+                end = event.get('end', {}).get('dateTime') or event.get('end', {}).get('date')
                 content = f"Calendar Event: {event['summary']} starting {start}. Description: {event.get('description', '')}"
                 try:
-                    await process_and_save_tasks(content, user_id, f"calendar: {event['id']}", db)
+                    is_all_day = len(str(start or "")) == 10
+                    due_date = f"{start}T12:00:00Z" if is_all_day else start
+                    end_date = f"{end}T13:00:00Z" if end and len(str(end)) == 10 else end
+                    task = make_structured_task(
+                        title=event.get("summary", "Calendar Event"),
+                        description=event.get("description", ""),
+                        due_date=due_date,
+                        end_date=end_date,
+                        assigner="Google Calendar",
+                        item_type="reminder",
+                        is_all_day=is_all_day
+                    )
+                    sync_entries.append((task, content, f"calendar: {event['id']}"))
                     summary["calendar"] += 1
                 except: continue
     except Exception as e:
         print(f"Calendar sync error: {e}")
+
+    if sync_entries:
+        await save_structured_task_entries(sync_entries, user_id, db)
 
     return {"status": "success", "processed": summary}
 
 # --- REUSABLE PROCESSING LOGIC ---
 async def process_and_save_tasks(text_content, user_id, source_info, db, current_time=None):
     structured_tasks = extract_task_from_text(text_content, current_time)
+    return await save_structured_tasks(structured_tasks, text_content, user_id, source_info, db)
 
+async def save_structured_tasks(structured_tasks, text_content, user_id, source_info, db):
     if not structured_tasks:
         # Return a success with 0 tasks instead of a 500 error
         return {"status": "success", "task_ids": [], "message": "No actionable tasks found in input."}
 
-    try:
-        new_raw = RawInput(
-            content=text_content[:500], # Save snippet to avoid DB bloat
-            source_type=source_info,
-            received_at=datetime.now()
-        )
-        db.add(new_raw)
-        db.flush()
+    entries = [(task_data, text_content, source_info) for task_data in structured_tasks]
+    return await save_structured_task_entries(entries, user_id, db)
 
+async def save_structured_task_entries(entries, user_id, db):
+    if not entries:
+        return {"status": "success", "task_ids": [], "message": "No actionable tasks found in input."}
+
+    try:
         task_ids = []
-        for task_data in structured_tasks:
+        duplicate_index = build_duplicate_index(db, user_id)
+        for task_data, text_content, source_info in entries:
+            new_raw = RawInput(
+                content=text_content[:500], # Save snippet to avoid DB bloat
+                source_type=source_info,
+                received_at=datetime.now()
+            )
+            db.add(new_raw)
+            db.flush()
+
             normalized_assigner = normalize_task_assigner(task_data, text_content, source_info)
-            duplicate = find_duplicate_task(db, user_id, task_data)
+            duplicate = find_duplicate_task(duplicate_index, task_data)
             if duplicate:
                 if normalized_assigner != "me" and (not duplicate.assignee or duplicate.assignee == "me"):
                     duplicate.assignee = normalized_assigner
@@ -588,6 +700,9 @@ async def process_and_save_tasks(text_content, user_id, source_info, db, current
             db.add(new_task)
             db.flush()
             task_ids.append(new_task.task_id)
+            key = task_match_key({"title": new_task.title, "due_date": new_task.due_date})
+            if key:
+                duplicate_index[key] = new_task
 
         db.commit()
         return {"status": "success", "task_ids": task_ids, "message": f"Extracted {len(task_ids)} tasks"}

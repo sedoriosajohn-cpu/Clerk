@@ -908,6 +908,7 @@ input:checked + .slider:before { transform: translateX(26px); }
                         <div class="left-buttons">
                             <button class="ghost" id="voiceBtn" type="button">🎙️ Voice</button>
                             <button class="ghost" id="syncGmailBtn" type="button" onclick="syncGmail()">📧 Sync Gmail</button>
+                            <button class="ghost" id="syncClassroomBtn" type="button" onclick="syncClassroom()">🏫 Sync Classroom</button>
                             <button class="ghost" id="uploadBtn" type="button" onclick="document.getElementById('fileInput').click()">📎 Attach Doc</button>
                         </div>
                         <button class="primary" id="processBtn" type="button">Process Input</button>
@@ -970,7 +971,7 @@ input:checked + .slider:before { transform: translateX(26px); }
                                 <div style="font-size: 24px;">📧</div>
                                 <div>
                                     <h4 style="margin: 0; font-size: 16px; color: var(--text);">Google Account</h4>
-                                    <p style="margin: 4px 0 0; font-size: 13px; color: var(--muted);" id="google-status">Connect to sync Gmail and Calendar.</p>
+                                    <p style="margin: 4px 0 0; font-size: 13px; color: var(--muted);" id="google-status">Connect to sync Gmail and Google Classroom.</p>
                                 </div>
                             </div>
                             <button class="ghost" id="connectGoogleBtn" onclick="connectGoogleAccount()" style="padding: 8px 16px; font-size: 13px;">Connect</button>
@@ -1036,6 +1037,15 @@ function getFriendlyApiError(error) {
     if (error && error.name === 'AbortError') return "The server took too long to respond.";
     if (error && error.message) return error.message;
     return "Connection failed. Make sure the FastAPI backend is running on port 8000.";
+}
+
+function getFriendlyGoogleError(message) {
+    const text = String(message || "");
+    const lowered = text.toLowerCase();
+    if (lowered.includes("invalid_grant") || lowered.includes("expired or revoked")) {
+        return "Google access expired. Please connect your Google account again.";
+    }
+    return text || "Google connection failed. Please try connecting again.";
 }
 
 async function apiFetch(url, options = {}) {
@@ -1121,7 +1131,7 @@ window.USER_SETTINGS = { preferred_name: "User", dark_mode: false, notifications
 
 const oauthParams = new URLSearchParams(window.location.search);
 if (oauthParams.has('google_error')) {
-    alert(`Google connection failed: ${oauthParams.get('google_error')}`);
+    alert(getFriendlyGoogleError(oauthParams.get('google_error')));
     window.history.replaceState({}, document.title, window.location.pathname);
 } else if (oauthParams.has('google_connected')) {
     alert("Google account connected successfully.");
@@ -2174,6 +2184,50 @@ async function syncGmail() {
         }
     } catch (err) {
         console.error("Gmail sync failed:", err);
+        alert(getFriendlyApiError(err));
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+}
+
+async function syncClassroom() {
+    const btn = document.getElementById('syncClassroomBtn');
+    const userId = window.CURRENT_USER_ID;
+    if (!userId) return alert("Please log in first.");
+
+    const originalText = btn.textContent;
+    btn.textContent = "Extracting...";
+    btn.disabled = true;
+
+    try {
+        const response = await apiFetch(`${API_BASE}/sync-classroom?user_id=${userId}`, {
+            throttleKey: `sync-classroom:${userId}`,
+            minInterval: 30000,
+            timeout: 45000
+        });
+        const data = await response.json().catch(() => ({}));
+
+        if (data.auth_url) {
+            console.log("Redirecting to Google for authentication...");
+            window.location.href = data.auth_url;
+            return;
+        }
+
+        if (response.ok && data.status === "success") {
+            btn.textContent = "Done";
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }, 3000);
+            alert(data.message || "Classroom sync complete.");
+            loadView(currentView);
+        } else {
+            alert("Error: " + (data.message || data.detail || "Failed to extract Classroom tasks"));
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    } catch (err) {
+        console.error("Classroom sync failed:", err);
         alert(getFriendlyApiError(err));
         btn.textContent = originalText;
         btn.disabled = false;

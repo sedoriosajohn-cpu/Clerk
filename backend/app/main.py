@@ -19,6 +19,7 @@ import time
 import re
 from urllib.parse import quote
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -269,6 +270,21 @@ def clear_google_oauth_state(state: Optional[str]):
     if os.path.exists(state_path):
         os.remove(state_path)
 
+def clear_google_token(user_id: int):
+    token_path = get_google_token_path(user_id)
+    if os.path.exists(token_path):
+        os.remove(token_path)
+
+def is_invalid_google_grant(error: Exception) -> bool:
+    message = str(error).lower()
+    return "invalid_grant" in message or "expired or revoked" in message
+
+def google_auth_required_response(user_id: int, message: Optional[str] = None):
+    return {
+        "auth_url": create_google_auth_url(user_id),
+        "message": message or "Google needs to be reconnected. Please sign in again."
+    }
+
 def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     frontend_url = get_frontend_url()
     if error:
@@ -276,6 +292,7 @@ def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = Non
     if not code:
         return RedirectResponse(url=f"{frontend_url}?google_error=missing_authorization_code")
 
+    saved_state = {}
     try:
         saved_state = load_google_oauth_state(state)
         if not saved_state.get("code_verifier"):
@@ -293,7 +310,12 @@ def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = Non
             token.write(creds.to_json())
         clear_google_oauth_state(state)
     except Exception as exc:
-        message = str(exc) or exc.__class__.__name__
+        if is_invalid_google_grant(exc):
+            if saved_state.get("user_id"):
+                clear_google_token(saved_state["user_id"])
+            message = "Google access expired. Please connect your Google account again."
+        else:
+            message = str(exc) or exc.__class__.__name__
         return RedirectResponse(url=f"{frontend_url}?google_error={quote(message, safe='')}")
 
     return RedirectResponse(url=f"{frontend_url}?google_connected=1")
@@ -301,17 +323,31 @@ def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = Non
 def get_google_creds(user_id: int):
     creds = None
     token_path = get_google_token_path(user_id)
-    if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+    try:
+        if os.path.exists(token_path):
+            creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+    except Exception:
+        clear_google_token(user_id)
+        return None
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            with open(token_path, 'w') as token:
-                token.write(creds.to_json())
-            return creds # Credentials refreshed, return them
+            try:
+                creds.refresh(Request())
+                with open(token_path, 'w') as token:
+                    token.write(creds.to_json())
+                return creds # Credentials refreshed, return them
+            except RefreshError:
+                clear_google_token(user_id)
+                return None
+            except Exception as exc:
+                if is_invalid_google_grant(exc):
+                    clear_google_token(user_id)
+                    return None
+                raise
         else:
             # No valid creds and no refresh token — caller must trigger OAuth
+            clear_google_token(user_id)
             return None # Indicate that credentials are not available
     return creds
 
@@ -320,7 +356,7 @@ def get_gmail_service(user_id: int):
     if not creds:
         # If get_google_creds returns None, it means authentication is needed.
         # We raise HTTPException here for any direct backend calls that expect a service.
-        raise HTTPException(status_code=401, detail="Google account not connected. Please connect via Settings.")
+        raise HTTPException(status_code=401, detail="Google needs to be reconnected. Please connect via Settings.")
     return build('gmail', 'v1', credentials=creds)
 
 @app.get("/auth/google")
@@ -536,7 +572,7 @@ async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
             if not os.path.exists(CREDS_PATH):
                 return {"error": "credentials_missing", "message": "Google credentials.json is missing on the server."}
 
-            return {"auth_url": create_google_auth_url(user_id), "message": "Google account not connected. Please connect via Settings."}
+            return google_auth_required_response(user_id)
         service = build('gmail', 'v1', credentials=creds)
         # Fetch the 5 most recent emails
         results = service.users().messages().list(userId='me', maxResults=5).execute()
@@ -567,7 +603,7 @@ async def sync_all(user_id: int, db: Session = Depends(get_db)):
         creds = get_google_creds(user_id)
         if not creds:
             # If no credentials, return the auth URL for the frontend to redirect
-            return {"auth_url": create_google_auth_url(user_id), "message": "Google account not connected. Please connect via Settings."}
+            return google_auth_required_response(user_id)
 
     except HTTPException:
         raise

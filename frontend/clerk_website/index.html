@@ -1038,6 +1038,15 @@ function getFriendlyApiError(error) {
     return "Connection failed. Make sure the FastAPI backend is running on port 8000.";
 }
 
+function getFriendlyGoogleError(message) {
+    const text = String(message || "");
+    const lowered = text.toLowerCase();
+    if (lowered.includes("invalid_grant") || lowered.includes("expired or revoked")) {
+        return "Google access expired. Please connect your Google account again.";
+    }
+    return text || "Google connection failed. Please try connecting again.";
+}
+
 async function apiFetch(url, options = {}) {
     const method = (options.method || 'GET').toUpperCase();
     const throttleKey = options.throttleKey || `${method}:${url}`;
@@ -1121,7 +1130,7 @@ window.USER_SETTINGS = { preferred_name: "User", dark_mode: false, notifications
 
 const oauthParams = new URLSearchParams(window.location.search);
 if (oauthParams.has('google_error')) {
-    alert(`Google connection failed: ${oauthParams.get('google_error')}`);
+    alert(getFriendlyGoogleError(oauthParams.get('google_error')));
     window.history.replaceState({}, document.title, window.location.pathname);
 } else if (oauthParams.has('google_connected')) {
     alert("Google account connected successfully.");

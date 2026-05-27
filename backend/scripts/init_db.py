@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, ForeignKey, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -45,6 +45,7 @@ class Task(Base):
     task_id = Column(Integer, primary_key=True, index=True)
     raw_id = Column(Integer, ForeignKey("raw_inputs.raw_id"))
     title = Column(String, nullable=False)
+    description = Column(Text)
     due_date = Column(String) 
     end_date = Column(String) # For spanning time slots
     due_text = Column(String)
@@ -55,6 +56,20 @@ class Task(Base):
     confidence = Column(Float)
     status = Column(String, default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+def ensure_database_schema():
+    if not DATABASE_URL:
+        return
+
+    inspector = inspect(engine)
+    if "tasks" not in inspector.get_table_names():
+        Base.metadata.create_all(bind=engine)
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("tasks")}
+    if "description" not in existing_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE tasks ADD COLUMN description TEXT"))
 
 #Initialization Function
 def initialize_database():
@@ -67,6 +82,7 @@ def initialize_database():
     try:
         # 1. Create the tables based on your Classes (User, Task, etc.)
         Base.metadata.create_all(bind=engine)
+        ensure_database_schema()
         print("✅ Tables verified/created.")
 
         # 2. Open a temporary session to add the admin user

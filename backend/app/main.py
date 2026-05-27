@@ -11,6 +11,7 @@ try:
 except ImportError:
     from scripts.init_db import SessionLocal, Task, RawInput, User
 from datetime import datetime, timedelta
+import asyncio
 import base64
 import os.path
 import json
@@ -33,7 +34,10 @@ SCOPES = [
 
 app = FastAPI()
 SYNC_THROTTLE_SECONDS = int(os.environ.get("SYNC_THROTTLE_SECONDS", "30"))
+AUTO_SYNC_ENABLED = os.environ.get("AUTO_SYNC_ENABLED", "1") == "1"
+AUTO_SYNC_INTERVAL_SECONDS = int(os.environ.get("AUTO_SYNC_INTERVAL_SECONDS", "900"))
 sync_request_log = {}
+auto_sync_task = None
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 GOOGLE_TOKEN_DIR = os.path.join(BASE_DIR, "..", "..", "google_tokens")
@@ -663,6 +667,28 @@ def is_actionable_classroom_item(item: dict) -> bool:
 
     return True
 
+def cleanup_classroom_noise_tasks(db: Session, user_id: int) -> int:
+    tasks = db.query(Task).filter(
+        Task.owner_id == user_id,
+        Task.status != "deleted"
+    ).all()
+
+    cleaned = 0
+    for task in tasks:
+        if not CLASSROOM_DAY_ONLY_TITLE_RE.match(task.title or ""):
+            continue
+
+        raw = db.query(RawInput).filter(RawInput.raw_id == task.raw_id).first() if task.raw_id else None
+        came_from_classroom = raw and str(raw.source_type or "").startswith("classroom")
+        assigned_by_class = task.assignee and task.assignee != "me"
+        if came_from_classroom or assigned_by_class:
+            task.status = "deleted"
+            cleaned += 1
+
+    if cleaned:
+        db.commit()
+    return cleaned
+
 def classroom_item_to_entry(classroom, course: dict, item: dict):
     due = item.get('dueDate', {})
     due_str = f"{due.get('month')}/{due.get('day')}/{due.get('year')}" if due else "No date"
@@ -690,7 +716,7 @@ def classroom_item_to_entry(classroom, course: dict, item: dict):
     return task, content, f"classroom: {item['id']}"
 
 def collect_classroom_entries(classroom, db: Session, user_id: int):
-    summary = {"classroom": 0, "skipped": 0, "already_scanned": 0}
+    summary = {"classroom": 0, "skipped": 0, "already_scanned": 0, "cleaned": cleanup_classroom_noise_tasks(db, user_id)}
     sync_entries = []
 
     courses_result = classroom.courses().list(pageSize=5).execute()
@@ -773,7 +799,7 @@ async def sync_classroom(user_id: int, db: Session = Depends(get_db)):
         return {
             "status": "success",
             "processed": summary,
-            "message": f"Added {summary['classroom']} Classroom tasks, skipped {summary['skipped']} non-task posts, and ignored {summary['already_scanned']} already scanned posts."
+            "message": f"Added {summary['classroom']} Classroom tasks, skipped {summary['skipped']} non-task posts, ignored {summary['already_scanned']} already scanned posts, and cleaned {summary['cleaned']} old date-only tasks."
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -838,6 +864,92 @@ async def sync_all(user_id: int, db: Session = Depends(get_db)):
         await save_structured_task_entries(sync_entries, user_id, db)
 
     return {"status": "success", "processed": summary}
+
+async def auto_sync_user(user_id: int, db: Session):
+    creds = get_google_creds(user_id)
+    if not creds:
+        return {"gmail": 0, "classroom": 0}
+
+    gmail_count = 0
+    try:
+        service = build('gmail', 'v1', credentials=creds)
+        results = service.users().messages().list(userId='me', maxResults=5).execute()
+        for msg in results.get('messages', []):
+            source_info = f"gmail: {msg['id']}"
+            if source_already_scanned(db, user_id, source_info):
+                continue
+
+            m = service.users().messages().get(userId='me', id=msg['id']).execute()
+            body = get_email_body(m.get('payload', {})) or m.get('snippet', '')
+            sender = get_email_sender(m.get('payload', {}))
+            if not body:
+                mark_source_scanned(db, user_id, source_info, "Empty Gmail message")
+                continue
+
+            if sender:
+                body = f"Email From: {sender}\n{body}"
+            result = await process_and_save_tasks(body, user_id, source_info, db)
+            if not result.get("task_ids"):
+                mark_source_scanned(db, user_id, source_info, body)
+            gmail_count += 1
+    except Exception as exc:
+        print(f"Auto Gmail sync error for user {user_id}: {exc}")
+
+    classroom_count = 0
+    try:
+        classroom = build('classroom', 'v1', credentials=creds)
+        entries, summary = collect_classroom_entries(classroom, db, user_id)
+        if entries:
+            await save_structured_task_entries(entries, user_id, db)
+        classroom_count = summary.get("classroom", 0)
+    except Exception as exc:
+        print(f"Auto Classroom sync error for user {user_id}: {exc}")
+
+    return {"gmail": gmail_count, "classroom": classroom_count}
+
+def get_auto_sync_user_ids(db: Session) -> List[int]:
+    if not os.path.isdir(GOOGLE_TOKEN_DIR):
+        return []
+
+    user_ids = []
+    for filename in os.listdir(GOOGLE_TOKEN_DIR):
+        match = re.fullmatch(r'user_(\d+)\.json', filename)
+        if not match:
+            continue
+
+        user_id = int(match.group(1))
+        if db.query(User).filter(User.user_id == user_id).first():
+            user_ids.append(user_id)
+    return user_ids
+
+async def run_auto_sync_once():
+    db = SessionLocal()
+    try:
+        for user_id in get_auto_sync_user_ids(db):
+            await auto_sync_user(user_id, db)
+    finally:
+        db.close()
+
+async def auto_sync_loop():
+    while True:
+        try:
+            await run_auto_sync_once()
+        except Exception as exc:
+            print(f"Auto sync loop error: {exc}")
+        await asyncio.sleep(AUTO_SYNC_INTERVAL_SECONDS)
+
+@app.on_event("startup")
+async def start_auto_sync():
+    global auto_sync_task
+    if AUTO_SYNC_ENABLED and auto_sync_task is None:
+        auto_sync_task = asyncio.create_task(auto_sync_loop())
+
+@app.on_event("shutdown")
+async def stop_auto_sync():
+    global auto_sync_task
+    if auto_sync_task:
+        auto_sync_task.cancel()
+        auto_sync_task = None
 
 # --- REUSABLE PROCESSING LOGIC ---
 async def process_and_save_tasks(text_content, user_id, source_info, db, current_time=None):

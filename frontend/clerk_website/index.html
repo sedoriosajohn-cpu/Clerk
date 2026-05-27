@@ -35,19 +35,23 @@ body {
     background-attachment: fixed; /* Keeps gradient smooth on scroll */
     color: var(--text);
     transition: all 0.3s ease;
+    min-height: 100vh;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
 /* ==========================================================================
    2. TOP BAR & NAVIGATION
    ========================================================================== */
 .topbar {
-    height: 86px;
+    height: 74px;
     background: rgba(255, 255, 255, .75);
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 34px;
+    gap: 18px;
+    padding: 0 24px;
     backdrop-filter: blur(10px); /* Modern glass effect */
 }
 
@@ -56,29 +60,36 @@ body {
     align-items: center;
     gap: 14px;
     font-weight: 700;
-    font-size: 28px; /* Slightly scaled down for elegance */
+    font-size: 24px;
+    flex: 0 0 auto;
 }
 
 .brand img {
-    width: 44px;
-    height: 44px;
+    width: 42px;
+    height: 42px;
     border-radius: 50%;
     background: white;
     object-fit: cover;
+    cursor: pointer;
 }
 
 .nav {
     display: flex;
-    gap: 12px;
+    gap: 8px;
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
 }
 
 .nav a {
     color: var(--text);
     text-decoration: none;
-    padding: 10px 20px;
+    padding: 9px 14px;
     border-radius: 12px;
     font-weight: 500;
+    font-size: 14px;
     transition: 0.2s;
+    white-space: nowrap;
 }
 
 .nav a:hover {
@@ -90,33 +101,82 @@ body {
     color: var(--teal-dark);
 }
 
+.user-menu-container {
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
 /* ==========================================================================
    3. LAYOUT & PANELS
    ========================================================================== */
 .page {
-    max-width: 1240px;
+    max-width: 1280px;
     margin: auto;
-    padding: 28px 24px 60px;
+    min-height: calc(100vh - 74px);
+    padding: 16px 20px 20px;
+    overflow: visible;
 }
 
 .layout {
     display: grid;
-    grid-template-columns: 280px 1fr;
-    gap: 26px;
+    grid-template-columns: 250px minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+    min-height: calc(100vh - 110px);
 }
 
 .sidebar, .panel, .composer {
     background: var(--panel-bg);
     border: 1px solid var(--border);
-    border-radius: 26px;
+    border-radius: 20px;
     box-shadow: var(--shadow);
-    padding: 26px;
+    padding: 20px;
     transition: transform 0.2s ease, background 0.3s ease;
+}
+
+.sidebar {
+    align-self: start;
 }
 
 .main-stack {
     display: grid;
-    gap: 24px;
+    gap: 14px;
+    min-height: 0;
+}
+
+.today-header h1 {
+    font-size: 24px;
+    margin: 0;
+}
+
+.panel {
+    min-height: 0;
+    overflow: visible;
+}
+
+#agendaView {
+    display: flex;
+    flex-direction: column;
+}
+
+#agendaView h2,
+.composer h2 {
+    margin-top: 0;
+}
+
+.agenda-list {
+    min-height: 0;
+    overflow: visible;
+    padding-right: 4px;
+}
+
+.composer {
+    padding: 16px 20px;
+}
+
+.composer textarea,
+textarea {
+    min-height: 76px;
 }
 
 /* ==========================================================================
@@ -336,10 +396,10 @@ body.dark-mode .hour-label {
    ========================================================================== */
 textarea {
     width: 100%;
-    min-height: 100px;
+    min-height: 76px;
     border: 1px solid var(--border);
     border-radius: 16px;
-    padding: 18px;
+    padding: 12px 14px;
     font-size: 16px;
     background: rgba(255,255,255,0.5);
     color: var(--text);
@@ -355,13 +415,21 @@ textarea:focus {
 .composer-actions {
     display: flex;
     justify-content: space-between;
-    margin-top: 16px;
+    gap: 12px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+}
+
+.left-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 button {
     border: none;
     border-radius: 12px;
-    padding: 12px 24px;
+    padding: 10px 18px;
     font-size: 15px;
     font-weight: 700;
     cursor: pointer;
@@ -414,7 +482,7 @@ button {
     margin-top: 15px;
     border: 1px solid var(--border);
     border-radius: 18px;
-    overflow: hidden;
+    overflow: visible;
     background: var(--panel-bg);
 }
 
@@ -480,8 +548,8 @@ button {
 
 .calendar-day-body {
     position: relative;
-    height: 960px;
-    overflow-y: auto;
+    min-height: 960px;
+    overflow: visible;
     background: rgba(255, 255, 255, 0.7);
 }
 
@@ -641,9 +709,15 @@ body.dark-mode .calendar-all-day-row {
 .month-card {
     background: transparent !important; 
     border: 1px solid var(--border);
-    border-radius: 20px;
-    padding: 15px;
+    border-radius: 18px;
+    padding: 14px;
     margin-bottom: 10px;
+    cursor: pointer;
+}
+
+.month-card:hover {
+    border-color: var(--teal-dark);
+    background: rgba(94, 234, 212, 0.08) !important;
 }
 
 .month-row {
@@ -659,17 +733,29 @@ body.dark-mode .calendar-all-day-row {
 .calendar-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    gap: 4px;
+    gap: 3px;
     text-align: center;
     font-size: 12px;
     color: var(--muted);
 }
 
 .calendar-grid div {
-    padding: 8px 0;
+    padding: 7px 0;
     border-radius: 8px;
     transition: background 0.2s;
     color: var(--text); 
+}
+
+.calendar-grid .mini-cal-day {
+    min-height: 38px;
+    display: grid;
+    align-content: center;
+    gap: 3px;
+    cursor: pointer;
+}
+
+.calendar-grid .mini-cal-day:hover {
+    background: rgba(94, 234, 212, 0.12);
 }
 
 .calendar-grid .dayname {
@@ -690,6 +776,41 @@ body.dark-mode .calendar-all-day-row {
 .calendar-grid .empty {
     opacity: 0;
 }
+
+.mini-task-dots {
+    display: flex;
+    justify-content: center;
+    gap: 2px;
+    min-height: 4px;
+}
+
+.calendar-grid .mini-task-dot,
+.calendar-grid .mini-task-span,
+.calendar-grid .mini-task-more {
+    padding: 0;
+    display: block;
+    height: 5px;
+    border-radius: 999px;
+}
+
+.mini-task-dot {
+    width: 5px;
+    border-radius: 50%;
+}
+
+.mini-task-span {
+    width: 14px;
+}
+
+.mini-task-more {
+    width: 18px;
+}
+
+.mini-task-dot.pink, .mini-task-span.pink, .mini-task-more.pink { background: #d4145a; }
+.mini-task-dot.amber, .mini-task-span.amber, .mini-task-more.amber { background: #c68a00; }
+.mini-task-dot.teal, .mini-task-span.teal, .mini-task-more.teal { background: #00a190; }
+.mini-task-dot.blue, .mini-task-span.blue, .mini-task-more.blue { background: #3478bd; }
+.mini-task-dot.reminder, .mini-task-span.reminder, .mini-task-more.reminder { background: #7e22ce; }
 /* Styling for task "pills" inside calendar days */
 .calendar-event {
     display: flex;
@@ -900,6 +1021,320 @@ body.dark-mode .insight-task {
 }
 
 /* ==========================================================================
+   6.8 DASHBOARD
+   ========================================================================== */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.9fr);
+    gap: 16px;
+    align-items: start;
+}
+
+.dashboard-column {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+}
+
+.dashboard-section {
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.36);
+    min-width: 0;
+}
+
+.dashboard-section-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.dashboard-section-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--text);
+}
+
+.dashboard-section-trigger {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+    text-align: left;
+}
+
+.dashboard-section-trigger:hover {
+    color: var(--teal-dark);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+}
+
+.dashboard-section-count {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.dashboard-list {
+    display: grid;
+    gap: 8px;
+}
+
+.dashboard-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+    padding: 10px 10px 10px 12px;
+    border-top: 1px solid var(--border);
+    border-left: 4px solid transparent;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.24);
+}
+
+.dashboard-row:first-child {
+    border-top-color: transparent;
+}
+
+.dashboard-row.pink { border-left-color: #d4145a; background: rgba(255, 75, 145, 0.12); }
+.dashboard-row.amber { border-left-color: #c68a00; background: rgba(255, 177, 0, 0.14); }
+.dashboard-row.teal { border-left-color: #00a190; background: rgba(0, 215, 192, 0.12); }
+.dashboard-row.blue { border-left-color: #3478bd; background: rgba(0, 163, 255, 0.12); }
+.dashboard-row.reminder { border-left-color: #7e22ce; background: rgba(168, 85, 247, 0.12); }
+
+.dashboard-type-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-right: 4px;
+    font-weight: 800;
+}
+
+.dashboard-type-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.dashboard-type-dot.pink { background: #d4145a; }
+.dashboard-type-dot.amber { background: #c68a00; }
+.dashboard-type-dot.teal { background: #00a190; }
+.dashboard-type-dot.blue { background: #3478bd; }
+.dashboard-type-dot.reminder { background: #7e22ce; }
+
+body.dark-mode .dashboard-row.pink { background: rgba(255, 75, 145, 0.18); }
+body.dark-mode .dashboard-row.amber { background: rgba(255, 177, 0, 0.18); }
+body.dark-mode .dashboard-row.teal { background: rgba(0, 215, 192, 0.16); }
+body.dark-mode .dashboard-row.blue { background: rgba(0, 163, 255, 0.16); }
+body.dark-mode .dashboard-row.reminder { background: rgba(168, 85, 247, 0.18); }
+
+.dashboard-row-title {
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.dashboard-row-meta {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.dashboard-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.dashboard-empty {
+    color: var(--muted);
+    font-size: 13px;
+    padding: 8px 0;
+}
+
+.dashboard-insight-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.dashboard-stat {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.42);
+}
+
+.dashboard-stat-label {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.dashboard-stat-value {
+    margin-top: 4px;
+    color: var(--text);
+    font-size: 22px;
+    font-weight: 800;
+}
+
+.dashboard-conflict-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+body.dark-mode .dashboard-section,
+body.dark-mode .dashboard-stat {
+    background: rgba(15, 23, 42, 0.34);
+}
+
+.section-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 10002;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 26px;
+    background: rgba(15, 23, 42, 0.48);
+    backdrop-filter: blur(8px);
+}
+
+.section-modal.open {
+    display: flex;
+}
+
+.section-modal-card {
+    width: min(980px, 100%);
+    max-height: min(86vh, 900px);
+    overflow-y: auto;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.25);
+    padding: 24px;
+}
+
+.section-modal-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    align-items: flex-start;
+    margin-bottom: 18px;
+}
+
+.section-modal-title {
+    margin: 0;
+    color: var(--text);
+    font-size: 26px;
+    font-weight: 800;
+}
+
+.section-modal-subtitle {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.section-modal-close {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    background: rgba(127, 152, 165, 0.12);
+    color: var(--text);
+    font-size: 20px;
+}
+
+.section-modal-body {
+    display: grid;
+    gap: 18px;
+}
+
+.expanded-section {
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.28);
+}
+
+.expanded-section h3 {
+    margin: 0 0 12px;
+    color: var(--text);
+    font-size: 16px;
+}
+
+.expanded-list {
+    display: grid;
+    gap: 10px;
+}
+
+.expanded-task-row {
+    border-left: 5px solid transparent;
+    border-radius: 12px;
+    padding: 14px;
+    background: rgba(255, 255, 255, 0.44);
+}
+
+.expanded-task-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 14px;
+}
+
+.expanded-task-actions {
+    display: flex;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+.expanded-task-row.pink { border-left-color: #d4145a; background: rgba(255, 75, 145, 0.12); }
+.expanded-task-row.amber { border-left-color: #c68a00; background: rgba(255, 177, 0, 0.14); }
+.expanded-task-row.teal { border-left-color: #00a190; background: rgba(0, 215, 192, 0.12); }
+.expanded-task-row.blue { border-left-color: #3478bd; background: rgba(0, 163, 255, 0.12); }
+.expanded-task-row.reminder { border-left-color: #7e22ce; background: rgba(168, 85, 247, 0.12); }
+
+.expanded-task-title {
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 800;
+}
+
+.expanded-task-meta {
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.expanded-task-description {
+    margin: 10px 0 0;
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+body.dark-mode .expanded-section,
+body.dark-mode .expanded-task-row {
+    background: rgba(15, 23, 42, 0.34);
+}
+
+/* ==========================================================================
    7. NOTIFICATIONS (TOASTS)
    ========================================================================== */
 #toast-container {
@@ -969,16 +1404,61 @@ input:checked + .slider:before { transform: translateX(26px); }
    9. RESPONSIVE BITS
    ========================================================================== */
 @media (max-width: 980px) {
+    body {
+        overflow: auto;
+    }
+
+    .topbar {
+        height: auto;
+        min-height: 74px;
+        flex-wrap: wrap;
+        padding: 12px 18px;
+    }
+
+    .nav {
+        display: none;
+    }
+
+    .page {
+        height: auto;
+        overflow: visible;
+    }
+
     .layout {
         grid-template-columns: 1fr;
+        height: auto;
     }
     
     .sidebar {
-        display: none; /* Hide sidebar on small screens for better focus */
+        display: none;
+    }
+
+    .main-stack {
+        min-height: auto;
+    }
+
+    .panel {
+        overflow: visible;
+    }
+
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-insight-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
 @media (max-width: 720px) {
+    .dashboard-insight-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-row {
+        grid-template-columns: 1fr;
+    }
+
     .insight-task-head {
         flex-direction: column;
     }
@@ -995,20 +1475,11 @@ input:checked + .slider:before { transform: translateX(26px); }
 <body>
     <header class="topbar">
         <div class="brand">
-            <img src="logo.png" alt="Clerk logo">
+            <img src="logo.png" alt="Clerk logo" onclick="goHome()" title="Home">
             <span>CLERK</span>
         </div>
 
-        <nav class="nav">
-            <a href="#" onclick="loadView('calendar')">Calendar</a>
-            <a href="#" onclick="loadView('my tasks')">My Tasks</a>
-            <a href="#" onclick="loadView('reminders')">Reminders</a>
-            <a href="#" onclick="loadView('history')">History</a>
-            <a href="#" class="active" onclick="loadView('agenda')">Agenda</a>
-            <a href="#" onclick="loadView('insights')">Insights</a>
-        </nav>
-
-        <div class="user-menu-container" style="position: relative; margin-left: 20px;">
+        <div class="user-menu-container" style="position: relative;">
             <div class="user-profile" onclick="toggleUserMenu()" style="cursor:pointer; display:flex; align-items:center; gap:10px;">
                 <span id="display-username" style="color:var(--text); font-weight:500;">User</span>
                 <div style="width:35px; height:35px; background:var(--teal); border-radius:50%; display:flex; align-items:center; justify-content:center; color:white;">👤</div>
@@ -1025,7 +1496,7 @@ input:checked + .slider:before { transform: translateX(26px); }
     <main class="page">
         <div class="layout">
             <aside class="sidebar">
-                <div class="month-card">
+                <div class="month-card" onclick="loadView('calendar')" title="Open full calendar">
                     <div class="month-row">
                         <span id="sidebarMonthYear"></span>
                         <span>🗓️</span>
@@ -1147,6 +1618,19 @@ input:checked + .slider:before { transform: translateX(26px); }
             </section>
         </div>
     </main>
+
+    <div class="section-modal" id="sectionModal" onclick="handleSectionModalBackdrop(event)">
+        <div class="section-modal-card" role="dialog" aria-modal="true" aria-labelledby="sectionModalTitle">
+            <div class="section-modal-head">
+                <div>
+                    <h2 class="section-modal-title" id="sectionModalTitle">Section</h2>
+                    <div class="section-modal-subtitle" id="sectionModalSubtitle"></div>
+                </div>
+                <button class="section-modal-close" type="button" onclick="closeSectionModal()" aria-label="Close">×</button>
+            </div>
+            <div class="section-modal-body" id="sectionModalBody"></div>
+        </div>
+    </div>
 
     <div id="login-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.98); z-index:9999; display:flex; justify-content:center; align-items:center;">
         <div style="background:#1e293b; padding:40px; border-radius:26px; text-align:center; border:1px solid var(--teal); box-shadow: var(--shadow); width: 350px;">
@@ -1293,6 +1777,7 @@ if (oauthParams.has('google_error')) {
 const notifiedTasks = new Set(); // To prevent duplicate alerts
 let currentTask = null; // This will hold the result from your FastAPI /ingest
 let currentView = 'agenda';
+let latestTasks = [];
 let selectedTaskIds = new Set();
 let lastRenderedTaskIds = [];
 
@@ -1301,6 +1786,10 @@ let currentCalMonth = new Date().getMonth();
 let currentCalYear = new Date().getFullYear();
 let currentCalDay = new Date().getDate();
 let currentCalendarView = 'month';
+
+function goHome() {
+    loadView('agenda');
+}
 
   //login function 
 window.login = async function() {
@@ -1701,6 +2190,369 @@ function renderInsightsPage(tasks, containerId = 'agendaList') {
     `;
 }
 
+function getActiveTasks(tasks) {
+    return tasks.filter(task => task.status !== 'completed' && task.status !== 'deleted');
+}
+
+function sortByScheduleThenTitle(tasks) {
+    return [...tasks].sort((a, b) => {
+        const aDate = parseWallTime(a.due_date);
+        const bDate = parseWallTime(b.due_date);
+        if (!aDate && !bDate) return String(a.title || '').localeCompare(String(b.title || ''));
+        if (!aDate) return 1;
+        if (!bDate) return -1;
+        return aDate - bDate;
+    });
+}
+
+function isTaskDueToday(task) {
+    const start = parseWallTime(task.due_date);
+    if (!start) return false;
+    const todayStart = startOfLocalDay(new Date());
+    const todayEnd = new Date(todayStart);
+    todayEnd.setHours(23, 59, 59, 999);
+    const end = task.end_date ? parseWallTime(task.end_date) : start;
+    return start <= todayEnd && end >= todayStart;
+}
+
+function renderDashboardTaskRow(task, options = {}) {
+    const isHistory = Boolean(options.isHistory);
+    const showDescription = Boolean(options.showDescription);
+    const conflicts = options.conflictMap ? (options.conflictMap.get(Number(task.task_id)) || []) : [];
+    const start = parseWallTime(task.due_date);
+    const timedRange = getTimedTaskRange(task);
+    const end = timedRange ? timedRange.end : (task.end_date ? parseWallTime(task.end_date) : null);
+    const scheduleText = formatScheduleRange(start, end, Boolean(task.is_all_day));
+    const description = task.description ? ` · ${task.description}` : '';
+    const confidenceScore = Number(task.confidence);
+    const confidence = !isNaN(confidenceScore) ? ` · ${Math.round(confidenceScore)}%` : '';
+    const conflictText = conflicts.length
+        ? ` · Conflicts with ${conflicts.map(conflict => conflict.title || 'Untitled Task').join(', ')}`
+        : '';
+    const typeLabel = task.item_type === 'reminder' ? 'Reminder' : 'Task';
+    const colorClass = getTaskColorClass(task);
+
+    return `
+        <div class="dashboard-row ${colorClass}" id="task-item-${task.task_id}">
+            <div>
+                <div class="dashboard-row-title">${escapeHTML(task.title || 'Untitled Task')}</div>
+                <div class="dashboard-row-meta">
+                    <span class="dashboard-type-chip"><span class="dashboard-type-dot ${colorClass}"></span>${escapeHTML(typeLabel)}</span>
+                    · ${escapeHTML(scheduleText)}${escapeHTML(confidence)}
+                    ${showDescription ? escapeHTML(description) : ''}
+                    ${conflictText ? `<span style="color:#be123c;">${escapeHTML(conflictText)}</span>` : ''}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderDashboardList(tasks, emptyText, options = {}) {
+    if (!tasks.length) return `<div class="dashboard-empty">${escapeHTML(emptyText)}</div>`;
+    const limit = options.limit || tasks.length;
+    return `<div class="dashboard-list">${tasks.slice(0, limit).map(task => renderDashboardTaskRow(task, options)).join('')}</div>`;
+}
+
+function getDashboardData(tasks) {
+    const activeTasks = getActiveTasks(tasks);
+    const todayTasks = sortByScheduleThenTitle(activeTasks.filter(task => task.item_type !== 'reminder' && isTaskDueToday(task)));
+    const tasksOnly = sortByScheduleThenTitle(activeTasks.filter(task => task.item_type !== 'reminder'));
+    const remindersOnly = sortByScheduleThenTitle(activeTasks.filter(task => task.item_type === 'reminder'));
+    const historyTasks = [...tasks]
+        .filter(task => task.status === 'completed' || task.status === 'deleted')
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+    const conflictMap = buildConflictMap(activeTasks);
+    const confidenceScores = activeTasks.map(task => Number(task.confidence)).filter(score => !isNaN(score));
+    const averageConfidence = confidenceScores.length
+        ? Math.round(confidenceScores.reduce((sum, score) => sum + score, 0) / confidenceScores.length)
+        : 0;
+    const conflictTaskCount = [...conflictMap.keys()].length;
+    const lowConfidenceCount = activeTasks.filter(task => Number(task.confidence || 0) < 70).length;
+    const conflictChips = [...conflictMap.entries()].slice(0, 4).map(([taskId, conflicts]) => {
+        const task = activeTasks.find(item => Number(item.task_id) === Number(taskId));
+        if (!task) return '';
+        return `<span class="conflict-chip">${escapeHTML(task.title || 'Untitled Task')} conflicts with ${escapeHTML(conflicts[0]?.title || 'another task')}</span>`;
+    }).join('');
+
+    return {
+        activeTasks,
+        todayTasks,
+        tasksOnly,
+        remindersOnly,
+        historyTasks,
+        conflictMap,
+        averageConfidence,
+        conflictTaskCount,
+        lowConfidenceCount,
+        conflictChips
+    };
+}
+
+function renderDashboardPage(tasks, containerId = 'agendaList') {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const {
+        activeTasks,
+        todayTasks,
+        tasksOnly,
+        remindersOnly,
+        historyTasks,
+        conflictMap,
+        averageConfidence,
+        conflictTaskCount,
+        lowConfidenceCount,
+        conflictChips
+    } = getDashboardData(tasks);
+
+    container.innerHTML = `
+        <div class="dashboard-grid">
+            <div class="dashboard-column">
+                <section class="dashboard-section">
+                    <div class="dashboard-section-header">
+                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="openSectionModal('agenda')">Agenda + Insights</button></h3>
+                        <span class="dashboard-section-count">${todayTasks.length} due today</span>
+                    </div>
+                    <div class="dashboard-insight-grid">
+                        <div class="dashboard-stat">
+                            <div class="dashboard-stat-label">Active</div>
+                            <div class="dashboard-stat-value">${activeTasks.length}</div>
+                        </div>
+                        <div class="dashboard-stat">
+                            <div class="dashboard-stat-label">Avg confidence</div>
+                            <div class="dashboard-stat-value">${averageConfidence}%</div>
+                        </div>
+                        <div class="dashboard-stat">
+                            <div class="dashboard-stat-label">Low confidence</div>
+                            <div class="dashboard-stat-value">${lowConfidenceCount}</div>
+                        </div>
+                        <div class="dashboard-stat">
+                            <div class="dashboard-stat-label">Conflicts</div>
+                            <div class="dashboard-stat-value">${conflictTaskCount}</div>
+                        </div>
+                    </div>
+                    <div class="dashboard-conflict-list">
+                        ${conflictChips || '<span class="no-conflict-chip">No schedule conflicts detected</span>'}
+                    </div>
+                    <div style="margin-top:14px;">
+                        ${renderDashboardList(todayTasks, 'Nothing scheduled for today.', { showDescription: true, conflictMap })}
+                    </div>
+                </section>
+
+                <section class="dashboard-section">
+                    <div class="dashboard-section-header">
+                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="openSectionModal('history')">History</button></h3>
+                        <span class="dashboard-section-count">${historyTasks.length} recent</span>
+                    </div>
+                    ${renderDashboardList(historyTasks, 'No completed or deleted tasks yet.', { isHistory: true, limit: 6 })}
+                </section>
+            </div>
+
+            <div class="dashboard-column">
+                <section class="dashboard-section">
+                    <div class="dashboard-section-header">
+                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="openSectionModal('tasks')">My Tasks</button></h3>
+                        <span class="dashboard-section-count">${tasksOnly.length} open</span>
+                    </div>
+                    ${renderDashboardList(tasksOnly, 'No active tasks.', { showDescription: true, conflictMap, limit: 8 })}
+                </section>
+
+                <section class="dashboard-section">
+                    <div class="dashboard-section-header">
+                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="openSectionModal('reminders')">Reminders</button></h3>
+                        <span class="dashboard-section-count">${remindersOnly.length} active</span>
+                    </div>
+                    ${renderDashboardList(remindersOnly, 'No active reminders.', { limit: 6 })}
+                </section>
+            </div>
+        </div>
+    `;
+}
+
+function renderExpandedTaskRow(task, conflictMap = new Map()) {
+    const colorClass = getTaskColorClass(task);
+    const start = parseWallTime(task.due_date);
+    const timedRange = getTimedTaskRange(task);
+    const end = timedRange ? timedRange.end : (task.end_date ? parseWallTime(task.end_date) : null);
+    const scheduleText = formatScheduleRange(start, end, Boolean(task.is_all_day));
+    const confidenceScore = Number(task.confidence);
+    const confidence = !isNaN(confidenceScore) ? `${Math.round(confidenceScore)}% confidence` : 'No confidence score';
+    const typeLabel = task.item_type === 'reminder' ? 'Reminder' : 'Task';
+    const description = task.description || 'No description saved for this item yet.';
+    const conflicts = conflictMap.get(Number(task.task_id)) || [];
+    const isHistory = task.status === 'completed' || task.status === 'deleted';
+    const actionHtml = isHistory ? `
+        <button class="done-btn" onclick="handleModalTaskAction(${task.task_id}, 'pending')" title="Restore">↻</button>
+        <button class="done-btn delete" onclick="handleModalPermanentDelete(${task.task_id})" title="Delete Permanently">×</button>
+    ` : `
+        <button class="done-btn" onclick="handleModalTaskAction(${task.task_id}, 'completed')" title="Complete">✓</button>
+        <button class="done-btn delete" onclick="handleModalTaskAction(${task.task_id}, 'deleted')" title="Dismiss">×</button>
+    `;
+
+    return `
+        <article class="expanded-task-row ${colorClass}">
+            <div class="expanded-task-head">
+                <div class="expanded-task-title">${escapeHTML(task.title || 'Untitled Task')}</div>
+                <div class="expanded-task-actions">${actionHtml}</div>
+            </div>
+            <div class="expanded-task-meta">
+                <span class="dashboard-type-chip"><span class="dashboard-type-dot ${colorClass}"></span>${escapeHTML(typeLabel)}</span>
+                · ${escapeHTML(scheduleText)}
+                · ${escapeHTML(capitalizePriority(task.priority))}
+                · ${escapeHTML(confidence)}
+                ${task.status ? ` · ${escapeHTML(String(task.status))}` : ''}
+            </div>
+            <p class="expanded-task-description">${escapeHTML(description)}</p>
+            ${conflicts.length ? `
+                <div class="dashboard-conflict-list">
+                    ${conflicts.map(conflict => `<span class="conflict-chip">Conflicts with ${escapeHTML(conflict.title || 'Untitled Task')}</span>`).join('')}
+                </div>
+            ` : ''}
+        </article>
+    `;
+}
+
+function renderExpandedList(tasks, emptyText, conflictMap = new Map()) {
+    if (!tasks.length) return `<div class="dashboard-empty">${escapeHTML(emptyText)}</div>`;
+    return `<div class="expanded-list">${tasks.map(task => renderExpandedTaskRow(task, conflictMap)).join('')}</div>`;
+}
+
+function getSectionModalContent(section) {
+    const data = getDashboardData(latestTasks);
+
+    if (section === 'agenda') {
+        return {
+            title: 'Agenda + Insights',
+            subtitle: `${data.todayTasks.length} due today · ${data.conflictTaskCount} schedule conflicts · ${data.averageConfidence}% average confidence`,
+            body: `
+                <section class="expanded-section">
+                    <h3>Insights</h3>
+                    <div class="dashboard-insight-grid">
+                        <div class="dashboard-stat">
+                            <div class="dashboard-stat-label">Active</div>
+                            <div class="dashboard-stat-value">${data.activeTasks.length}</div>
+                        </div>
+                        <div class="dashboard-stat">
+                            <div class="dashboard-stat-label">Avg confidence</div>
+                            <div class="dashboard-stat-value">${data.averageConfidence}%</div>
+                        </div>
+                        <div class="dashboard-stat">
+                            <div class="dashboard-stat-label">Low confidence</div>
+                            <div class="dashboard-stat-value">${data.lowConfidenceCount}</div>
+                        </div>
+                        <div class="dashboard-stat">
+                            <div class="dashboard-stat-label">Conflicts</div>
+                            <div class="dashboard-stat-value">${data.conflictTaskCount}</div>
+                        </div>
+                    </div>
+                    <div class="dashboard-conflict-list">
+                        ${data.conflictChips || '<span class="no-conflict-chip">No schedule conflicts detected</span>'}
+                    </div>
+                </section>
+                <section class="expanded-section">
+                    <h3>Today's Agenda</h3>
+                    ${renderExpandedList(data.todayTasks, 'Nothing scheduled for today.', data.conflictMap)}
+                </section>
+            `
+        };
+    }
+
+    if (section === 'tasks') {
+        return {
+            title: 'My Tasks',
+            subtitle: `${data.tasksOnly.length} open tasks`,
+            body: `
+                <section class="expanded-section">
+                    <h3>Open Tasks</h3>
+                    ${renderExpandedList(data.tasksOnly, 'No active tasks.', data.conflictMap)}
+                </section>
+            `
+        };
+    }
+
+    if (section === 'reminders') {
+        return {
+            title: 'Reminders',
+            subtitle: `${data.remindersOnly.length} active reminders`,
+            body: `
+                <section class="expanded-section">
+                    <h3>Active Reminders</h3>
+                    ${renderExpandedList(data.remindersOnly, 'No active reminders.', data.conflictMap)}
+                </section>
+            `
+        };
+    }
+
+    return {
+        title: 'History',
+        subtitle: `${data.historyTasks.length} completed or deleted tasks`,
+        body: `
+            <section class="expanded-section">
+                <h3>Recently Completed & Deleted</h3>
+                ${renderExpandedList(data.historyTasks, 'No completed or deleted tasks yet.', data.conflictMap)}
+            </section>
+        `
+    };
+}
+
+function openSectionModal(section) {
+    const modal = document.getElementById('sectionModal');
+    const title = document.getElementById('sectionModalTitle');
+    const subtitle = document.getElementById('sectionModalSubtitle');
+    const body = document.getElementById('sectionModalBody');
+    if (!modal || !title || !subtitle || !body) return;
+
+    const content = getSectionModalContent(section);
+    title.textContent = content.title;
+    subtitle.textContent = content.subtitle;
+    body.innerHTML = content.body;
+    modal.classList.add('open');
+}
+
+function closeSectionModal() {
+    const modal = document.getElementById('sectionModal');
+    if (modal) modal.classList.remove('open');
+}
+
+function handleSectionModalBackdrop(event) {
+    if (event.target && event.target.id === 'sectionModal') closeSectionModal();
+}
+
+async function handleModalTaskAction(taskId, status) {
+    try {
+        const response = await apiFetch(`${API_BASE}/tasks/${taskId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status })
+        });
+        if (!response.ok) throw new Error("Task update failed");
+
+        closeSectionModal();
+        loadView(currentView);
+    } catch (err) {
+        console.error("Modal task update failed:", err);
+        alert("Failed to update task.");
+    }
+}
+
+async function handleModalPermanentDelete(taskId) {
+    if (!confirm("Permanently delete this task?")) return;
+
+    try {
+        const response = await apiFetch(`${API_BASE}/tasks/${taskId}/permanent`, {
+            method: 'DELETE'
+        });
+        if (!response.ok) throw new Error("Permanent delete failed");
+
+        closeSectionModal();
+        loadView(currentView);
+    } catch (err) {
+        console.error("Modal permanent delete failed:", err);
+        alert("Failed to permanently delete task.");
+    }
+}
+
 function toggleTaskSelection(taskId, isSelected) {
     const id = Number(taskId);
     if (isSelected) selectedTaskIds.add(id);
@@ -1890,7 +2742,7 @@ async function loadView(view) {
         return; 
     } else {
         agendaPanel.style.display = 'block';
-        composer.style.display = view === 'insights' ? 'none' : 'block';
+        composer.style.display = view === 'calendar' ? 'none' : 'block';
         settingsView.style.display = 'none';
     }
     
@@ -1918,25 +2770,14 @@ async function loadView(view) {
         
         // This is the variable name your renderTaskList expects
         const allTasks = data.tasks || [];
+        latestTasks = allTasks;
+        buildCalendar(latestTasks);
         console.log("Tasks successfully loaded for User " + userId + ":", allTasks);
 
         // 6. View Routing
         if (view === 'agenda') {
-            titleHeader.textContent = "Today's Agenda";
-            
-            const todayStart = new Date();
-            todayStart.setHours(0,0,0,0);
-            const todayEnd = new Date();
-            todayEnd.setHours(23,59,59,999);
-            
-            const todayTasks = allTasks.filter(t => {
-                if (t.item_type === 'reminder') return false; // Hide reminders from main agenda
-                const start = parseWallTime(t.due_date);
-                if (!start) return false;
-                const end = t.end_date ? parseWallTime(t.end_date) : start;
-                return (start <= todayEnd && end >= todayStart);
-            });
-            renderTaskList(todayTasks, 'agendaList', false);
+            titleHeader.textContent = "Dashboard";
+            renderDashboardPage(allTasks, 'agendaList');
         }
         else if (view === 'my tasks') {
             titleHeader.textContent = "All My Tasks";
@@ -2516,6 +3357,11 @@ window.changeCalendarView = function(view) {
 };
 
 window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('sectionModal')?.classList.contains('open')) {
+        closeSectionModal();
+        return;
+    }
+
     const target = e.target;
     const isTyping = target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
     if (isTyping || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -2772,13 +3618,21 @@ function renderOutput(task) {
     taskInput.value = '';
 }
 
-function buildCalendar() {
+function taskSpansMultipleDays(task) {
+    const start = parseWallTime(task?.due_date);
+    const end = task?.end_date ? parseWallTime(task.end_date) : null;
+    if (!start || !end || isNaN(start.getTime()) || isNaN(end.getTime())) return false;
+    return formatDateKey(start) !== formatDateKey(end);
+}
+
+function buildCalendar(tasks = latestTasks) {
     const grid = document.getElementById('calendarGrid');
     if (!grid) return; // Prevent crash if grid is missing
 
     const now = new Date();
     const year = now.getFullYear();
     const month = now.getMonth();
+    const activeTasks = getActiveTasks(tasks || []);
 
     // Clear previous calendar
     grid.innerHTML = '';
@@ -2803,8 +3657,28 @@ function buildCalendar() {
     // Add actual days
     for (let day = 1; day <= daysInMonth; day++) {
         const el = document.createElement('div');
-        el.textContent = day;
-        if (day === now.getDate()) el.className = 'selected';
+        const date = new Date(year, month, day);
+        const dateTasks = activeTasks.filter(task => taskOccursOnDate(task, date));
+        el.className = `mini-cal-day${day === now.getDate() ? ' selected' : ''}`;
+        el.innerHTML = `
+            <span>${day}</span>
+            <span class="mini-task-dots">
+                ${dateTasks.slice(0, 3).map((task, index) => {
+                    const markerClass = dateTasks.length > 3 && index === 2
+                        ? 'mini-task-more'
+                        : (taskSpansMultipleDays(task) ? 'mini-task-span' : 'mini-task-dot');
+                    return `<span class="${markerClass} ${getTaskColorClass(task)}"></span>`;
+                }).join('')}
+            </span>
+        `;
+        el.onclick = (event) => {
+            event.stopPropagation();
+            currentCalYear = year;
+            currentCalMonth = month;
+            currentCalDay = day;
+            currentCalendarView = 'day';
+            loadView('calendar');
+        };
         grid.appendChild(el);
     }
 }
@@ -2829,12 +3703,12 @@ function setLiveDates() {
 
     //Highlights the current day in the calendar grid
     const currentDay = today.getDate();
-    const calendarDays = document.querySelectorAll('.calendar-grid div:not(.dayname)');
+    const calendarDays = document.querySelectorAll('.calendar-grid .mini-cal-day');
     
     calendarDays.forEach(dayDiv => {
         dayDiv.classList.remove('selected');
         // Match the number and add the teal circle
-        if (dayDiv.textContent == currentDay) {
+        if (dayDiv.querySelector('span')?.textContent == currentDay) {
             dayDiv.classList.add('selected');
         }
     });
@@ -2843,7 +3717,7 @@ function setLiveDates() {
 // Run the function as soon as the page loads
 window.addEventListener('DOMContentLoaded', () => {
     setLiveDates();
-    buildCalendar();
+    buildCalendar(latestTasks);
 });
 
 // Checks for a date change every minute

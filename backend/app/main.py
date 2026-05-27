@@ -7,9 +7,9 @@ from typing import Optional, List
 from sqlalchemy.orm import Session
 from .extractor import extract_task_from_text
 try:
-    from backend.scripts.init_db import SessionLocal, Task, RawInput, User
+    from backend.scripts.init_db import SessionLocal, Task, RawInput, User, ensure_database_schema
 except ImportError:
-    from scripts.init_db import SessionLocal, Task, RawInput, User
+    from scripts.init_db import SessionLocal, Task, RawInput, User, ensure_database_schema
 from datetime import datetime, timedelta
 import asyncio
 import base64
@@ -105,6 +105,7 @@ class TaskUpdate(BaseModel):
     due_date: Optional[str] = None
     end_date: Optional[str] = None
     title: Optional[str] = None
+    description: Optional[str] = None
     priority: Optional[str] = None
     item_type: Optional[str] = None
     status: Optional[str] = None
@@ -455,6 +456,25 @@ def normalize_task_assigner(task_data, text_content: str, source_info: str) -> s
         or task_data.get("assignee")
     )
     return clean_assigner_label(raw_assigner, source_info)
+
+def task_to_dict(task: Task) -> dict:
+    return {
+        "owner_id": task.owner_id,
+        "task_id": task.task_id,
+        "raw_id": task.raw_id,
+        "title": task.title,
+        "description": task.description or "",
+        "due_date": task.due_date,
+        "end_date": task.end_date,
+        "due_text": task.due_text,
+        "assignee": task.assignee,
+        "item_type": task.item_type,
+        "priority": task.priority,
+        "is_all_day": bool(task.is_all_day),
+        "confidence": task.confidence,
+        "status": task.status,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+    }
 
 def normalize_title_for_match(title: Optional[str]) -> str:
     text = re.sub(r'[^a-z0-9\s]', ' ', str(title or "").lower())
@@ -941,6 +961,7 @@ async def auto_sync_loop():
 @app.on_event("startup")
 async def start_auto_sync():
     global auto_sync_task
+    ensure_database_schema()
     if AUTO_SYNC_ENABLED and auto_sync_task is None:
         auto_sync_task = asyncio.create_task(auto_sync_loop())
 
@@ -993,6 +1014,7 @@ async def save_structured_task_entries(entries, user_id, db):
                 owner_id=user_id,
                 raw_id=new_raw.raw_id,
                 title=task_data.get("title"),
+                description=task_data.get("description"),
                 due_date=task_data.get("due_date"), # Store None if not provided, not "None" string
                 end_date=task_data.get("end_date"),
                 due_text=task_data.get("due"),
@@ -1040,7 +1062,7 @@ async def get_tasks(user_id: int, db: Session = Depends(get_db)):
     if changed:
         db.commit()
 
-    return {"tasks": tasks}
+    return {"tasks": [task_to_dict(task) for task in tasks]}
 
 @app.get("/users/{user_id}/settings")
 async def get_user_settings(user_id: int, db: Session = Depends(get_db)):
@@ -1087,7 +1109,7 @@ async def get_task_history(user_id: int, db: Session = Depends(get_db), limit: i
         Task.owner_id == user_id,
         (Task.status == 'completed') | (Task.status == 'deleted')
     ).order_by(Task.created_at.desc()).limit(limit).all()
-    return {"tasks": history_tasks}
+    return {"tasks": [task_to_dict(task) for task in history_tasks]}
 
 @app.patch("/tasks/{task_id}")
 async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depends(get_db)):
@@ -1096,6 +1118,7 @@ async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depen
         raise HTTPException(status_code=404, detail="Task not found")
 
     if task_update.title: task.title = task_update.title
+    if task_update.description is not None: task.description = task_update.description
     if task_update.priority: task.priority = task_update.priority
     if task_update.item_type: task.item_type = task_update.item_type
     if task_update.status: task.status = task_update.status # This handles "completed" and "deleted"

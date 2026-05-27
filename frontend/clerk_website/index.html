@@ -757,6 +757,147 @@ body.dark-mode .calendar-all-day-row {
 .calendar-event.blue { background-color: rgba(0, 163, 255, 0.25); border-left: 3px solid #0077bb; }
 .calendar-event.reminder { background-color: rgba(168, 85, 247, 0.25); border-left: 3px solid #7e22ce; }/* Purple for reminders */
 
+/* ==========================================================================
+   6.75 INSIGHTS
+   ========================================================================== */
+.insights-shell {
+    display: grid;
+    gap: 18px;
+}
+
+.insights-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.insight-stat {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px;
+    background: rgba(255, 255, 255, 0.42);
+}
+
+.insight-stat-label {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.insight-stat-value {
+    color: var(--text);
+    font-size: 28px;
+    font-weight: 800;
+    margin-top: 6px;
+}
+
+.insights-list {
+    display: grid;
+    gap: 12px;
+}
+
+.insight-task {
+    border: 1px solid var(--border);
+    border-left: 5px solid var(--teal-dark);
+    border-radius: 14px;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.48);
+}
+
+.insight-task.has-conflict {
+    border-left-color: #e11d48;
+}
+
+.insight-task.low-confidence {
+    border-left-color: #f59e0b;
+}
+
+.insight-task-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    align-items: flex-start;
+}
+
+.insight-task-title {
+    font-size: 17px;
+    font-weight: 800;
+    margin: 0;
+    color: var(--text);
+}
+
+.insight-task-meta {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.insight-description {
+    margin: 12px 0 0;
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.confidence-meter {
+    min-width: 138px;
+    text-align: right;
+}
+
+.confidence-score {
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--text);
+}
+
+.confidence-track {
+    height: 8px;
+    margin-top: 8px;
+    background: rgba(127, 152, 165, 0.18);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.confidence-fill {
+    height: 100%;
+    border-radius: 999px;
+}
+
+.confidence-fill.high { background: #14b8a6; }
+.confidence-fill.medium { background: #f59e0b; }
+.confidence-fill.low { background: #e11d48; }
+
+.insight-conflicts {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.conflict-chip {
+    border-radius: 999px;
+    padding: 6px 10px;
+    background: rgba(225, 29, 72, 0.1);
+    color: #be123c;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.no-conflict-chip {
+    border-radius: 999px;
+    padding: 6px 10px;
+    background: rgba(20, 184, 166, 0.12);
+    color: #0f766e;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+body.dark-mode .insight-stat,
+body.dark-mode .insight-task {
+    background: rgba(15, 23, 42, 0.34);
+}
 
 /* ==========================================================================
    7. NOTIFICATIONS (TOASTS)
@@ -837,6 +978,17 @@ input:checked + .slider:before { transform: translateX(26px); }
     }
 }
 
+@media (max-width: 720px) {
+    .insight-task-head {
+        flex-direction: column;
+    }
+
+    .confidence-meter {
+        width: 100%;
+        text-align: left;
+    }
+}
+
 </style>
 </head>
 
@@ -853,7 +1005,7 @@ input:checked + .slider:before { transform: translateX(26px); }
             <a href="#" onclick="loadView('reminders')">Reminders</a>
             <a href="#" onclick="loadView('history')">History</a>
             <a href="#" class="active" onclick="loadView('agenda')">Agenda</a>
-            <a href="#insightsSection">Clerk Insights</a>
+            <a href="#" onclick="loadView('insights')">Insights</a>
         </nav>
 
         <div class="user-menu-container" style="position: relative; margin-left: 20px;">
@@ -1399,6 +1551,156 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
     updateBulkToolbar();
 }
 
+function getConfidenceLevel(score) {
+    const value = Number(score);
+    if (value >= 80) return 'high';
+    if (value >= 60) return 'medium';
+    return 'low';
+}
+
+function formatScheduleRange(start, end, isAllDay = false) {
+    if (!start) return 'No scheduled time';
+    const dateText = start.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+    if (isAllDay) return `${dateText} · All day`;
+    const startText = start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const endText = end ? end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+    return `${dateText} · ${startText}${endText ? `-${endText}` : ''}`;
+}
+
+function getTimedTaskRange(task) {
+    if (!task || !task.due_date || task.is_all_day) return null;
+    const start = parseWallTime(task.due_date);
+    if (!start || isNaN(start.getTime())) return null;
+
+    let end = task.end_date ? parseWallTime(task.end_date) : null;
+    if (!end || isNaN(end.getTime()) || end <= start) {
+        end = new Date(start.getTime() + 60 * 60000);
+    }
+    return { start, end };
+}
+
+function buildConflictMap(tasks) {
+    const activeTimedTasks = tasks
+        .filter(task => task.status !== 'completed' && task.status !== 'deleted')
+        .map(task => ({ task, range: getTimedTaskRange(task) }))
+        .filter(entry => entry.range)
+        .sort((a, b) => a.range.start - b.range.start);
+
+    const conflicts = new Map();
+
+    for (let i = 0; i < activeTimedTasks.length; i++) {
+        for (let j = i + 1; j < activeTimedTasks.length; j++) {
+            const current = activeTimedTasks[i];
+            const next = activeTimedTasks[j];
+            if (next.range.start >= current.range.end) break;
+
+            if (current.range.start < next.range.end && next.range.start < current.range.end) {
+                const currentId = Number(current.task.task_id);
+                const nextId = Number(next.task.task_id);
+                if (!conflicts.has(currentId)) conflicts.set(currentId, []);
+                if (!conflicts.has(nextId)) conflicts.set(nextId, []);
+                conflicts.get(currentId).push(next.task);
+                conflicts.get(nextId).push(current.task);
+            }
+        }
+    }
+
+    return conflicts;
+}
+
+function renderInsightsPage(tasks, containerId = 'agendaList') {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const activeTasks = tasks
+        .filter(task => task.status !== 'completed' && task.status !== 'deleted')
+        .sort((a, b) => {
+            const aDate = parseWallTime(a.due_date);
+            const bDate = parseWallTime(b.due_date);
+            if (!aDate && !bDate) return String(a.title || '').localeCompare(String(b.title || ''));
+            if (!aDate) return 1;
+            if (!bDate) return -1;
+            return aDate - bDate;
+        });
+
+    if (!activeTasks.length) {
+        container.innerHTML = '<p style="color:var(--muted); padding:20px;">No active tasks to analyze yet.</p>';
+        return;
+    }
+
+    const conflictMap = buildConflictMap(activeTasks);
+    const conflictTaskCount = [...conflictMap.keys()].length;
+    const confidenceScores = activeTasks.map(task => Number(task.confidence)).filter(score => !isNaN(score));
+    const averageConfidence = confidenceScores.length
+        ? Math.round(confidenceScores.reduce((sum, score) => sum + score, 0) / confidenceScores.length)
+        : 0;
+    const lowConfidenceCount = activeTasks.filter(task => Number(task.confidence || 0) < 70).length;
+
+    const taskRows = activeTasks.map(task => {
+        const start = parseWallTime(task.due_date);
+        const timedRange = getTimedTaskRange(task);
+        const displayEnd = timedRange ? timedRange.end : (task.end_date ? parseWallTime(task.end_date) : null);
+        const score = Math.max(0, Math.min(100, Math.round(Number(task.confidence ?? 0))));
+        const confidenceLevel = getConfidenceLevel(score);
+        const conflicts = conflictMap.get(Number(task.task_id)) || [];
+        const hasConflict = conflicts.length > 0;
+        const isLowConfidence = score < 70;
+        const description = task.description || 'No description saved for this task yet.';
+        const typeLabel = String(task.item_type || 'task');
+
+        return `
+            <article class="insight-task ${hasConflict ? 'has-conflict' : ''} ${isLowConfidence ? 'low-confidence' : ''}">
+                <div class="insight-task-head">
+                    <div>
+                        <h3 class="insight-task-title">${escapeHTML(task.title || 'Untitled Task')}</h3>
+                        <div class="insight-task-meta">
+                            ${escapeHTML(typeLabel.charAt(0).toUpperCase() + typeLabel.slice(1))}
+                            · ${escapeHTML(formatScheduleRange(start, displayEnd, Boolean(task.is_all_day)))}
+                            · ${escapeHTML(capitalizePriority(task.priority))}
+                        </div>
+                    </div>
+                    <div class="confidence-meter" aria-label="Confidence score ${score}%">
+                        <div class="confidence-score">${score}% confidence</div>
+                        <div class="confidence-track">
+                            <div class="confidence-fill ${confidenceLevel}" style="width:${score}%;"></div>
+                        </div>
+                    </div>
+                </div>
+                <p class="insight-description">${escapeHTML(description)}</p>
+                <div class="insight-conflicts">
+                    ${hasConflict
+                        ? conflicts.map(conflict => `<span class="conflict-chip">Conflicts with ${escapeHTML(conflict.title || 'Untitled Task')}</span>`).join('')
+                        : '<span class="no-conflict-chip">No schedule conflict detected</span>'}
+                </div>
+            </article>
+        `;
+    }).join('');
+
+    container.innerHTML = `
+        <div class="insights-shell">
+            <div class="insights-summary">
+                <div class="insight-stat">
+                    <div class="insight-stat-label">Active tasks</div>
+                    <div class="insight-stat-value">${activeTasks.length}</div>
+                </div>
+                <div class="insight-stat">
+                    <div class="insight-stat-label">Average confidence</div>
+                    <div class="insight-stat-value">${averageConfidence}%</div>
+                </div>
+                <div class="insight-stat">
+                    <div class="insight-stat-label">Low confidence</div>
+                    <div class="insight-stat-value">${lowConfidenceCount}</div>
+                </div>
+                <div class="insight-stat">
+                    <div class="insight-stat-label">Schedule conflicts</div>
+                    <div class="insight-stat-value">${conflictTaskCount}</div>
+                </div>
+            </div>
+            <div class="insights-list">${taskRows}</div>
+        </div>
+    `;
+}
+
 function toggleTaskSelection(taskId, isSelected) {
     const id = Number(taskId);
     if (isSelected) selectedTaskIds.add(id);
@@ -1567,7 +1869,8 @@ async function loadView(view) {
     // 1. Update Navbar UI
     document.querySelectorAll('.nav a').forEach(link => {
         link.classList.remove('active');
-        if (link.textContent.toLowerCase() === view || (view === 'history' && link.textContent.toLowerCase() === 'history')) {
+        const linkLabel = link.textContent.toLowerCase();
+        if (linkLabel === view || (view === 'history' && linkLabel === 'history') || (view === 'insights' && linkLabel.includes('insights'))) {
             link.classList.add('active');
         }
     });
@@ -1587,7 +1890,7 @@ async function loadView(view) {
         return; 
     } else {
         agendaPanel.style.display = 'block';
-        composer.style.display = 'block';
+        composer.style.display = view === 'insights' ? 'none' : 'block';
         settingsView.style.display = 'none';
     }
     
@@ -1656,6 +1959,10 @@ async function loadView(view) {
             titleHeader.textContent = "Monthly Schedule";
             // Uses your global calendar variables
             renderBigCalendar(currentCalMonth, currentCalYear, allTasks.filter(t => t.status !== 'completed' && t.status !== 'deleted'));
+        }
+        else if (view === 'insights') {
+            titleHeader.textContent = "Clerk Insights";
+            renderInsightsPage(allTasks, 'agendaList');
         }
         else if (view === 'history') {
             titleHeader.textContent = "Recently Completed & Deleted Tasks";

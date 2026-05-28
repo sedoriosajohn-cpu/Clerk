@@ -2134,6 +2134,117 @@ button {
     background: var(--panel-bg);
 }
 
+.settings-grid {
+    display: grid;
+    gap: 12px;
+}
+
+.settings-card {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+    background: rgba(127, 152, 165, 0.05);
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+}
+
+.settings-copy {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+}
+
+.settings-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    background: var(--panel-muted);
+    color: var(--text);
+    font-weight: 900;
+    flex: 0 0 auto;
+}
+
+.settings-copy h4 {
+    margin: 0;
+    color: var(--text);
+    font-size: 16px;
+}
+
+.settings-copy p {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.35;
+}
+
+.settings-field {
+    margin-top: 14px;
+}
+
+.settings-field label {
+    display: block;
+    margin-bottom: 7px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.settings-field input {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 11px 12px;
+    background: var(--panel-bg);
+    color: var(--text);
+    outline: none;
+}
+
+.settings-inline-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: var(--panel-muted);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.status-pill.connected {
+    background: rgba(20, 184, 166, .12);
+    color: #0f766e;
+}
+
+.status-pill.warning {
+    background: rgba(217, 119, 6, .13);
+    color: #b45309;
+}
+
+@media (max-width: 720px) {
+    .settings-row {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
 #login-overlay {
     background:
         linear-gradient(135deg, rgba(10, 15, 28, .96), rgba(23, 42, 69, .96)) !important;
@@ -2395,28 +2506,61 @@ button {
 
                     <div style="margin-bottom: 32px;">
                         <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--teal-dark); margin-bottom: 16px;">Integrations</h3>
-                        <div style="background: rgba(127, 152, 165, 0.05); border: 1px solid var(--border); padding: 20px; border-radius: 18px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                            <div style="display: flex; align-items: center; gap: 16px;">
-                                <div style="font-size: 24px;">📧</div>
+                        <div class="settings-card">
+                            <div class="settings-row">
+                            <div class="settings-copy">
+                                <div class="settings-icon">G</div>
                                 <div>
                                     <h4 style="margin: 0; font-size: 16px; color: var(--text);">Google Account</h4>
-                                    <p style="margin: 4px 0 0; font-size: 13px; color: var(--muted);" id="google-status">Connect to sync Gmail and Google Classroom.</p>
+                                    <p id="google-status">Connect once to automatically sync Gmail, Google Classroom, and Google Calendar events.</p>
                                 </div>
                             </div>
-                            <button class="ghost" id="connectGoogleBtn" onclick="connectGoogleAccount()" style="padding: 8px 16px; font-size: 13px;">Connect</button>
+                            <div class="settings-inline-actions" style="margin-top:0;">
+                                <span class="status-pill" id="google-sync-status">Not connected</span>
+                                <button class="ghost" id="connectGoogleBtn" onclick="connectGoogleAccount()" style="padding: 8px 16px; font-size: 13px;">Connect</button>
+                            </div>
+                            </div>
                         </div>
                     </div>
 
                     <div>
-                        <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 16px;">System (Coming Soon)</h3>
-                        <div style="display: grid; gap: 12px; opacity: 0.6;">
-                            <div style="border: 1px dashed var(--border); padding: 16px; border-radius: 14px; display: flex; align-items: center; gap: 12px; color: var(--muted);">
-                                <span></span>
-                                <span style="font-size: 14px; font-weight: 600;">Privacy & Data Security</span>
+                        <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--teal-dark); margin-bottom: 16px;">Privacy & Data Security</h3>
+                        <div class="settings-grid">
+                            <div class="settings-card">
+                                <div class="settings-row">
+                                    <div class="settings-copy">
+                                        <div class="settings-icon">2F</div>
+                                        <div>
+                                            <h4>Email Two-Factor Authentication</h4>
+                                            <p>Verify your email before enabling 2FA. Once enabled, Clerk sends a one-time login code after your password is accepted.</p>
+                                        </div>
+                                    </div>
+                                    <span class="status-pill" id="two-factor-status">2FA off</span>
+                                </div>
+                                <div class="settings-field">
+                                    <label for="security-email-input">Security email</label>
+                                    <input type="email" id="security-email-input" placeholder="you@example.com" onchange="saveUserSettings()">
+                                </div>
+                                <div class="settings-field" id="two-factor-code-row" style="display:none;">
+                                    <label for="two-factor-setup-code">Verification code</label>
+                                    <input type="text" id="two-factor-setup-code" placeholder="Enter the emailed code" inputmode="numeric" autocomplete="one-time-code">
+                                </div>
+                                <div class="settings-inline-actions">
+                                    <button class="ghost" id="send2faTestBtn" type="button" onclick="sendTwoFactorTestCode()">Send verification code</button>
+                                    <button class="primary" id="verify2faBtn" type="button" onclick="verifyTwoFactorSetupCode()" style="display:none;">Enable 2FA</button>
+                                    <button class="ghost" id="disable2faBtn" type="button" onclick="disableTwoFactor()" style="display:none;">Disable 2FA</button>
+                                </div>
                             </div>
-                            <div style="border: 1px dashed var(--border); padding: 16px; border-radius: 14px; display: flex; align-items: center; gap: 12px; color: var(--muted);">
-                                <span>📅</span>
-                                <span style="font-size: 14px; font-weight: 600;">External Calendar Sync</span>
+                            <div class="settings-card">
+                                <div class="settings-row">
+                                    <div class="settings-copy">
+                                        <div class="settings-icon">P</div>
+                                        <div>
+                                            <h4>Stored Data</h4>
+                                            <p>Clerk stores your account settings, extracted tasks, and Google OAuth token locally/server-side for syncing. Disconnect Google by reconnecting with revoked access from your Google account permissions.</p>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2445,6 +2589,7 @@ button {
 
             <input type="text" id="username-input" placeholder="Username" style="padding:15px; border-radius:12px; border:none; margin-bottom:15px; width:100%; font-size:16px;">
             <input type="password" id="password-input" placeholder="Password" style="padding:15px; border-radius:12px; border:none; margin-bottom:20px; width:100%; font-size:16px;">
+            <input type="text" id="two-factor-input" placeholder="Email verification code" inputmode="numeric" autocomplete="one-time-code" style="padding:15px; border-radius:12px; border:none; margin-bottom:20px; width:100%; font-size:16px; display:none;">
 
             <button id="login-btn" onclick="login()" class="primary" style="width:100%;">Sign In</button>
             <button id="register-btn" onclick="register()" class="ghost" style="width:100%; margin-top:10px; display:none;">Create Account</button>
@@ -2573,14 +2718,21 @@ function escapeHTML(value) {
 
 //global user variable 
 window.CURRENT_USER_ID = null;
-window.USER_SETTINGS = { preferred_name: "User", dark_mode: false, notifications_enabled: true };
+window.USER_SETTINGS = {
+    preferred_name: "User",
+    email: "",
+    dark_mode: false,
+    notifications_enabled: true,
+    two_factor_enabled: false,
+    google_connected: false
+};
 
 const oauthParams = new URLSearchParams(window.location.search);
 if (oauthParams.has('google_error')) {
     alert(getFriendlyGoogleError(oauthParams.get('google_error')));
     window.history.replaceState({}, document.title, window.location.pathname);
 } else if (oauthParams.has('google_connected')) {
-    alert("Google account connected successfully.");
+    handleGoogleConnected(oauthParams.get('user_id'));
     window.history.replaceState({}, document.title, window.location.pathname);
 }
 
@@ -2590,6 +2742,7 @@ let currentView = 'agenda';
 let latestTasks = [];
 let selectedTaskIds = new Set();
 let lastRenderedTaskIds = [];
+let pendingTwoFactorLogin = false;
 
 //for the calendar, it keeps track where the user is currently looking at
 let currentCalMonth = new Date().getMonth();
@@ -2605,13 +2758,18 @@ function goHome() {
 window.login = async function() {
     const usernameInput = document.getElementById('username-input').value;
     const passwordInput = document.getElementById('password-input').value;
+    const twoFactorInput = document.getElementById('two-factor-input');
     const errorMsg = document.getElementById('login-error');
 
     try {
         const response = await apiFetch(`${API_BASE}/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: usernameInput, password: passwordInput }),
+            body: JSON.stringify({
+                username: usernameInput,
+                password: passwordInput,
+                two_factor_code: pendingTwoFactorLogin ? twoFactorInput.value.trim() : undefined
+            }),
             throttleKey: 'login',
             minInterval: 1000
         });
@@ -2619,16 +2777,34 @@ window.login = async function() {
 
         if (response.ok) {
             const data = await response.json();
+            if (data.requires_2fa) {
+                pendingTwoFactorLogin = true;
+                twoFactorInput.style.display = 'block';
+                twoFactorInput.focus();
+                document.getElementById('auth-subtitle').textContent = data.message || "Enter the verification code sent to your email.";
+                document.getElementById('login-btn').textContent = "Verify Code";
+                errorMsg.style.display = 'none';
+                return;
+            }
+
             // Store the ID and Name
             window.CURRENT_USER_ID = data.user_id;
+            pendingTwoFactorLogin = false;
+            twoFactorInput.value = "";
+            twoFactorInput.style.display = 'none';
+            document.getElementById('login-btn').textContent = "Sign In";
             
             await fetchUserSettings();
             
             // Hide login and show agenda
             document.getElementById('login-overlay').style.display = 'none';
             loadView('agenda');
+            if (window.USER_SETTINGS.google_connected) {
+                syncAllGoogleSources({ silent: true });
+            }
         } else {
-            errorMsg.textContent = "Invalid username or password";
+            const data = await response.json().catch(() => ({}));
+            errorMsg.textContent = data.detail || "Invalid username, password, or verification code";
             errorMsg.style.display = 'block';
         }
     } catch (err) {
@@ -2648,6 +2824,9 @@ async function fetchUserSettings() {
             updateDisplayName(window.USER_SETTINGS.preferred_name, false);
             document.getElementById('darkThemeToggle').checked = window.USER_SETTINGS.dark_mode;
             document.getElementById('notificationToggle').checked = window.USER_SETTINGS.notifications_enabled;
+            document.getElementById('security-email-input').value = window.USER_SETTINGS.email || "";
+            updateSecurityStatus();
+            updateGoogleSyncStatus();
             
             if (window.USER_SETTINGS.dark_mode) toggleDarkTheme(false);
         }
@@ -2658,20 +2837,149 @@ async function fetchUserSettings() {
 
 async function saveUserSettings() {
     if (!window.CURRENT_USER_ID) return;
+    const securityEmail = document.getElementById('security-email-input').value.trim();
     
     const settings = {
         preferred_name: document.getElementById('preferred-name-input').value,
+        email: securityEmail,
         dark_mode: document.getElementById('darkThemeToggle').checked,
         notifications_enabled: document.getElementById('notificationToggle').checked
     };
     
-    window.USER_SETTINGS = settings;
+    try {
+        const response = await apiFetch(`${API_BASE}/users/${window.CURRENT_USER_ID}/settings`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.detail || "Could not save settings.");
+        }
+        window.USER_SETTINGS = { ...window.USER_SETTINGS, ...settings };
+        updateSecurityStatus();
+    } catch (err) {
+        alert(err.message || getFriendlyApiError(err));
+        await fetchUserSettings();
+    }
+}
 
-    await apiFetch(`${API_BASE}/users/${window.CURRENT_USER_ID}/settings`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings)
-    });
+function updateSecurityStatus() {
+    const status = document.getElementById('two-factor-status');
+    if (!status) return;
+    const enabled = Boolean(window.USER_SETTINGS.two_factor_enabled);
+    const email = document.getElementById('security-email-input')?.value.trim();
+    const sendBtn = document.getElementById('send2faTestBtn');
+    const verifyBtn = document.getElementById('verify2faBtn');
+    const disableBtn = document.getElementById('disable2faBtn');
+    const codeRow = document.getElementById('two-factor-code-row');
+
+    status.textContent = enabled ? `2FA on${email ? ` for ${email}` : ''}` : '2FA off';
+    status.className = `status-pill ${enabled ? 'connected' : ''}`;
+    if (sendBtn) sendBtn.style.display = enabled ? 'none' : 'inline-flex';
+    if (verifyBtn) verifyBtn.style.display = 'none';
+    if (disableBtn) disableBtn.style.display = enabled ? 'inline-flex' : 'none';
+    if (codeRow) codeRow.style.display = 'none';
+}
+
+function updateGoogleSyncStatus() {
+    const status = document.getElementById('google-sync-status');
+    const connectBtn = document.getElementById('connectGoogleBtn');
+    const googleText = document.getElementById('google-status');
+    if (!status) return;
+    const connected = Boolean(window.USER_SETTINGS.google_connected);
+    status.textContent = connected ? 'Auto-sync on' : 'Not connected';
+    status.className = `status-pill ${connected ? 'connected' : 'warning'}`;
+    if (connectBtn) connectBtn.textContent = connected ? 'Reconnect' : 'Connect';
+    if (googleText) {
+        googleText.textContent = connected
+            ? 'Gmail, Google Classroom, and Google Calendar sync automatically after connection.'
+            : 'Connect once to automatically sync Gmail, Google Classroom, and Google Calendar events.';
+    }
+}
+
+async function sendTwoFactorTestCode({ quiet = false } = {}) {
+    if (!window.CURRENT_USER_ID) return alert("Please log in first.");
+    const email = document.getElementById('security-email-input').value.trim();
+    if (!email) return alert("Add a security email first.");
+    const btn = document.getElementById('send2faTestBtn');
+    const originalText = btn.textContent;
+    btn.textContent = "Sending...";
+    btn.disabled = true;
+
+    try {
+        const response = await apiFetch(`${API_BASE}/users/${window.CURRENT_USER_ID}/2fa/send-test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+            throttleKey: `2fa-test:${window.CURRENT_USER_ID}`,
+            minInterval: 30000
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || "Could not send verification code.");
+        if (!quiet) alert(data.message || "Verification code sent.");
+        window.USER_SETTINGS.email = email;
+        document.getElementById('two-factor-code-row').style.display = 'block';
+        document.getElementById('verify2faBtn').style.display = 'inline-flex';
+        document.getElementById('two-factor-setup-code').focus();
+    } catch (err) {
+        alert(err.message || getFriendlyApiError(err));
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+}
+
+async function verifyTwoFactorSetupCode() {
+    if (!window.CURRENT_USER_ID) return alert("Please log in first.");
+    const email = document.getElementById('security-email-input').value.trim();
+    const code = document.getElementById('two-factor-setup-code').value.trim();
+    if (!email) return alert("Add a security email first.");
+    if (!code) return alert("Enter the verification code.");
+
+    const btn = document.getElementById('verify2faBtn');
+    const originalText = btn.textContent;
+    btn.textContent = "Verifying...";
+    btn.disabled = true;
+
+    try {
+        const response = await apiFetch(`${API_BASE}/users/${window.CURRENT_USER_ID}/2fa/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, code }),
+            throttleKey: `2fa-verify:${window.CURRENT_USER_ID}`,
+            minInterval: 1000
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || "Could not enable 2FA.");
+        alert(data.message || "Two-factor authentication is now enabled.");
+        document.getElementById('two-factor-setup-code').value = "";
+        await fetchUserSettings();
+    } catch (err) {
+        alert(err.message || getFriendlyApiError(err));
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+}
+
+async function disableTwoFactor() {
+    if (!window.CURRENT_USER_ID) return alert("Please log in first.");
+    if (!confirm("Disable two-factor authentication for this account?")) return;
+
+    try {
+        const response = await apiFetch(`${API_BASE}/users/${window.CURRENT_USER_ID}/settings`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ two_factor_enabled: false })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || "Could not disable 2FA.");
+        alert("Two-factor authentication disabled.");
+        await fetchUserSettings();
+    } catch (err) {
+        alert(err.message || getFriendlyApiError(err));
+    }
 }
 
 //user login 
@@ -2683,14 +2991,21 @@ function toggleAuthMode() {
     const loginBtn = document.getElementById('login-btn');
     const registerBtn = document.getElementById('register-btn');
     const toggleText = document.getElementById('toggle-text');
+    const twoFactorInput = document.getElementById('two-factor-input');
+    pendingTwoFactorLogin = false;
+    twoFactorInput.value = "";
+    twoFactorInput.style.display = "none";
+    loginBtn.textContent = "Sign In";
 
     if (isLoginMode) {
         title.textContent = "Clerk Login";
+        document.getElementById('auth-subtitle').textContent = "Enter your credentials";
         loginBtn.style.display = "block";
         registerBtn.style.display = "none";
         toggleText.textContent = "Don't have an account?";
     } else {
         title.textContent = "Create Account";
+        document.getElementById('auth-subtitle').textContent = "Choose a username and password";
         loginBtn.style.display = "none";
         registerBtn.style.display = "block";
         toggleText.textContent = "Already have an account?";
@@ -4519,6 +4834,46 @@ async function syncClassroom() {
         alert(getFriendlyApiError(err));
         btn.textContent = originalText;
         btn.disabled = false;
+    }
+}
+
+async function syncAllGoogleSources({ silent = false } = {}) {
+    const userId = window.CURRENT_USER_ID;
+    if (!userId) return;
+
+    try {
+        const response = await apiFetch(`${API_BASE}/sync-all?user_id=${userId}`, {
+            throttleKey: `sync-all:${userId}`,
+            minInterval: 30000,
+            timeout: 60000
+        });
+        const data = await response.json().catch(() => ({}));
+
+        if (data.auth_url) {
+            window.location.href = data.auth_url;
+            return;
+        }
+
+        if (!response.ok) throw new Error(data.detail || data.message || "Google sync failed.");
+        if (!silent) alert("Google sync complete.");
+        loadView(currentView);
+    } catch (err) {
+        console.error("Google auto-sync failed:", err);
+        if (!silent) alert(getFriendlyApiError(err));
+    }
+}
+
+async function handleGoogleConnected(userIdFromRedirect) {
+    alert("Google account connected successfully. Clerk will sync Gmail, Classroom, and Calendar automatically.");
+    if (userIdFromRedirect) {
+        window.CURRENT_USER_ID = userIdFromRedirect;
+        document.getElementById('login-overlay').style.display = 'none';
+    }
+    if (window.CURRENT_USER_ID) {
+        await fetchUserSettings();
+        window.USER_SETTINGS.google_connected = true;
+        updateGoogleSyncStatus();
+        await syncAllGoogleSources({ silent: true });
     }
 }
 

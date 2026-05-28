@@ -13,9 +13,12 @@ except ImportError:
 from datetime import datetime, timedelta
 import asyncio
 import base64
+from email.message import EmailMessage
 import os.path
 import json
 import hashlib
+import secrets
+import smtplib
 import time
 import re
 from urllib.parse import quote
@@ -83,6 +86,65 @@ def get_db():
     finally:
         db.close()
 
+def is_valid_email(value: Optional[str]) -> bool:
+    return bool(value and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", value.strip()))
+
+def hash_two_factor_code(code: str) -> str:
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+def send_email_message(to_email: str, subject: str, body: str):
+    smtp_host = os.environ.get("SMTP_HOST")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_username = os.environ.get("SMTP_USERNAME")
+    smtp_password = os.environ.get("SMTP_PASSWORD")
+    smtp_from = os.environ.get("SMTP_FROM") or smtp_username
+
+    if not smtp_host or not smtp_from:
+        print(f"[2FA email fallback] To: {to_email} | Subject: {subject} | {body}")
+        return {"sent": False, "reason": "smtp_not_configured"}
+
+    message = EmailMessage()
+    message["To"] = to_email
+    message["From"] = smtp_from
+    message["Subject"] = subject
+    message.set_content(body)
+
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+        server.starttls()
+        if smtp_username and smtp_password:
+            server.login(smtp_username, smtp_password)
+        server.send_message(message)
+
+    return {"sent": True}
+
+def send_two_factor_code(user: User):
+    if not is_valid_email(user.email):
+        raise HTTPException(status_code=400, detail="Add a valid email address before enabling 2FA.")
+
+    code = f"{secrets.randbelow(1000000):06d}"
+    user.two_factor_code_hash = hash_two_factor_code(code)
+    user.two_factor_expires_at = (datetime.utcnow() + timedelta(minutes=10)).isoformat()
+    result = send_email_message(
+        user.email,
+        "Your Clerk verification code",
+        f"Your Clerk verification code is {code}. It expires in 10 minutes."
+    )
+    return result
+
+def verify_two_factor_code(user: User, code: Optional[str]) -> bool:
+    if not code or not user.two_factor_code_hash or not user.two_factor_expires_at:
+        return False
+    try:
+        expires_at = datetime.fromisoformat(user.two_factor_expires_at)
+    except ValueError:
+        return False
+    if datetime.utcnow() > expires_at:
+        return False
+    return hash_two_factor_code(code.strip()) == user.two_factor_code_hash
+
+def has_google_token(user_id: int) -> bool:
+    return os.path.exists(get_google_token_path(user_id))
+
 def ensure_user_exists(user_id: int, db: Session):
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
@@ -93,6 +155,7 @@ def ensure_user_exists(user_id: int, db: Session):
 class LoginRequest(BaseModel):
     username: str
     password: str
+    two_factor_code: Optional[str] = None
 
 class UserInput(BaseModel):
     content: str
@@ -116,8 +179,17 @@ class BulkTaskAction(BaseModel):
 
 class UserSettingsUpdate(BaseModel):
     preferred_name: Optional[str] = None
+    email: Optional[str] = None
     dark_mode: Optional[bool] = None
     notifications_enabled: Optional[bool] = None
+    two_factor_enabled: Optional[bool] = None
+
+class TwoFactorSendRequest(BaseModel):
+    email: Optional[str] = None
+
+class TwoFactorVerifyRequest(BaseModel):
+    email: Optional[str] = None
+    code: str
 
 # --- FRONTEND ROUTE ---
 @app.get("/")
@@ -132,6 +204,22 @@ async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == data.username).first()
     if not user or user.password_hash != data.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    if user.two_factor_enabled:
+        if data.two_factor_code:
+            if not verify_two_factor_code(user, data.two_factor_code):
+                raise HTTPException(status_code=401, detail="Invalid or expired verification code")
+            user.two_factor_code_hash = None
+            user.two_factor_expires_at = None
+            db.commit()
+        else:
+            send_result = send_two_factor_code(user)
+            db.commit()
+            detail = "Verification code sent."
+            if not send_result.get("sent"):
+                detail = "Verification code generated. Configure SMTP_HOST and SMTP_FROM to send email in production."
+            return {"requires_2fa": True, "message": detail, "email": user.email}
+
     return {"user_id": user.user_id, "username": user.username}
 
 @app.post("/register")
@@ -324,9 +412,9 @@ def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = Non
             message = "Google access expired. Please connect your Google account again."
         else:
             message = str(exc) or exc.__class__.__name__
-        return RedirectResponse(url=f"{frontend_url}?google_error={quote(message, safe='')}")
+    return RedirectResponse(url=f"{frontend_url}?google_error={quote(message, safe='')}")
 
-    return RedirectResponse(url=f"{frontend_url}?google_connected=1")
+    return RedirectResponse(url=f"{frontend_url}?google_connected=1&user_id={saved_state['user_id']}")
 
 def get_google_creds(user_id: int):
     creds = None
@@ -1071,8 +1159,11 @@ async def get_user_settings(user_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
     return {
         "preferred_name": user.preferred_name or user.username,
+        "email": user.email or "",
         "dark_mode": bool(user.dark_mode),
-        "notifications_enabled": bool(user.notifications_enabled)
+        "notifications_enabled": bool(user.notifications_enabled),
+        "two_factor_enabled": bool(user.two_factor_enabled),
+        "google_connected": has_google_token(user_id)
     }
 
 @app.patch("/users/{user_id}/settings")
@@ -1083,13 +1174,62 @@ async def update_user_settings(user_id: int, settings: UserSettingsUpdate, db: S
 
     if settings.preferred_name is not None:
         user.preferred_name = settings.preferred_name
+    if settings.email is not None:
+        email = settings.email.strip()
+        if email and not is_valid_email(email):
+            raise HTTPException(status_code=400, detail="Enter a valid email address.")
+        user.email = email or None
     if settings.dark_mode is not None:
         user.dark_mode = 1 if settings.dark_mode else 0
     if settings.notifications_enabled is not None:
         user.notifications_enabled = 1 if settings.notifications_enabled else 0
+    if settings.two_factor_enabled is not None:
+        if settings.two_factor_enabled:
+            raise HTTPException(status_code=400, detail="Verify your email code before enabling 2FA.")
+        else:
+            user.two_factor_enabled = 0
+            user.two_factor_code_hash = None
+            user.two_factor_expires_at = None
 
     db.commit()
     return {"message": "Settings updated"}
+
+@app.post("/users/{user_id}/2fa/send-test")
+async def send_two_factor_test(user_id: int, request: TwoFactorSendRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if request.email is not None:
+        email = request.email.strip()
+        if not is_valid_email(email):
+            raise HTTPException(status_code=400, detail="Enter a valid email address.")
+        user.email = email
+
+    send_result = send_two_factor_code(user)
+    db.commit()
+    message = "Verification code sent."
+    if not send_result.get("sent"):
+        message = "Verification code generated. Configure SMTP_HOST and SMTP_FROM to send email in production."
+    return {"status": "success", "message": message}
+
+@app.post("/users/{user_id}/2fa/verify")
+async def verify_two_factor_setup(user_id: int, request: TwoFactorVerifyRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if request.email is not None:
+        email = request.email.strip()
+        if not is_valid_email(email):
+            raise HTTPException(status_code=400, detail="Enter a valid email address.")
+        user.email = email
+    if not verify_two_factor_code(user, request.code):
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code.")
+
+    user.two_factor_enabled = 1
+    user.two_factor_code_hash = None
+    user.two_factor_expires_at = None
+    db.commit()
+    return {"status": "success", "message": "Two-factor authentication is now enabled."}
 
 @app.get("/tasks/history")
 async def get_task_history(user_id: int, db: Session = Depends(get_db), limit: int = 50):

@@ -1469,6 +1469,797 @@ input:checked + .slider:before { transform: translateX(26px); }
     }
 }
 
+/* ==========================================================================
+   10. SLEEK REDESIGN OVERRIDES
+   ========================================================================== */
+:root {
+    --teal: #1fb6a6;
+    --teal-dark: #0f766e;
+    --teal-soft: #e5faf7;
+    --bg: #f6f8fb;
+    --panel-bg: #ffffff;
+    --panel-muted: #f1f5f9;
+    --text: #16212f;
+    --muted: #66758a;
+    --border: #dbe3ec;
+    --shadow: 0 16px 45px rgba(15, 23, 42, .08);
+    --shadow-soft: 0 1px 2px rgba(15, 23, 42, .06);
+    --accent-blue: #2563eb;
+    --accent-pink: #db2777;
+    --accent-amber: #d97706;
+    --accent-violet: #7c3aed;
+}
+
+html {
+    background: var(--bg);
+}
+
+body {
+    background:
+        linear-gradient(180deg, rgba(255,255,255,.92), rgba(246,248,251,.96) 42%, #eef3f7 100%),
+        radial-gradient(circle at 22% 0%, rgba(31, 182, 166, .16), transparent 30%),
+        radial-gradient(circle at 88% 8%, rgba(37, 99, 235, .10), transparent 28%);
+    color: var(--text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    letter-spacing: 0;
+}
+
+body.dark-mode {
+    --bg: #0b1120;
+    --panel-bg: #111827;
+    --panel-muted: #172033;
+    --text: #eef4ff;
+    --muted: #9aa8bc;
+    --border: #263247;
+    --shadow: 0 20px 60px rgba(0, 0, 0, .35);
+    --shadow-soft: 0 1px 2px rgba(0, 0, 0, .35);
+}
+
+.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    height: 72px;
+    padding: 0 28px;
+    background: rgba(255, 255, 255, .84);
+    border-bottom: 1px solid rgba(219, 227, 236, .86);
+    box-shadow: 0 1px 0 rgba(15, 23, 42, .02);
+    backdrop-filter: blur(18px);
+}
+
+body.dark-mode .topbar {
+    background: rgba(17, 24, 39, .84);
+    border-bottom-color: var(--border);
+}
+
+.brand {
+    gap: 12px;
+    font-size: 20px;
+    letter-spacing: .08em;
+    color: var(--text);
+}
+
+.brand img {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    box-shadow: var(--shadow-soft);
+}
+
+.nav {
+    display: inline-flex;
+    justify-content: center;
+    gap: 4px;
+    padding: 5px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .76);
+    box-shadow: var(--shadow-soft);
+}
+
+.nav a {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 34px;
+    padding: 7px 12px;
+    border-radius: 10px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 750;
+}
+
+.nav a:hover {
+    background: var(--panel-muted);
+    color: var(--text);
+}
+
+.nav a.active {
+    color: var(--text);
+    background: #eaf2ff;
+    box-shadow: inset 0 0 0 1px rgba(37, 99, 235, .12);
+}
+
+body.dark-mode .nav {
+    background: #0f172a;
+    border-color: #2c3850;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04), 0 14px 34px rgba(0, 0, 0, .24);
+}
+
+body.dark-mode .nav a {
+    color: #93a4bd;
+}
+
+body.dark-mode .nav a:hover {
+    background: #172033;
+    color: #e8eef8;
+}
+
+body.dark-mode .nav a.active {
+    color: #ffffff;
+    background: #1d4ed8;
+    box-shadow: 0 10px 24px rgba(37, 99, 235, .26);
+}
+
+.nav-icon {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--teal);
+    box-shadow: 0 0 0 3px rgba(31, 182, 166, .12);
+}
+
+.nav a[data-view="calendar"] .nav-icon { background: var(--accent-blue); box-shadow: 0 0 0 3px rgba(37, 99, 235, .11); }
+.nav a[data-view="reminders"] .nav-icon { background: var(--accent-violet); box-shadow: 0 0 0 3px rgba(124, 58, 237, .11); }
+.nav a[data-view="history"] .nav-icon { background: #64748b; box-shadow: 0 0 0 3px rgba(100, 116, 139, .12); }
+
+.user-profile {
+    min-height: 40px;
+    padding: 4px 5px 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--panel-bg);
+    box-shadow: var(--shadow-soft);
+}
+
+.user-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    color: white;
+    font-size: 12px;
+    font-weight: 900;
+    background: linear-gradient(135deg, var(--teal), var(--accent-blue));
+}
+
+#user-dropdown {
+    border-radius: 14px !important;
+    background: var(--panel-bg) !important;
+    box-shadow: var(--shadow) !important;
+}
+
+.page {
+    max-width: 1400px;
+    padding: 24px 28px 36px;
+}
+
+.layout {
+    grid-template-columns: 290px minmax(0, 1fr);
+    gap: 22px;
+    min-height: calc(100vh - 120px);
+}
+
+.sidebar,
+.panel,
+.composer {
+    border-radius: 18px;
+    border: 1px solid rgba(219, 227, 236, .92);
+    background: rgba(255, 255, 255, .88);
+    box-shadow: var(--shadow-soft);
+}
+
+body.dark-mode .sidebar,
+body.dark-mode .panel,
+body.dark-mode .composer {
+    background: rgba(17, 24, 39, .88);
+}
+
+.sidebar {
+    position: sticky;
+    top: 96px;
+    display: grid;
+    gap: 14px;
+    padding: 16px;
+}
+
+.sidebar-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 2px 2px 0;
+}
+
+.sidebar-kicker,
+.panel-kicker {
+    margin: 0;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 850;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+}
+
+.sidebar-title {
+    margin: 3px 0 0;
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 850;
+}
+
+.month-card {
+    margin: 0;
+    border-radius: 14px;
+    background: var(--panel-muted) !important;
+}
+
+.month-card:hover {
+    border-color: rgba(31, 182, 166, .5);
+    background: #ecfdf9 !important;
+}
+
+.month-row {
+    margin-bottom: 12px;
+    font-size: 14px;
+}
+
+.calendar-grid {
+    gap: 2px;
+}
+
+.hourly-event[draggable="true"],
+.calendar-event[draggable="true"],
+.calendar-all-day-event[draggable="true"] {
+    cursor: grab;
+}
+
+.hourly-event.dragging,
+.calendar-event.dragging,
+.calendar-all-day-event.dragging {
+    cursor: grabbing;
+    opacity: .55;
+}
+
+.calendar-drop-active {
+    outline: 2px dashed rgba(31, 182, 166, .78);
+    outline-offset: -4px;
+    background: rgba(31, 182, 166, .08) !important;
+}
+
+.calendar-day-body.calendar-drop-active {
+    outline-offset: -8px;
+}
+
+.calendar-drop-hint {
+    position: absolute;
+    left: 92px;
+    right: 18px;
+    height: 2px;
+    background: var(--teal);
+    pointer-events: none;
+    z-index: 25;
+    box-shadow: 0 0 0 4px rgba(31, 182, 166, .12);
+}
+
+.calendar-grid div {
+    border-radius: 7px;
+    padding: 6px 0;
+}
+
+.calendar-grid .mini-cal-day {
+    min-height: 34px;
+}
+
+.calendar-grid .selected {
+    background: var(--text) !important;
+}
+
+.main-stack {
+    gap: 16px;
+}
+
+.today-header {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 4px 2px 2px;
+}
+
+.today-header h1 {
+    color: var(--text);
+    font-size: 30px;
+    font-weight: 850;
+    line-height: 1.15;
+}
+
+.today-header .line {
+    display: none;
+}
+
+#agendaView {
+    padding: 0;
+    overflow: hidden;
+}
+
+#agendaView > h2 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 62px;
+    margin: 0;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 850;
+}
+
+.agenda-list {
+    padding: 18px;
+}
+
+.dashboard-grid {
+    grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr);
+    gap: 14px;
+}
+
+body[data-current-view="agenda"] #taskComposer {
+    order: -1;
+}
+
+body[data-current-view="agenda"] .today-header {
+    order: -2;
+}
+
+body[data-current-view="agenda"] #taskComposer h2::after {
+    content: "Quick capture";
+    margin-left: 10px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: var(--panel-muted);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.dashboard-home {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(320px, .95fr);
+    gap: 14px;
+    align-items: start;
+}
+
+.dashboard-home-column {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+}
+
+.dashboard-focus-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.dashboard-compact-list {
+    display: grid;
+    gap: 10px;
+}
+
+.dashboard-link-button {
+    border: 1px solid var(--border);
+    background: var(--panel-bg);
+    color: var(--text);
+    padding: 7px 10px;
+    min-height: 32px;
+    font-size: 12px;
+}
+
+.dashboard-conflict-stack {
+    display: grid;
+    gap: 10px;
+}
+
+.dashboard-conflict-card {
+    border: 1px solid rgba(225, 29, 72, .22);
+    border-left: 4px solid #e11d48;
+    border-radius: 12px;
+    padding: 12px;
+    background: rgba(225, 29, 72, .07);
+}
+
+.dashboard-conflict-title {
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 850;
+    line-height: 1.25;
+}
+
+.dashboard-conflict-detail {
+    margin-top: 7px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.42;
+}
+
+.dashboard-conflict-suggestion {
+    margin-top: 8px;
+    color: #be123c;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+body.dark-mode .dashboard-conflict-card {
+    background: rgba(225, 29, 72, .13);
+    border-color: rgba(251, 113, 133, .28);
+}
+
+body.dark-mode .dashboard-conflict-suggestion {
+    color: #fb7185;
+}
+
+.dashboard-section,
+.expanded-section,
+.insight-stat,
+.insight-task,
+.dashboard-stat {
+    border-radius: 12px;
+    background: var(--panel-muted);
+    box-shadow: none;
+}
+
+.dashboard-section {
+    padding: 14px;
+}
+
+.dashboard-section-header {
+    align-items: center;
+}
+
+.dashboard-section-trigger {
+    color: var(--text);
+    text-decoration: none;
+}
+
+.dashboard-section-trigger:hover {
+    color: var(--teal-dark);
+    text-decoration: none;
+}
+
+.dashboard-section-count {
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .78);
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+body.dark-mode .dashboard-section-count {
+    background: rgba(255, 255, 255, .06);
+}
+
+.dashboard-row,
+.expanded-task-row,
+.agenda-item {
+    border: 1px solid var(--border);
+    border-left-width: 4px;
+    border-radius: 12px;
+    background: var(--panel-bg);
+    box-shadow: var(--shadow-soft);
+}
+
+.dashboard-row {
+    padding: 12px;
+    transition: transform .18s ease, box-shadow .18s ease;
+}
+
+.dashboard-row:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 26px rgba(15, 23, 42, .08);
+}
+
+.dashboard-row.pink,
+.expanded-task-row.pink,
+.calendar-event.pink { border-left-color: var(--accent-pink); }
+.dashboard-row.amber,
+.expanded-task-row.amber,
+.calendar-event.amber { border-left-color: var(--accent-amber); }
+.dashboard-row.teal,
+.expanded-task-row.teal,
+.calendar-event.teal { border-left-color: var(--teal-dark); }
+.dashboard-row.blue,
+.expanded-task-row.blue,
+.calendar-event.blue { border-left-color: var(--accent-blue); }
+.dashboard-row.reminder,
+.expanded-task-row.reminder,
+.calendar-event.reminder { border-left-color: var(--accent-violet); }
+
+.dashboard-row-title,
+.task-title,
+.expanded-task-title {
+    font-weight: 850;
+}
+
+.dashboard-row-meta,
+.task-sub,
+.expanded-task-meta {
+    color: var(--muted);
+}
+
+.dashboard-insight-grid {
+    gap: 10px;
+}
+
+.dashboard-stat {
+    padding: 12px;
+}
+
+.dashboard-stat-value {
+    font-size: 24px;
+}
+
+.conflict-chip,
+.no-conflict-chip {
+    border-radius: 999px;
+    padding: 6px 9px;
+}
+
+.composer {
+    padding: 18px;
+}
+
+.composer h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 850;
+}
+
+.composer .subline {
+    display: none;
+}
+
+.input-group {
+    margin-top: 12px;
+}
+
+.input-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+}
+
+textarea {
+    min-height: 92px;
+    border-radius: 14px;
+    background: var(--panel-muted);
+    color: var(--text);
+    line-height: 1.45;
+}
+
+textarea:focus {
+    border-color: rgba(31, 182, 166, .75);
+    box-shadow: 0 0 0 4px rgba(31, 182, 166, .12);
+}
+
+button {
+    min-height: 38px;
+    border-radius: 10px;
+    font-weight: 800;
+}
+
+.primary {
+    background: linear-gradient(135deg, #111827, #243449);
+    color: #fff;
+}
+
+.primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 26px rgba(17, 24, 39, .18);
+}
+
+.ghost {
+    background: var(--panel-muted);
+    color: var(--text);
+    border: 1px solid var(--border);
+}
+
+.ghost:hover {
+    border-color: rgba(31, 182, 166, .45);
+    color: var(--teal-dark);
+}
+
+.done-btn {
+    width: 30px;
+    height: 30px;
+    min-height: 30px;
+    border: 1px solid var(--border);
+    background: var(--panel-bg);
+}
+
+.cal-nav {
+    padding: 2px 2px 14px;
+}
+
+.cal-view-select {
+    border-radius: 10px;
+    background: var(--panel-bg);
+}
+
+.big-calendar-grid,
+.calendar-day-shell,
+.calendar-week-shell,
+.calendar-year-shell {
+    border-radius: 14px;
+    background: var(--border);
+}
+
+.cal-header {
+    background: #eef6ff;
+    color: #1d4ed8;
+}
+
+.cal-day,
+.week-day,
+.year-month,
+.calendar-day-body,
+.calendar-all-day-row {
+    background: var(--panel-bg);
+}
+
+.calendar-event {
+    border-left-width: 4px;
+    background: var(--panel-muted);
+}
+
+.section-modal-card {
+    border-radius: 18px;
+    background: var(--panel-bg);
+}
+
+#login-overlay {
+    background:
+        linear-gradient(135deg, rgba(10, 15, 28, .96), rgba(23, 42, 69, .96)) !important;
+}
+
+#login-overlay > div {
+    width: min(390px, calc(100vw - 36px)) !important;
+    border: 1px solid rgba(255, 255, 255, .12) !important;
+    border-radius: 22px !important;
+    background: rgba(15, 23, 42, .88) !important;
+    box-shadow: 0 30px 90px rgba(0, 0, 0, .35) !important;
+}
+
+#login-overlay input {
+    border: 1px solid rgba(255,255,255,.08) !important;
+    background: rgba(255,255,255,.08) !important;
+    color: #fff !important;
+    outline: none;
+}
+
+@media (max-width: 1120px) {
+    .topbar {
+        height: auto;
+        min-height: 72px;
+        flex-wrap: wrap;
+        padding: 12px 18px;
+    }
+
+    .nav {
+        order: 3;
+        width: 100%;
+        overflow-x: auto;
+        justify-content: flex-start;
+    }
+
+    .page {
+        padding: 18px;
+    }
+
+    .layout {
+        grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+        position: static;
+        display: block;
+        padding: 14px;
+    }
+
+    .sidebar-heading {
+        margin-bottom: 12px;
+    }
+
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-home {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 720px) {
+    .brand span {
+        font-size: 17px;
+    }
+
+    .user-profile #display-username {
+        max-width: 96px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .today-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .today-header h1 {
+        font-size: 23px;
+    }
+
+    #agendaView > h2 {
+        min-height: 56px;
+        padding: 0 14px;
+    }
+
+    .agenda-list {
+        padding: 12px;
+    }
+
+    .composer-actions {
+        display: grid;
+    }
+
+    .left-buttons {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .left-buttons button,
+    .primary {
+        width: 100%;
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+
+    .dashboard-insight-grid,
+    .insights-summary,
+    .dashboard-focus-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .big-calendar-grid {
+        min-width: 760px;
+    }
+
+    .calendar-day-shell,
+    .calendar-week-shell,
+    .calendar-year-shell,
+    .big-calendar-grid {
+        overflow-x: auto;
+    }
+}
+
 </style>
 </head>
 
@@ -1479,10 +2270,19 @@ input:checked + .slider:before { transform: translateX(26px); }
             <span>CLERK</span>
         </div>
 
+        <nav class="nav" aria-label="Primary">
+            <a href="#" data-view="agenda" class="active" onclick="loadView('agenda'); return false;"><span class="nav-icon"></span>Dashboard</a>
+            <a href="#" data-view="my tasks" onclick="loadView('my tasks'); return false;"><span class="nav-icon"></span>Tasks</a>
+            <a href="#" data-view="reminders" onclick="loadView('reminders'); return false;"><span class="nav-icon"></span>Reminders</a>
+            <a href="#" data-view="calendar" onclick="loadView('calendar'); return false;"><span class="nav-icon"></span>Calendar</a>
+            <a href="#" data-view="insights" onclick="loadView('insights'); return false;"><span class="nav-icon"></span>Insights</a>
+            <a href="#" data-view="history" onclick="loadView('history'); return false;"><span class="nav-icon"></span>History</a>
+        </nav>
+
         <div class="user-menu-container" style="position: relative;">
             <div class="user-profile" onclick="toggleUserMenu()" style="cursor:pointer; display:flex; align-items:center; gap:10px;">
                 <span id="display-username" style="color:var(--text); font-weight:500;">User</span>
-                <div style="width:35px; height:35px; background:var(--teal); border-radius:50%; display:flex; align-items:center; justify-content:center; color:white;">👤</div>
+                <div class="user-avatar">U</div>
             </div>
             <div id="user-dropdown" style="display:none; position:absolute; right:0; top:45px; background:var(--panel-bg); border:1px solid var(--border); border-radius:12px; width:160px; box-shadow: var(--shadow); z-index:1000;">
                 <ul style="list-style:none; padding:10px; margin:0;">
@@ -1496,10 +2296,16 @@ input:checked + .slider:before { transform: translateX(26px); }
     <main class="page">
         <div class="layout">
             <aside class="sidebar">
+                <div class="sidebar-heading">
+                    <div>
+                        <p class="sidebar-kicker">Schedule</p>
+                        <h2 class="sidebar-title">This month</h2>
+                    </div>
+                </div>
                 <div class="month-card" onclick="loadView('calendar')" title="Open full calendar">
                     <div class="month-row">
                         <span id="sidebarMonthYear"></span>
-                        <span>🗓️</span>
+                        <span>Open</span>
                     </div>
                     <div class="calendar-grid" id="calendarGrid"></div>
                 </div>
@@ -1512,7 +2318,7 @@ input:checked + .slider:before { transform: translateX(26px); }
                 </header>
 
                 <section class="panel" id="agendaView">
-                    <h2>Today's Agenda</h2>
+                    <h2>Dashboard</h2>
                     <div class="agenda-list" id="agendaList"></div>
                     <div id="newTasksList"></div>
                     <div id="statusMsg" style="display:none;">Task saved!</div>
@@ -1745,6 +2551,10 @@ const parseWallTime = (isoStr) => {
 
 function formatDateKey(date) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatLocalDateTimeValue(date) {
+    return `${formatDateKey(date)}T${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
 function startOfLocalDay(date) {
@@ -2097,6 +2907,86 @@ function buildConflictMap(tasks) {
     return conflicts;
 }
 
+function getConflictPairs(tasks, limit = 4) {
+    const activeTimedTasks = tasks
+        .filter(task => task.status !== 'completed' && task.status !== 'deleted')
+        .map(task => ({ task, range: getTimedTaskRange(task) }))
+        .filter(entry => entry.range)
+        .sort((a, b) => a.range.start - b.range.start);
+
+    const pairs = [];
+    const seen = new Set();
+
+    for (let i = 0; i < activeTimedTasks.length; i++) {
+        for (let j = i + 1; j < activeTimedTasks.length; j++) {
+            const current = activeTimedTasks[i];
+            const next = activeTimedTasks[j];
+            if (next.range.start >= current.range.end) break;
+            if (!(current.range.start < next.range.end && next.range.start < current.range.end)) continue;
+
+            const firstId = Number(current.task.task_id);
+            const secondId = Number(next.task.task_id);
+            const key = [firstId, secondId].sort((a, b) => a - b).join(':');
+            if (seen.has(key)) continue;
+            seen.add(key);
+
+            const overlapStart = new Date(Math.max(current.range.start.getTime(), next.range.start.getTime()));
+            const overlapEnd = new Date(Math.min(current.range.end.getTime(), next.range.end.getTime()));
+            pairs.push({
+                first: current.task,
+                second: next.task,
+                firstRange: current.range,
+                secondRange: next.range,
+                overlapStart,
+                overlapEnd,
+                overlapMinutes: Math.max(1, Math.round((overlapEnd - overlapStart) / 60000))
+            });
+        }
+    }
+
+    return pairs
+        .sort((a, b) => b.overlapMinutes - a.overlapMinutes || a.overlapStart - b.overlapStart)
+        .slice(0, limit);
+}
+
+function formatTimeOnly(date) {
+    if (!date) return '';
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function formatConflictCard(pair) {
+    const dateText = pair.overlapStart.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+    const overlapText = `${formatTimeOnly(pair.overlapStart)}-${formatTimeOnly(pair.overlapEnd)}`;
+    const firstRange = `${formatTimeOnly(pair.firstRange.start)}-${formatTimeOnly(pair.firstRange.end)}`;
+    const secondRange = `${formatTimeOnly(pair.secondRange.start)}-${formatTimeOnly(pair.secondRange.end)}`;
+    const minutesText = pair.overlapMinutes >= 60 && pair.overlapMinutes % 60 === 0
+        ? `${pair.overlapMinutes / 60} hour${pair.overlapMinutes === 60 ? '' : 's'}`
+        : `${pair.overlapMinutes} minutes`;
+
+    return `
+        <article class="dashboard-conflict-card">
+            <div class="dashboard-conflict-title">${escapeHTML(pair.first.title || 'Untitled Task')} overlaps ${escapeHTML(pair.second.title || 'Untitled Task')}</div>
+            <div class="dashboard-conflict-detail">
+                They both occupy ${escapeHTML(overlapText)} on ${escapeHTML(dateText)}.
+                ${escapeHTML(pair.first.title || 'First task')} is scheduled ${escapeHTML(firstRange)}, while ${escapeHTML(pair.second.title || 'second task')} is scheduled ${escapeHTML(secondRange)}.
+            </div>
+            <div class="dashboard-conflict-suggestion">Overlap length: ${escapeHTML(minutesText)}. Move one item outside that window to clear it.</div>
+        </article>
+    `;
+}
+
+function renderConflictDetails(pairs, emptyText = 'No schedule conflicts detected.') {
+    if (!pairs.length) return `<div class="dashboard-empty">${escapeHTML(emptyText)}</div>`;
+    return `<div class="dashboard-conflict-stack">${pairs.map(formatConflictCard).join('')}</div>`;
+}
+
+function getConflictPairsForTask(taskId, tasks, limit = 4) {
+    const normalizedId = Number(taskId);
+    return getConflictPairs(tasks, 100)
+        .filter(pair => Number(pair.first.task_id) === normalizedId || Number(pair.second.task_id) === normalizedId)
+        .slice(0, limit);
+}
+
 function renderInsightsPage(tasks, containerId = 'agendaList') {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -2226,9 +3116,7 @@ function renderDashboardTaskRow(task, options = {}) {
     const description = task.description ? ` · ${task.description}` : '';
     const confidenceScore = Number(task.confidence);
     const confidence = !isNaN(confidenceScore) ? ` · ${Math.round(confidenceScore)}%` : '';
-    const conflictText = conflicts.length
-        ? ` · Conflicts with ${conflicts.map(conflict => conflict.title || 'Untitled Task').join(', ')}`
-        : '';
+    const conflictText = conflicts.length && options.showConflictTag ? ` · ${conflicts.length} conflict${conflicts.length === 1 ? '' : 's'}` : '';
     const typeLabel = task.item_type === 'reminder' ? 'Reminder' : 'Task';
     const colorClass = getTaskColorClass(task);
 
@@ -2258,6 +3146,7 @@ function getDashboardData(tasks) {
     const todayTasks = sortByScheduleThenTitle(activeTasks.filter(task => task.item_type !== 'reminder' && isTaskDueToday(task)));
     const tasksOnly = sortByScheduleThenTitle(activeTasks.filter(task => task.item_type !== 'reminder'));
     const remindersOnly = sortByScheduleThenTitle(activeTasks.filter(task => task.item_type === 'reminder'));
+    const upcomingTasks = sortByScheduleThenTitle(activeTasks.filter(task => task.item_type !== 'reminder' && !isTaskDueToday(task)));
     const historyTasks = [...tasks]
         .filter(task => task.status === 'completed' || task.status === 'deleted')
         .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
@@ -2269,23 +3158,20 @@ function getDashboardData(tasks) {
         : 0;
     const conflictTaskCount = [...conflictMap.keys()].length;
     const lowConfidenceCount = activeTasks.filter(task => Number(task.confidence || 0) < 70).length;
-    const conflictChips = [...conflictMap.entries()].slice(0, 4).map(([taskId, conflicts]) => {
-        const task = activeTasks.find(item => Number(item.task_id) === Number(taskId));
-        if (!task) return '';
-        return `<span class="conflict-chip">${escapeHTML(task.title || 'Untitled Task')} conflicts with ${escapeHTML(conflicts[0]?.title || 'another task')}</span>`;
-    }).join('');
+    const conflictPairs = getConflictPairs(activeTasks, 4);
 
     return {
         activeTasks,
         todayTasks,
         tasksOnly,
         remindersOnly,
+        upcomingTasks,
         historyTasks,
         conflictMap,
+        conflictPairs,
         averageConfidence,
         conflictTaskCount,
-        lowConfidenceCount,
-        conflictChips
+        lowConfidenceCount
     };
 }
 
@@ -2300,25 +3186,41 @@ function renderDashboardPage(tasks, containerId = 'agendaList') {
         remindersOnly,
         historyTasks,
         conflictMap,
+        conflictPairs,
+        upcomingTasks,
         averageConfidence,
         conflictTaskCount,
-        lowConfidenceCount,
-        conflictChips
+        lowConfidenceCount
     } = getDashboardData(tasks);
 
     container.innerHTML = `
-        <div class="dashboard-grid">
-            <div class="dashboard-column">
+        <div class="dashboard-home">
+            <div class="dashboard-home-column">
                 <section class="dashboard-section">
                     <div class="dashboard-section-header">
-                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="openSectionModal('agenda')">Agenda + Insights</button></h3>
+                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="openSectionModal('agenda')">Today's Tasks</button></h3>
                         <span class="dashboard-section-count">${todayTasks.length} due today</span>
                     </div>
-                    <div class="dashboard-insight-grid">
-                        <div class="dashboard-stat">
-                            <div class="dashboard-stat-label">Active</div>
-                            <div class="dashboard-stat-value">${activeTasks.length}</div>
-                        </div>
+                    ${renderDashboardList(todayTasks, 'Nothing scheduled for today.', { showDescription: true, conflictMap, showConflictTag: true, limit: 8 })}
+                    ${todayTasks.length > 8 ? `<button class="dashboard-link-button" type="button" onclick="openSectionModal('agenda')">View all ${todayTasks.length} due today</button>` : ''}
+                </section>
+
+                <section class="dashboard-section">
+                    <div class="dashboard-section-header">
+                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="loadView('my tasks')">Upcoming</button></h3>
+                        <span class="dashboard-section-count">${tasksOnly.length} open</span>
+                    </div>
+                    ${renderDashboardList(upcomingTasks, 'No upcoming tasks beyond today.', { limit: 5 })}
+                </section>
+            </div>
+
+            <div class="dashboard-home-column">
+                <section class="dashboard-section">
+                    <div class="dashboard-section-header">
+                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="loadView('insights')">Task Pulse</button></h3>
+                        <span class="dashboard-section-count">${activeTasks.length} active</span>
+                    </div>
+                    <div class="dashboard-focus-row">
                         <div class="dashboard-stat">
                             <div class="dashboard-stat-label">Avg confidence</div>
                             <div class="dashboard-stat-value">${averageConfidence}%</div>
@@ -2328,49 +3230,35 @@ function renderDashboardPage(tasks, containerId = 'agendaList') {
                             <div class="dashboard-stat-value">${lowConfidenceCount}</div>
                         </div>
                         <div class="dashboard-stat">
-                            <div class="dashboard-stat-label">Conflicts</div>
-                            <div class="dashboard-stat-value">${conflictTaskCount}</div>
+                            <div class="dashboard-stat-label">Reminders</div>
+                            <div class="dashboard-stat-value">${remindersOnly.length}</div>
                         </div>
                     </div>
-                    <div class="dashboard-conflict-list">
-                        ${conflictChips || '<span class="no-conflict-chip">No schedule conflicts detected</span>'}
-                    </div>
-                    <div style="margin-top:14px;">
-                        ${renderDashboardList(todayTasks, 'Nothing scheduled for today.', { showDescription: true, conflictMap })}
-                    </div>
                 </section>
 
                 <section class="dashboard-section">
                     <div class="dashboard-section-header">
-                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="openSectionModal('history')">History</button></h3>
-                        <span class="dashboard-section-count">${historyTasks.length} recent</span>
+                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="openSectionModal('conflicts')">Schedule Conflicts</button></h3>
+                        <span class="dashboard-section-count">${conflictTaskCount} involved</span>
                     </div>
-                    ${renderDashboardList(historyTasks, 'No completed or deleted tasks yet.', { isHistory: true, limit: 6 })}
-                </section>
-            </div>
-
-            <div class="dashboard-column">
-                <section class="dashboard-section">
-                    <div class="dashboard-section-header">
-                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="openSectionModal('tasks')">My Tasks</button></h3>
-                        <span class="dashboard-section-count">${tasksOnly.length} open</span>
-                    </div>
-                    ${renderDashboardList(tasksOnly, 'No active tasks.', { showDescription: true, conflictMap, limit: 8 })}
+                    ${renderConflictDetails(conflictPairs)}
                 </section>
 
-                <section class="dashboard-section">
-                    <div class="dashboard-section-header">
-                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="openSectionModal('reminders')">Reminders</button></h3>
-                        <span class="dashboard-section-count">${remindersOnly.length} active</span>
-                    </div>
-                    ${renderDashboardList(remindersOnly, 'No active reminders.', { limit: 6 })}
-                </section>
+                ${remindersOnly.length ? `
+                    <section class="dashboard-section">
+                        <div class="dashboard-section-header">
+                            <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="loadView('reminders')">Reminders</button></h3>
+                            <span class="dashboard-section-count">${remindersOnly.length} active</span>
+                        </div>
+                        ${renderDashboardList(remindersOnly, 'No active reminders.', { limit: 3 })}
+                    </section>
+                ` : ''}
             </div>
         </div>
     `;
 }
 
-function renderExpandedTaskRow(task, conflictMap = new Map()) {
+function renderExpandedTaskRow(task, conflictMap = new Map(), allTasks = latestTasks) {
     const colorClass = getTaskColorClass(task);
     const start = parseWallTime(task.due_date);
     const timedRange = getTimedTaskRange(task);
@@ -2405,9 +3293,7 @@ function renderExpandedTaskRow(task, conflictMap = new Map()) {
             </div>
             <p class="expanded-task-description">${escapeHTML(description)}</p>
             ${conflicts.length ? `
-                <div class="dashboard-conflict-list">
-                    ${conflicts.map(conflict => `<span class="conflict-chip">Conflicts with ${escapeHTML(conflict.title || 'Untitled Task')}</span>`).join('')}
-                </div>
+                ${renderConflictDetails(getConflictPairsForTask(task.task_id, allTasks), 'No overlap details available for this item.')}
             ` : ''}
         </article>
     `;
@@ -2415,7 +3301,7 @@ function renderExpandedTaskRow(task, conflictMap = new Map()) {
 
 function renderExpandedList(tasks, emptyText, conflictMap = new Map()) {
     if (!tasks.length) return `<div class="dashboard-empty">${escapeHTML(emptyText)}</div>`;
-    return `<div class="expanded-list">${tasks.map(task => renderExpandedTaskRow(task, conflictMap)).join('')}</div>`;
+    return `<div class="expanded-list">${tasks.map(task => renderExpandedTaskRow(task, conflictMap, latestTasks)).join('')}</div>`;
 }
 
 function getSectionModalContent(section) {
@@ -2423,11 +3309,11 @@ function getSectionModalContent(section) {
 
     if (section === 'agenda') {
         return {
-            title: 'Agenda + Insights',
+            title: "Today's Tasks",
             subtitle: `${data.todayTasks.length} due today · ${data.conflictTaskCount} schedule conflicts · ${data.averageConfidence}% average confidence`,
             body: `
                 <section class="expanded-section">
-                    <h3>Insights</h3>
+                    <h3>Task Pulse</h3>
                     <div class="dashboard-insight-grid">
                         <div class="dashboard-stat">
                             <div class="dashboard-stat-label">Active</div>
@@ -2446,13 +3332,23 @@ function getSectionModalContent(section) {
                             <div class="dashboard-stat-value">${data.conflictTaskCount}</div>
                         </div>
                     </div>
-                    <div class="dashboard-conflict-list">
-                        ${data.conflictChips || '<span class="no-conflict-chip">No schedule conflicts detected</span>'}
-                    </div>
                 </section>
                 <section class="expanded-section">
                     <h3>Today's Agenda</h3>
                     ${renderExpandedList(data.todayTasks, 'Nothing scheduled for today.', data.conflictMap)}
+                </section>
+            `
+        };
+    }
+
+    if (section === 'conflicts') {
+        return {
+            title: 'Schedule Conflicts',
+            subtitle: `${data.conflictTaskCount} tasks involved in overlapping timed windows`,
+            body: `
+                <section class="expanded-section">
+                    <h3>What overlaps</h3>
+                    ${renderConflictDetails(getConflictPairs(data.activeTasks, 20))}
                 </section>
             `
         };
@@ -2717,12 +3613,12 @@ async function completeTask(taskId) {
 async function loadView(view) {
     // 0. Update the global state so other functions know what page we are on
     currentView = view; 
+    document.body.dataset.currentView = view;
 
     // 1. Update Navbar UI
     document.querySelectorAll('.nav a').forEach(link => {
         link.classList.remove('active');
-        const linkLabel = link.textContent.toLowerCase();
-        if (linkLabel === view || (view === 'history' && linkLabel === 'history') || (view === 'insights' && linkLabel.includes('insights'))) {
+        if (link.dataset.view === view) {
             link.classList.add('active');
         }
     });
@@ -2776,7 +3672,7 @@ async function loadView(view) {
 
         // 6. View Routing
         if (view === 'agenda') {
-            titleHeader.textContent = "Dashboard";
+            titleHeader.textContent = "Today";
             renderDashboardPage(allTasks, 'agendaList');
         }
         else if (view === 'my tasks') {
@@ -2936,6 +3832,131 @@ function getCalendarSpanMeta(task, date, rangeEndDate) {
     return { spanClass, showTitle };
 }
 
+function findTaskById(taskId) {
+    const normalizedId = Number(taskId);
+    return (window.currentCalendarTasks || latestTasks || []).find(task => Number(task.task_id) === normalizedId);
+}
+
+function getTaskDurationMinutes(task) {
+    const range = getTimedTaskRange(task);
+    if (!range) return 60;
+    return Math.max(15, Math.round((range.end - range.start) / 60000));
+}
+
+function beginCalendarDrag(event, taskId) {
+    if (!event.dataTransfer) return;
+    event.stopPropagation();
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(taskId));
+    event.dataTransfer.setData('application/x-clerk-task-id', String(taskId));
+    event.currentTarget.classList.add('dragging');
+}
+
+function endCalendarDrag(event) {
+    event.currentTarget.classList.remove('dragging');
+    document.querySelectorAll('.calendar-drop-active').forEach(el => el.classList.remove('calendar-drop-active'));
+    document.querySelectorAll('.calendar-drop-hint').forEach(el => el.remove());
+}
+
+function getDraggedTaskId(event) {
+    if (!event.dataTransfer) return '';
+    return event.dataTransfer.getData('application/x-clerk-task-id') || event.dataTransfer.getData('text/plain');
+}
+
+function makeCalendarItemDraggable(element, task) {
+    if (!element || !task) return;
+    element.draggable = true;
+    element.dataset.taskId = task.task_id;
+    element.addEventListener('dragstart', event => beginCalendarDrag(event, task.task_id));
+    element.addEventListener('dragend', endCalendarDrag);
+}
+
+function setDropActive(event, isActive) {
+    event.currentTarget.classList.toggle('calendar-drop-active', isActive);
+}
+
+function copyTaskTimeToDate(task, targetDate) {
+    const start = parseWallTime(task?.due_date);
+    const nextDate = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 12, 0, 0);
+    if (start && !task.is_all_day) {
+        nextDate.setHours(start.getHours(), start.getMinutes(), 0, 0);
+    }
+    return nextDate;
+}
+
+async function moveTaskToDate(taskId, targetDate) {
+    const task = findTaskById(taskId);
+    if (!task || !targetDate) return;
+
+    if (task.is_all_day) {
+        const originalStart = parseWallTime(task.due_date);
+        const originalEnd = task.end_date ? parseWallTime(task.end_date) : null;
+        const daySpan = originalStart && originalEnd
+            ? Math.max(0, Math.round((startOfLocalDay(originalEnd) - startOfLocalDay(originalStart)) / 86400000))
+            : 0;
+        const nextEnd = daySpan ? new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate() + daySpan) : null;
+        await updateTaskSchedule(taskId, targetDate, nextEnd, true);
+        return;
+    }
+
+    const durationMinutes = getTaskDurationMinutes(task);
+    const nextStart = copyTaskTimeToDate(task, targetDate);
+    const nextEnd = new Date(nextStart.getTime() + durationMinutes * 60000);
+    await updateTaskSchedule(taskId, nextStart, nextEnd, false);
+}
+
+async function handleCalendarDayDrop(event, targetDate) {
+    event.preventDefault();
+    event.stopPropagation();
+    setDropActive(event, false);
+    const taskId = getDraggedTaskId(event);
+    if (!taskId || taskId === 'undefined') return;
+    await moveTaskToDate(taskId, targetDate);
+    loadView('calendar');
+}
+
+function getTimeFromTimelineDrop(event, targetDate, container) {
+    const rect = container.getBoundingClientRect();
+    const rawMinutes = ((event.clientY - rect.top) / rect.height) * 1440;
+    const snappedMinutes = Math.max(0, Math.min(23 * 60 + 45, Math.round(rawMinutes / 15) * 15));
+    return new Date(
+        targetDate.getFullYear(),
+        targetDate.getMonth(),
+        targetDate.getDate(),
+        Math.floor(snappedMinutes / 60),
+        snappedMinutes % 60,
+        0
+    );
+}
+
+function updateTimelineDropHint(event, container, targetDate) {
+    let hint = container.querySelector('.calendar-drop-hint');
+    if (!hint) {
+        hint = document.createElement('div');
+        hint.className = 'calendar-drop-hint';
+        container.appendChild(hint);
+    }
+    const dropDate = getTimeFromTimelineDrop(event, targetDate, container);
+    const minutes = dropDate.getHours() * 60 + dropDate.getMinutes();
+    hint.style.top = `${minutes}px`;
+}
+
+async function handleTimelineDrop(event, targetDate, container) {
+    event.preventDefault();
+    event.stopPropagation();
+    container.classList.remove('calendar-drop-active');
+    container.querySelectorAll('.calendar-drop-hint').forEach(el => el.remove());
+
+    const taskId = getDraggedTaskId(event);
+    const task = findTaskById(taskId);
+    if (!task) return;
+
+    const nextStart = getTimeFromTimelineDrop(event, targetDate, container);
+    const nextEnd = new Date(nextStart.getTime() + getTaskDurationMinutes(task) * 60000);
+    await updateTaskSchedule(taskId, nextStart, nextEnd, false);
+    loadView('calendar');
+}
+
 function openCalendarDay(dateStr) {
     const [year, month, day] = dateStr.split('-').map(Number);
     currentCalYear = year;
@@ -2964,13 +3985,17 @@ function renderDayCalendar(targetDate, allTasks = []) {
                 <div class="calendar-all-day-row">
                     <div class="calendar-all-day-label">All day</div>
                     <div class="calendar-all-day-events">
-                        ${allDayEvents.map(task => `<div class="calendar-all-day-event ${getTaskColorClass(task)}">${task.title}</div>`).join('')}
+                        ${allDayEvents.map(task => `<div class="calendar-all-day-event ${getTaskColorClass(task)}" draggable="true" data-task-id="${task.task_id}">${escapeHTML(task.title)}</div>`).join('')}
                     </div>
                 </div>
             ` : ''}
             <div class="calendar-day-body" id="calendarDayBody"></div>
         </div>
     `;
+    document.querySelectorAll('.calendar-all-day-event[data-task-id]').forEach(eventEl => {
+        const task = findTaskById(eventEl.dataset.taskId);
+        makeCalendarItemDraggable(eventEl, task);
+    });
     renderHourlySchedule(document.getElementById('calendarDayBody'), targetDate, allTasks, true);
 }
 
@@ -2995,7 +4020,7 @@ function renderWeekCalendar(month, year, allTasks = []) {
         if (!task) return '<div class="week-empty-lane"></div>';
         const { spanClass, showTitle } = getCalendarSpanMeta(task, date, weekEnd);
         return `
-            <div class="calendar-event ${getTaskColorClass(task)} ${spanClass}" draggable="true" title="${escapeHTML(task.title)}">
+            <div class="calendar-event ${getTaskColorClass(task)} ${spanClass}" draggable="true" data-task-id="${task.task_id}" title="${escapeHTML(task.title)}">
                 ${showTitle ? escapeHTML(task.title) : ''}
             </div>
         `;
@@ -3008,7 +4033,7 @@ function renderWeekCalendar(month, year, allTasks = []) {
                 ${days.map(date => {
                     const dateStr = formatDateKey(date);
                     return `
-                        <div class="week-day" onclick="openCalendarDay('${dateStr}')">
+                        <div class="week-day" data-date="${dateStr}" onclick="openCalendarDay('${dateStr}')">
                             <div class="week-day-title">${date.toLocaleDateString('en-US', { weekday: 'short' })}</div>
                             <div class="day-num">${date.getDate()}</div>
                             ${Array.from({ length: Math.max(maxLane + 1, 1) }, (_, laneIndex) => renderWeekLane(date, laneIndex)).join('')}
@@ -3018,6 +4043,21 @@ function renderWeekCalendar(month, year, allTasks = []) {
             </div>
         </div>
     `;
+    document.querySelectorAll('.calendar-week-shell .calendar-event[data-task-id]').forEach(eventEl => {
+        const task = findTaskById(eventEl.dataset.taskId);
+        makeCalendarItemDraggable(eventEl, task);
+    });
+    document.querySelectorAll('.calendar-week-shell .week-day[data-date]').forEach(dayEl => {
+        const [dropYear, dropMonth, dropDay] = dayEl.dataset.date.split('-').map(Number);
+        const dropDate = new Date(dropYear, dropMonth - 1, dropDay);
+        dayEl.addEventListener('dragover', event => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            setDropActive(event, true);
+        });
+        dayEl.addEventListener('dragleave', event => setDropActive(event, false));
+        dayEl.addEventListener('drop', event => handleCalendarDayDrop(event, dropDate));
+    });
 }
 
 function renderYearCalendar(year, allTasks = []) {
@@ -3150,20 +4190,19 @@ function renderBigCalendar(month, year, allTasks = []) {
         daySquare.className = 'cal-day';
         
         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const dropDate = new Date(year, month, day);
         daySquare.dataset.date = dateStr; 
         daySquare.addEventListener('click', () => openCalendarDay(dateStr));
         daySquare.innerHTML = `<span class="day-num">${day}</span>`;
 
         // 4. Drag & Drop Listeners
-        daySquare.addEventListener('dragover', (e) => e.preventDefault());
-        daySquare.addEventListener('drop', async (e) => {
+        daySquare.addEventListener('dragover', (e) => {
             e.preventDefault();
-            const taskId = e.dataTransfer.getData('text/plain');
-            if (taskId && taskId !== "undefined") {
-                await updateTaskDate(taskId, daySquare.dataset.date);
-                loadView('calendar'); 
-            }
+            e.dataTransfer.dropEffect = 'move';
+            setDropActive(e, true);
         });
+        daySquare.addEventListener('dragleave', e => setDropActive(e, false));
+        daySquare.addEventListener('drop', e => handleCalendarDayDrop(e, dropDate));
 
         // 5. Filter and Render Tasks
         // The allTasks array passed to renderBigCalendar is already filtered for active tasks/reminders
@@ -3211,7 +4250,7 @@ function renderBigCalendar(month, year, allTasks = []) {
             taskEl.className = `calendar-event ${colorClass} ${spanClass}`;
             taskEl.textContent = showTitle ? task.title : "";
             taskEl.title = task.title;
-            taskEl.draggable = true; 
+            makeCalendarItemDraggable(taskEl, task);
             
             daySquare.appendChild(taskEl);
         }
@@ -3224,6 +4263,18 @@ function renderHourlySchedule(container, targetDate, allTasks, showCurrentLine =
     if (!container) return;
     container.innerHTML = '';
     container.style.height = '1440px';
+    container.addEventListener('dragover', event => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        container.classList.add('calendar-drop-active');
+        updateTimelineDropHint(event, container, targetDate);
+    });
+    container.addEventListener('dragleave', event => {
+        if (event.currentTarget.contains(event.relatedTarget)) return;
+        container.classList.remove('calendar-drop-active');
+        container.querySelectorAll('.calendar-drop-hint').forEach(el => el.remove());
+    });
+    container.addEventListener('drop', event => handleTimelineDrop(event, targetDate, container));
     const year = targetDate.getFullYear();
     const month = targetDate.getMonth();
     const day = targetDate.getDate();
@@ -3256,6 +4307,7 @@ function renderHourlySchedule(container, targetDate, allTasks, showCurrentLine =
         const endMinutes = (event._end - new Date(year, month, day, 0, 0, 0)) / 60000;
         const eventEl = document.createElement('div');
         eventEl.className = `hourly-event ${getTaskColorClass(event)}`;
+        eventEl.dataset.taskId = event.task_id;
         const visibleTop = getVisibleTop(startMinutes);
         const visibleBottom = Math.min(1440, endMinutes * (hourHeight / 60));
         eventEl.style.top = `${visibleTop}px`;
@@ -3266,6 +4318,7 @@ function renderHourlySchedule(container, targetDate, allTasks, showCurrentLine =
             <span style="font-weight:800; font-size:10px;">${event._start.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})}</span>
             <span style="font-weight:700;">${event.title}</span>
         `;
+        makeCalendarItemDraggable(eventEl, event);
         container.appendChild(eventEl);
     });
 
@@ -3285,6 +4338,8 @@ function updateDisplayName(name, shouldSave = true) {
     // Update the Top Bar
     const topBarName = document.getElementById('display-username');
     if (topBarName) topBarName.textContent = nameToDisplay;
+    const avatar = document.querySelector('.user-avatar');
+    if (avatar) avatar.textContent = nameToDisplay.charAt(0).toUpperCase();
     
     // Update the Header
     const liveHeader = document.getElementById('liveDateHeader');
@@ -3300,22 +4355,23 @@ function toggleDarkTheme(shouldSave = true) {
     document.body.classList.toggle('dark-mode', isDark);
 
     if (isDark) {
-        root.style.setProperty('--bg', '#0f172a'); 
-        root.style.setProperty('--panel-bg', '#1e293b');
-        root.style.setProperty('--text', '#f8fafc');
-        root.style.setProperty('--muted', '#94a3b8');
-        root.style.setProperty('--border', '#334155');
-        root.style.setProperty('--shadow', '0 10px 15px -3px rgba(0, 0, 0, 0.5)');
-        document.body.style.background = "#0f172a"; // Solid for dark mode
+        root.style.setProperty('--bg', '#0b1120');
+        root.style.setProperty('--panel-bg', '#111827');
+        root.style.setProperty('--panel-muted', '#172033');
+        root.style.setProperty('--text', '#eef4ff');
+        root.style.setProperty('--muted', '#9aa8bc');
+        root.style.setProperty('--border', '#263247');
+        root.style.setProperty('--shadow', '0 20px 60px rgba(0, 0, 0, .35)');
+        document.body.style.background = 'linear-gradient(180deg, #0b1120 0%, #111827 100%)';
     } else {
-        // MATCH THE ORIGINAL LOOK EXACTLY
-        root.style.setProperty('--bg', 'radial-gradient(circle at top left, #dff5f2 0%, #eef3f5 32%, #f7f8fa 100%)');
-        root.style.setProperty('--panel-bg', 'rgba(255, 255, 255, 0.82)');
-        root.style.setProperty('--text', '#436172');
-        root.style.setProperty('--muted', '#7f98a5');
-        root.style.setProperty('--border', '#e2e8f0');
-        root.style.setProperty('--shadow', '0 10px 28px rgba(79, 113, 130, .12)');
-        document.body.style.background = 'radial-gradient(circle at top left, #dff5f2 0%, #eef3f5 32%, #f7f8fa 100%)';
+        root.style.setProperty('--bg', '#f6f8fb');
+        root.style.setProperty('--panel-bg', '#ffffff');
+        root.style.setProperty('--panel-muted', '#f1f5f9');
+        root.style.setProperty('--text', '#16212f');
+        root.style.setProperty('--muted', '#66758a');
+        root.style.setProperty('--border', '#dbe3ec');
+        root.style.setProperty('--shadow', '0 16px 45px rgba(15, 23, 42, .08)');
+        document.body.style.background = '';
     }
 
     if (shouldSave) saveUserSettings();
@@ -3573,6 +4629,32 @@ async function updateTaskDate(id, newDate) {
         if (!response.ok) throw new Error('Update failed');
     } catch (err) {
         console.error("Error updating task date:", err);
+    }
+}
+
+async function updateTaskSchedule(id, startDate, endDate = null, isAllDay = false) {
+    const payload = {
+        due_date: isAllDay ? formatDateKey(startDate) : formatLocalDateTimeValue(startDate),
+        is_all_day: Boolean(isAllDay)
+    };
+
+    if (!isAllDay && endDate) {
+        payload.end_date = formatLocalDateTimeValue(endDate);
+    } else if (isAllDay && endDate) {
+        payload.end_date = formatDateKey(endDate);
+    }
+
+    try {
+        const response = await apiFetch(`${API_BASE}/tasks/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error('Update failed');
+    } catch (err) {
+        console.error("Error updating task schedule:", err);
+        alert("Couldn't move that task. Please try again.");
+        throw err;
     }
 }
 

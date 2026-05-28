@@ -27,9 +27,13 @@ class User(Base):
     user_id = Column(Integer, primary_key=True)
     username = Column(String, unique=True)
     password_hash = Column(String)
+    email = Column(String)
     preferred_name = Column(String)
     dark_mode = Column(Integer, default=0)
     notifications_enabled = Column(Integer, default=1)
+    two_factor_enabled = Column(Integer, default=0)
+    two_factor_code_hash = Column(String)
+    two_factor_expires_at = Column(String)
 
 class RawInput(Base):
     __tablename__ = "raw_inputs"
@@ -62,14 +66,27 @@ def ensure_database_schema():
         return
 
     inspector = inspect(engine)
-    if "tasks" not in inspector.get_table_names():
+    table_names = inspector.get_table_names()
+    if "tasks" not in table_names or "users" not in table_names:
         Base.metadata.create_all(bind=engine)
-        return
+        inspector = inspect(engine)
 
     existing_columns = {column["name"] for column in inspector.get_columns("tasks")}
     if "description" not in existing_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE tasks ADD COLUMN description TEXT"))
+
+    existing_user_columns = {column["name"] for column in inspector.get_columns("users")}
+    user_columns = {
+        "email": "VARCHAR",
+        "two_factor_enabled": "INTEGER DEFAULT 0",
+        "two_factor_code_hash": "VARCHAR",
+        "two_factor_expires_at": "VARCHAR",
+    }
+    with engine.begin() as connection:
+        for column_name, column_type in user_columns.items():
+            if column_name not in existing_user_columns:
+                connection.execute(text(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}"))
 
 #Initialization Function
 def initialize_database():

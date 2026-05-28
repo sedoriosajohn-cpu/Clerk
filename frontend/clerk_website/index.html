@@ -893,13 +893,6 @@ input:checked + .slider:before { transform: translateX(26px); }
 
 <body>
 
-<section class="panel">
-    <h2>Clerk Insights</h2>
-    <p class="muted">Smart analysis of your workload and schedule conflicts.</p>
-
-    <div class="insights-grid" id="insightsGrid"></div>
-</section>
-
     <header class="topbar">
         <div class="brand">
             <img src="logo.png" alt="Clerk logo">
@@ -912,7 +905,7 @@ input:checked + .slider:before { transform: translateX(26px); }
             <a href="#" onclick="loadView('reminders')">Reminders</a>
             <a href="#" onclick="loadView('history')">History</a>
             <a href="#" class="active" onclick="loadView('agenda')">Agenda</a>
-            <a href="#insightsSection">Clerk Insights</a>
+            <a href="#" onclick="loadView('insights')">Clerk Insights</a>
         </nav>
 
         <div class="user-menu-container" style="position: relative; margin-left: 20px;">
@@ -1050,6 +1043,18 @@ input:checked + .slider:before { transform: translateX(26px); }
                         </div>
                     </div>
                 </section>
+                <section class="panel" id="insightsView" style="display: none;">
+                    <div style="margin-bottom: 24px;">
+                        <h2 style="margin: 0; font-size: 28px; font-weight: 800;">Clerk Insights</h2>
+                        <p style="color: var(--muted); margin-top: 4px;">
+                            Smart analysis of your tasks, workload, and schedule conflicts.
+                        </p>
+                    </div>
+
+                    <div class="subline"></div>
+
+                    <div class="insights-grid" id="insightsGrid"></div>
+                </section>
             </section>
         </div>
     </main>
@@ -1101,16 +1106,22 @@ async function loadClerkInsights() {
         return;
     }
 
-    const response = await fetch(`http://127.0.0.1:8000/insights?user_id=${userId}`);
-    const data = await response.json();
-    const tasks = data.tasks || [];
+    try {
+        const response = await fetch(`http://127.0.0.1:8000/insights?user_id=${userId}`);
 
-    const insights = [
-        ...analyzeWorkload(tasks),
-        ...detectTaskConflicts(tasks)
-    ];
+        if (!response.ok) {
+            throw new Error("Failed to load insights");
+        }
 
-    renderInsights(data.insights || []);
+        const data = await response.json();
+
+        renderInsights(data.insights || []);
+
+    } catch (err) {
+        console.error("Insights Error:", err);
+        document.getElementById("insightsGrid").innerHTML =
+            `<p class="muted">Could not load Clerk Insights.</p>`;
+    }
 }
 
 function analyzeWorkload(tasks) {
@@ -1228,8 +1239,6 @@ function renderInsights(insights) {
         </div>
     `).join("");
 }
-
-window.addEventListener("DOMContentLoaded", loadClerkInsights);
 
 function renderSkeleton(count = 4) {
     return `<div class="skeleton-list">${Array.from({ length: count }, () => '<div class="skeleton-card"></div>').join('')}</div>`;
@@ -1687,9 +1696,10 @@ async function loadView(view) {
     });
 
     // 2. Select UI components
-    const agendaPanel = document.querySelector('.panel:not(#settingsView)');
+    const agendaPanel = document.getElementById('agendaView');
     const composer = document.querySelector('.composer');
     const settingsView = document.getElementById('settingsView');
+    const insightsView = document.getElementById('insightsView');
     const titleHeader = agendaPanel.querySelector('h2'); 
     const agendaList = document.getElementById('agendaList');
 
@@ -1698,12 +1708,24 @@ async function loadView(view) {
         agendaPanel.style.display = 'none';
         composer.style.display = 'none';
         settingsView.style.display = 'block';
-        return; 
-    } else {
-        agendaPanel.style.display = 'block';
-        composer.style.display = 'block';
-        settingsView.style.display = 'none';
+        insightsView.style.display = 'none';
+    return;
     }
+
+    if (view === 'insights') {
+        agendaPanel.style.display = 'none';
+        composer.style.display = 'none';
+        settingsView.style.display = 'none';
+        insightsView.style.display = 'block';
+
+        await loadClerkInsights();
+        return;
+    }
+
+    agendaPanel.style.display = 'block';
+    composer.style.display = 'block';
+    settingsView.style.display = 'none';
+    insightsView.style.display = 'none';
     
     // 4. Loading State
     agendaList.innerHTML = renderSkeleton();

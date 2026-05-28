@@ -22,6 +22,15 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from openai import OpenAI
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY")
+)
 
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly',
@@ -127,7 +136,25 @@ async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
 
 @app.get("/insights")
 async def get_ai_insights(user_id: int, db: Session = Depends(get_db)):
-    tasks = db.query(Task).filter(Task.owner_id == user_id).all()
+    tasks = (
+        db.query(Task)
+        .filter(Task.owner_id == user_id)
+        .filter(Task.status != "completed")
+        .filter(Task.status != "deleted")
+        .all()
+    )
+
+    if not tasks:
+        return {
+            "insights": [
+                {
+                    "type": "success",
+                    "label": "Status",
+                    "title": "No active tasks yet",
+                    "body": "Once you add tasks, Clerk Insights will analyze your workload and schedule."
+                }
+            ]
+        }
 
     task_data = [
         {
@@ -143,24 +170,32 @@ async def get_ai_insights(user_id: int, db: Session = Depends(get_db)):
     prompt = f"""
 You are Clerk Insights, an AI productivity assistant.
 
-Analyze this user's tasks and generate 3-5 useful insights.
+Analyze this user's task list and generate 3 to 5 useful insight cards.
+
 Focus on:
 - workload analysis
-- possible schedule conflicts
-- urgent or high-priority tasks
+- schedule conflicts
+- high-priority tasks
 - low-confidence tasks
 - missing deadlines
 - recommended next actions
 
-Return ONLY valid JSON in this exact format:
+Return ONLY valid JSON.
+Do not include markdown.
+Do not include explanation outside the JSON.
+
+JSON format:
 [
   {{
-    "type": "success | info | warning | danger",
-    "label": "Short category",
+    "type": "success",
+    "label": "Workload",
     "title": "Short title",
     "body": "One helpful sentence"
   }}
 ]
+
+Allowed type values:
+success, info, warning, danger
 
 Tasks:
 {json.dumps(task_data, indent=2)}
@@ -168,19 +203,33 @@ Tasks:
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5.4",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3
+            temperature=0.2
         )
 
         raw_text = response.choices[0].message.content.strip()
+
+        # remove accidental markdown fences if model adds them
+        raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+
         insights = json.loads(raw_text)
 
         return {"insights": insights}
 
     except Exception as e:
-        print(f"AI Insights Error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate AI insights")
+        print("AI Insights Error:", repr(e))
+
+        return {
+            "insights": [
+                {
+                    "type": "warning",
+                    "label": "Insights",
+                    "title": "AI insights could not be generated",
+                    "body": "Clerk could not generate AI insights right now, but your task data is still available."
+                }
+            ]
+        }
 
 @app.post("/register")
 async def register_user(data: LoginRequest, db: Session = Depends(get_db)):

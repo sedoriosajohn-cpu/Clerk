@@ -2134,6 +2134,115 @@ button {
     background: var(--panel-bg);
 }
 
+.two-factor-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 10003;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 22px;
+    background: rgba(15, 23, 42, .66);
+    backdrop-filter: blur(10px);
+}
+
+.two-factor-modal.open {
+    display: flex;
+}
+
+.two-factor-card {
+    width: min(420px, 100%);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 24px;
+    background: var(--panel-bg);
+    box-shadow: var(--shadow);
+}
+
+.two-factor-card h2 {
+    margin: 0;
+    color: var(--text);
+    font-size: 22px;
+}
+
+.two-factor-card p {
+    margin: 8px 0 18px;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.two-factor-card input {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 13px 14px;
+    background: var(--panel-muted);
+    color: var(--text);
+    font-size: 18px;
+    letter-spacing: .08em;
+    outline: none;
+}
+
+.two-factor-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.two-factor-actions button {
+    flex: 1;
+}
+
+.password-strength {
+    display: none;
+    margin: -8px 0 16px;
+    text-align: left;
+}
+
+.password-strength.visible {
+    display: block;
+}
+
+.strength-track {
+    height: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, .12);
+}
+
+.strength-fill {
+    width: 0%;
+    height: 100%;
+    border-radius: inherit;
+    background: #ef4444;
+    transition: width .2s ease, background .2s ease;
+}
+
+.strength-label {
+    margin-top: 8px;
+    color: #cbd5e1;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.password-rules {
+    display: grid;
+    gap: 5px;
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.password-rules li {
+    color: #94a3b8;
+    font-size: 12px;
+}
+
+.password-rules li.pass {
+    color: #5eead4;
+}
+
 .settings-grid {
     display: grid;
     gap: 12px;
@@ -2587,9 +2696,21 @@ button {
             <h2 id="auth-title" style="color:white; margin-bottom:10px; font-size: 28px;">Clerk Login</h2>
             <p id="auth-subtitle" style="color:var(--muted); margin-bottom:25px;">Enter your credentials</p>
 
-            <input type="text" id="username-input" placeholder="Username" style="padding:15px; border-radius:12px; border:none; margin-bottom:15px; width:100%; font-size:16px;">
-            <input type="password" id="password-input" placeholder="Password" style="padding:15px; border-radius:12px; border:none; margin-bottom:20px; width:100%; font-size:16px;">
-            <input type="text" id="two-factor-input" placeholder="Email verification code" inputmode="numeric" autocomplete="one-time-code" style="padding:15px; border-radius:12px; border:none; margin-bottom:20px; width:100%; font-size:16px; display:none;">
+            <input type="text" id="username-input" placeholder="Username" oninput="updatePasswordStrength()" style="padding:15px; border-radius:12px; border:none; margin-bottom:15px; width:100%; font-size:16px;">
+            <input type="password" id="password-input" placeholder="Password" oninput="updatePasswordStrength()" style="padding:15px; border-radius:12px; border:none; margin-bottom:20px; width:100%; font-size:16px;">
+            <div class="password-strength" id="password-strength-panel">
+                <div class="strength-track"><div class="strength-fill" id="password-strength-fill"></div></div>
+                <div class="strength-label" id="password-strength-label">Password strength</div>
+                <ul class="password-rules" id="password-rules">
+                    <li data-rule="length">At least 12 characters</li>
+                    <li data-rule="uppercase">One uppercase letter</li>
+                    <li data-rule="lowercase">One lowercase letter</li>
+                    <li data-rule="number">One number</li>
+                    <li data-rule="special">One symbol</li>
+                    <li data-rule="no_username">Does not include your username</li>
+                    <li data-rule="no_spaces">No spaces</li>
+                </ul>
+            </div>
 
             <button id="login-btn" onclick="login()" class="primary" style="width:100%;">Sign In</button>
             <button id="register-btn" onclick="register()" class="ghost" style="width:100%; margin-top:10px; display:none;">Create Account</button>
@@ -2599,6 +2720,18 @@ button {
                 <a href="#" onclick="toggleAuthMode()" style="color:var(--teal); text-decoration:none; font-weight:bold;">Click here</a>
             </p>
             <p id="login-error" style="color:var(--pink); font-size:14px; margin-top:15px; display:none;"></p>
+        </div>
+    </div>
+    <div class="two-factor-modal" id="twoFactorLoginModal" onclick="handleTwoFactorBackdrop(event)">
+        <div class="two-factor-card" role="dialog" aria-modal="true" aria-labelledby="twoFactorLoginTitle">
+            <h2 id="twoFactorLoginTitle">Email verification</h2>
+            <p id="twoFactorLoginMessage">Enter the verification code sent to your email.</p>
+            <input type="text" id="two-factor-login-code" placeholder="000000" inputmode="numeric" autocomplete="one-time-code">
+            <p id="two-factor-login-error" style="display:none; color:#fb7185; margin-bottom:0;"></p>
+            <div class="two-factor-actions">
+                <button class="ghost" type="button" onclick="closeTwoFactorLoginModal()">Cancel</button>
+                <button class="primary" type="button" onclick="submitTwoFactorLoginCode()">Verify</button>
+            </div>
         </div>
     </div>
     <div id="toast-container"></div>
@@ -2732,7 +2865,7 @@ if (oauthParams.has('google_error')) {
     alert(getFriendlyGoogleError(oauthParams.get('google_error')));
     window.history.replaceState({}, document.title, window.location.pathname);
 } else if (oauthParams.has('google_connected')) {
-    handleGoogleConnected(oauthParams.get('user_id'));
+    handleGoogleConnectedRedirect(oauthParams.get('user_id'));
     window.history.replaceState({}, document.title, window.location.pathname);
 }
 
@@ -2743,6 +2876,7 @@ let latestTasks = [];
 let selectedTaskIds = new Set();
 let lastRenderedTaskIds = [];
 let pendingTwoFactorLogin = false;
+let googleConnectPopup = null;
 
 //for the calendar, it keeps track where the user is currently looking at
 let currentCalMonth = new Date().getMonth();
@@ -2758,7 +2892,6 @@ function goHome() {
 window.login = async function() {
     const usernameInput = document.getElementById('username-input').value;
     const passwordInput = document.getElementById('password-input').value;
-    const twoFactorInput = document.getElementById('two-factor-input');
     const errorMsg = document.getElementById('login-error');
 
     try {
@@ -2768,7 +2901,7 @@ window.login = async function() {
             body: JSON.stringify({
                 username: usernameInput,
                 password: passwordInput,
-                two_factor_code: pendingTwoFactorLogin ? twoFactorInput.value.trim() : undefined
+                two_factor_code: undefined
             }),
             throttleKey: 'login',
             minInterval: 1000
@@ -2778,11 +2911,7 @@ window.login = async function() {
         if (response.ok) {
             const data = await response.json();
             if (data.requires_2fa) {
-                pendingTwoFactorLogin = true;
-                twoFactorInput.style.display = 'block';
-                twoFactorInput.focus();
-                document.getElementById('auth-subtitle').textContent = data.message || "Enter the verification code sent to your email.";
-                document.getElementById('login-btn').textContent = "Verify Code";
+                openTwoFactorLoginModal(data.message || "Enter the verification code sent to your email.");
                 errorMsg.style.display = 'none';
                 return;
             }
@@ -2790,8 +2919,6 @@ window.login = async function() {
             // Store the ID and Name
             window.CURRENT_USER_ID = data.user_id;
             pendingTwoFactorLogin = false;
-            twoFactorInput.value = "";
-            twoFactorInput.style.display = 'none';
             document.getElementById('login-btn').textContent = "Sign In";
             
             await fetchUserSettings();
@@ -2813,6 +2940,128 @@ window.login = async function() {
         errorMsg.style.display = 'block';
     }
 };
+
+function openTwoFactorLoginModal(message) {
+    pendingTwoFactorLogin = true;
+    const modal = document.getElementById('twoFactorLoginModal');
+    const input = document.getElementById('two-factor-login-code');
+    const error = document.getElementById('two-factor-login-error');
+    document.getElementById('twoFactorLoginMessage').textContent = message;
+    input.value = "";
+    error.style.display = 'none';
+    error.textContent = "";
+    modal.classList.add('open');
+    setTimeout(() => input.focus(), 50);
+}
+
+function closeTwoFactorLoginModal() {
+    pendingTwoFactorLogin = false;
+    document.getElementById('twoFactorLoginModal').classList.remove('open');
+    document.getElementById('two-factor-login-code').value = "";
+}
+
+function handleTwoFactorBackdrop(event) {
+    if (event.target && event.target.id === 'twoFactorLoginModal') {
+        closeTwoFactorLoginModal();
+    }
+}
+
+function getPasswordRuleResults(password, username = '') {
+    const loweredUsername = String(username || '').toLowerCase().trim();
+    const loweredPassword = String(password || '').toLowerCase();
+    return {
+        length: password.length >= 12,
+        uppercase: /[A-Z]/.test(password),
+        lowercase: /[a-z]/.test(password),
+        number: /\d/.test(password),
+        special: /[^A-Za-z0-9]/.test(password),
+        no_username: !loweredUsername || !loweredPassword.includes(loweredUsername),
+        no_spaces: !/\s/.test(password)
+    };
+}
+
+function getPasswordStrength(password, username = '') {
+    const rules = getPasswordRuleResults(password, username);
+    const passed = Object.values(rules).filter(Boolean).length;
+    let label = 'Weak';
+    let color = '#ef4444';
+    if (passed >= 7) {
+        label = 'Strong';
+        color = '#14b8a6';
+    } else if (passed >= 5) {
+        label = 'Good';
+        color = '#f59e0b';
+    } else if (passed >= 3) {
+        label = 'Fair';
+        color = '#f97316';
+    }
+    return { rules, passed, total: Object.keys(rules).length, label, color };
+}
+
+function updatePasswordStrength() {
+    const panel = document.getElementById('password-strength-panel');
+    if (!panel || isLoginMode) return;
+    const password = document.getElementById('password-input').value;
+    const username = document.getElementById('username-input').value;
+    const strength = getPasswordStrength(password, username);
+    const percent = Math.round((strength.passed / strength.total) * 100);
+    panel.classList.add('visible');
+    document.getElementById('password-strength-fill').style.width = `${percent}%`;
+    document.getElementById('password-strength-fill').style.background = strength.color;
+    document.getElementById('password-strength-label').textContent = `${strength.label} password (${strength.passed}/${strength.total})`;
+    document.querySelectorAll('#password-rules [data-rule]').forEach(item => {
+        item.classList.toggle('pass', Boolean(strength.rules[item.dataset.rule]));
+    });
+}
+
+function isStrongPassword(password, username = '') {
+    return Object.values(getPasswordRuleResults(password, username)).every(Boolean);
+}
+
+async function submitTwoFactorLoginCode() {
+    const usernameInput = document.getElementById('username-input').value;
+    const passwordInput = document.getElementById('password-input').value;
+    const codeInput = document.getElementById('two-factor-login-code');
+    const error = document.getElementById('two-factor-login-error');
+    const code = codeInput.value.trim();
+    if (!code) {
+        error.textContent = "Enter the code from your email.";
+        error.style.display = 'block';
+        return;
+    }
+
+    try {
+        const response = await apiFetch(`${API_BASE}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: usernameInput,
+                password: passwordInput,
+                two_factor_code: code
+            }),
+            throttleKey: 'login-2fa',
+            minInterval: 1000
+        });
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.detail || "Invalid or expired verification code.");
+        }
+
+        const data = await response.json();
+        window.CURRENT_USER_ID = data.user_id;
+        closeTwoFactorLoginModal();
+        await fetchUserSettings();
+        document.getElementById('login-overlay').style.display = 'none';
+        loadView('agenda');
+        if (window.USER_SETTINGS.google_connected) {
+            syncAllGoogleSources({ silent: true });
+        }
+    } catch (err) {
+        error.textContent = err.message || getFriendlyApiError(err);
+        error.style.display = 'block';
+    }
+}
 
 async function fetchUserSettings() {
     try {
@@ -2991,10 +3240,9 @@ function toggleAuthMode() {
     const loginBtn = document.getElementById('login-btn');
     const registerBtn = document.getElementById('register-btn');
     const toggleText = document.getElementById('toggle-text');
-    const twoFactorInput = document.getElementById('two-factor-input');
+    const strengthPanel = document.getElementById('password-strength-panel');
     pendingTwoFactorLogin = false;
-    twoFactorInput.value = "";
-    twoFactorInput.style.display = "none";
+    closeTwoFactorLoginModal();
     loginBtn.textContent = "Sign In";
 
     if (isLoginMode) {
@@ -3002,12 +3250,14 @@ function toggleAuthMode() {
         document.getElementById('auth-subtitle').textContent = "Enter your credentials";
         loginBtn.style.display = "block";
         registerBtn.style.display = "none";
+        strengthPanel.classList.remove('visible');
         toggleText.textContent = "Don't have an account?";
     } else {
         title.textContent = "Create Account";
         document.getElementById('auth-subtitle').textContent = "Choose a username and password";
         loginBtn.style.display = "none";
         registerBtn.style.display = "block";
+        updatePasswordStrength();
         toggleText.textContent = "Already have an account?";
     }
 }
@@ -3018,6 +3268,12 @@ async function register() {
     const errorMsg = document.getElementById('login-error');
 
     if (!userVal || !passVal) return alert("Please fill in all fields");
+    if (!isStrongPassword(passVal, userVal)) {
+        updatePasswordStrength();
+        errorMsg.textContent = "Please choose a strong password that meets every rule.";
+        errorMsg.style.display = 'block';
+        return;
+    }
 
     try {
         const response = await apiFetch(`${API_BASE}/register`, {
@@ -4728,6 +4984,15 @@ window.changeCalendarView = function(view) {
 };
 
 window.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && document.getElementById('twoFactorLoginModal')?.classList.contains('open')) {
+        e.preventDefault();
+        submitTwoFactorLoginCode();
+        return;
+    }
+    if (e.key === 'Escape' && document.getElementById('twoFactorLoginModal')?.classList.contains('open')) {
+        closeTwoFactorLoginModal();
+        return;
+    }
     if (e.key === 'Escape' && document.getElementById('sectionModal')?.classList.contains('open')) {
         closeSectionModal();
         return;
@@ -4863,8 +5128,10 @@ async function syncAllGoogleSources({ silent = false } = {}) {
     }
 }
 
-async function handleGoogleConnected(userIdFromRedirect) {
-    alert("Google account connected successfully. Clerk will sync Gmail, Classroom, and Calendar automatically.");
+async function finishGoogleConnected(userIdFromRedirect, { showAlert = true } = {}) {
+    if (showAlert) {
+        alert("Google account connected successfully. Clerk will sync Gmail, Classroom, and Calendar automatically.");
+    }
     if (userIdFromRedirect) {
         window.CURRENT_USER_ID = userIdFromRedirect;
         document.getElementById('login-overlay').style.display = 'none';
@@ -4876,6 +5143,29 @@ async function handleGoogleConnected(userIdFromRedirect) {
         await syncAllGoogleSources({ silent: true });
     }
 }
+
+function handleGoogleConnectedRedirect(userIdFromRedirect) {
+    if (window.opener && !window.opener.closed) {
+        localStorage.setItem('clerk_google_connected', JSON.stringify({
+            user_id: userIdFromRedirect,
+            connected_at: Date.now()
+        }));
+        window.close();
+        return;
+    }
+
+    finishGoogleConnected(userIdFromRedirect);
+}
+
+window.addEventListener('storage', (event) => {
+    if (event.key !== 'clerk_google_connected' || !event.newValue) return;
+    try {
+        const data = JSON.parse(event.newValue);
+        finishGoogleConnected(data.user_id, { showAlert: true });
+    } catch (err) {
+        console.error("Failed to handle Google connection signal:", err);
+    }
+});
 
 // Connect Google Account Logic - This function initiates the Google OAuth flow.
 // This function is now primarily for the "Connect" button in settings,
@@ -4898,7 +5188,12 @@ async function connectGoogleAccount() {
         });
         const data = await response.json().catch(() => ({}));
         if (data.auth_url) {
-            window.location.href = data.auth_url;
+            googleConnectPopup = window.open(data.auth_url, 'clerkGoogleConnect', 'width=720,height=760');
+            if (!googleConnectPopup) {
+                window.location.href = data.auth_url;
+                return;
+            }
+            if (statusText) statusText.textContent = "Finish Google sign-in in the popup.";
             return;
         }
 

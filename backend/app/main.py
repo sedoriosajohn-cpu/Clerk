@@ -151,6 +151,38 @@ def ensure_user_exists(user_id: int, db: Session):
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
+def get_password_rule_results(password: str, username: Optional[str] = None) -> dict:
+    username_text = str(username or "").lower().strip()
+    password_text = password or ""
+    lowered_password = password_text.lower()
+    return {
+        "length": len(password_text) >= 12,
+        "uppercase": bool(re.search(r"[A-Z]", password_text)),
+        "lowercase": bool(re.search(r"[a-z]", password_text)),
+        "number": bool(re.search(r"\d", password_text)),
+        "special": bool(re.search(r"[^A-Za-z0-9]", password_text)),
+        "no_username": not username_text or username_text not in lowered_password,
+        "no_spaces": not bool(re.search(r"\s", password_text)),
+    }
+
+def validate_strong_password(password: str, username: Optional[str] = None):
+    rules = get_password_rule_results(password, username)
+    missing_labels = {
+        "length": "at least 12 characters",
+        "uppercase": "one uppercase letter",
+        "lowercase": "one lowercase letter",
+        "number": "one number",
+        "special": "one symbol",
+        "no_username": "cannot include your username",
+        "no_spaces": "no spaces",
+    }
+    missing = [missing_labels[key] for key, passed in rules.items() if not passed]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password must include {', '.join(missing)}."
+        )
+
 # --- SCHEMAS ---
 class LoginRequest(BaseModel):
     username: str
@@ -227,6 +259,7 @@ async def register_user(data: LoginRequest, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(User.username == data.username).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already taken")
+    validate_strong_password(data.password, data.username)
     new_user = User(username=data.username, password_hash=data.password)
     db.add(new_user)
     db.commit()
@@ -713,6 +746,70 @@ def mark_source_scanned(db: Session, user_id: int, source_info: str, content: st
     ))
     db.commit()
 
+def google_calendar_event_to_entry(event: dict):
+    start = event.get('start', {}).get('dateTime') or event.get('start', {}).get('date')
+    end = event.get('end', {}).get('dateTime') or event.get('end', {}).get('date')
+    if not start:
+        return None
+
+    is_all_day = len(str(start)) == 10
+    due_date = f"{start}T12:00:00Z" if is_all_day else start
+    end_date = f"{end}T13:00:00Z" if end and len(str(end)) == 10 else end
+    title = event.get("summary", "Google Calendar Event")
+    description = event.get("description", "")
+    content = f"Calendar Event: {title} starting {start}. Description: {description}"
+    task = make_structured_task(
+        title=title,
+        description=description,
+        due_date=due_date,
+        end_date=end_date,
+        assigner="Google Calendar",
+        item_type="reminder",
+        is_all_day=is_all_day
+    )
+    return task, content, f"calendar: {event['id']}"
+
+def collect_google_calendar_entries(calendar, db: Session, user_id: int, max_results: int = 2500):
+    summary = {"calendar": 0, "calendar_already_scanned": 0, "calendar_skipped": 0}
+    sync_entries = []
+    now = datetime.utcnow().isoformat() + 'Z'
+    page_token = None
+
+    while True:
+        request = calendar.events().list(
+            calendarId='primary',
+            timeMin=now,
+            maxResults=min(max_results, 2500),
+            singleEvents=True,
+            orderBy='startTime',
+            pageToken=page_token
+        )
+        cal_result = request.execute()
+        for event in cal_result.get('items', []):
+            if event.get("status") == "cancelled" or not event.get("summary"):
+                summary["calendar_skipped"] += 1
+                continue
+
+            source_info = f"calendar: {event['id']}"
+            if source_already_scanned(db, user_id, source_info):
+                summary["calendar_already_scanned"] += 1
+                continue
+
+            entry = google_calendar_event_to_entry(event)
+            if not entry:
+                summary["calendar_skipped"] += 1
+                mark_source_scanned(db, user_id, source_info, f"Skipped Calendar event: {event.get('summary', '')}")
+                continue
+
+            sync_entries.append(entry)
+            summary["calendar"] += 1
+
+        page_token = cal_result.get("nextPageToken")
+        if not page_token:
+            break
+
+    return sync_entries, summary
+
 CLASSROOM_TASK_WORD_RE = re.compile(
     r'\b(submit|turn\s+in|complete|finish|answer|write|draft|create|make|'
     r'prepare|read|study|review|upload|attach|respond|do|assignment|homework|'
@@ -939,32 +1036,11 @@ async def sync_all(user_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         print(f"Classroom sync error: {e}")
 
-    # 3. Fetch Calendar Events
+    # 3. Fetch all future Google Calendar events, idempotently by event id.
     try:
-        now = datetime.utcnow().isoformat() + 'Z'
-        cal_result = calendar.events().list(calendarId='primary', timeMin=now, maxResults=10).execute()
-        for event in cal_result.get('items', []):
-            # Only ingest actual events, not just "free" slots
-            if event.get('summary'):
-                start = event.get('start', {}).get('dateTime') or event.get('start', {}).get('date')
-                end = event.get('end', {}).get('dateTime') or event.get('end', {}).get('date')
-                content = f"Calendar Event: {event['summary']} starting {start}. Description: {event.get('description', '')}"
-                try:
-                    is_all_day = len(str(start or "")) == 10
-                    due_date = f"{start}T12:00:00Z" if is_all_day else start
-                    end_date = f"{end}T13:00:00Z" if end and len(str(end)) == 10 else end
-                    task = make_structured_task(
-                        title=event.get("summary", "Calendar Event"),
-                        description=event.get("description", ""),
-                        due_date=due_date,
-                        end_date=end_date,
-                        assigner="Google Calendar",
-                        item_type="reminder",
-                        is_all_day=is_all_day
-                    )
-                    sync_entries.append((task, content, f"calendar: {event['id']}"))
-                    summary["calendar"] += 1
-                except: continue
+        calendar_entries, calendar_summary = collect_google_calendar_entries(calendar, db, user_id)
+        sync_entries.extend(calendar_entries)
+        summary.update(calendar_summary)
     except Exception as e:
         print(f"Calendar sync error: {e}")
 
@@ -976,7 +1052,7 @@ async def sync_all(user_id: int, db: Session = Depends(get_db)):
 async def auto_sync_user(user_id: int, db: Session):
     creds = get_google_creds(user_id)
     if not creds:
-        return {"gmail": 0, "classroom": 0}
+        return {"gmail": 0, "classroom": 0, "calendar": 0}
 
     gmail_count = 0
     try:
@@ -1013,7 +1089,17 @@ async def auto_sync_user(user_id: int, db: Session):
     except Exception as exc:
         print(f"Auto Classroom sync error for user {user_id}: {exc}")
 
-    return {"gmail": gmail_count, "classroom": classroom_count}
+    calendar_count = 0
+    try:
+        calendar = build('calendar', 'v3', credentials=creds)
+        entries, summary = collect_google_calendar_entries(calendar, db, user_id)
+        if entries:
+            await save_structured_task_entries(entries, user_id, db)
+        calendar_count = summary.get("calendar", 0)
+    except Exception as exc:
+        print(f"Auto Calendar sync error for user {user_id}: {exc}")
+
+    return {"gmail": gmail_count, "classroom": classroom_count, "calendar": calendar_count}
 
 def get_auto_sync_user_ids(db: Session) -> List[int]:
     if not os.path.isdir(GOOGLE_TOKEN_DIR):
@@ -1081,6 +1167,9 @@ async def save_structured_task_entries(entries, user_id, db):
         task_ids = []
         duplicate_index = build_duplicate_index(db, user_id)
         for task_data, text_content, source_info in entries:
+            if source_already_scanned(db, user_id, source_info):
+                continue
+
             new_raw = RawInput(
                 content=text_content[:500], # Save snippet to avoid DB bloat
                 source_type=source_info,

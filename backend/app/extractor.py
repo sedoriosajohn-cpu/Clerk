@@ -397,7 +397,7 @@ def extract_task_from_text(text: str, current_time: Optional[str] = None) -> lis
         for chunk in split_text_for_ai(text):
             prompt = build_prompt(chunk, now_iso)
             response = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+                model=os.getenv("OPENAI_MODEL", "gpt-5.4"),
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0,
                 max_tokens=int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "2500"))

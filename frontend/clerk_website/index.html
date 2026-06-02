@@ -5483,7 +5483,7 @@ async function syncClassroom() {
     }
 }
 
-async function syncAllGoogleSources({ silent = false } = {}) {
+async function syncAllGoogleSources({ silent = false, viewAfterSync = currentView } = {}) {
     const userId = window.CURRENT_USER_ID;
     if (!userId) return;
 
@@ -5502,17 +5502,16 @@ async function syncAllGoogleSources({ silent = false } = {}) {
 
         if (!response.ok) throw new Error(data.detail || data.message || "Google sync failed.");
         if (!silent) alert("Google sync complete.");
-        loadView(currentView);
+        if (viewAfterSync) loadView(viewAfterSync);
+        return data;
     } catch (err) {
         console.error("Google auto-sync failed:", err);
         if (!silent) alert(getFriendlyApiError(err));
+        return null;
     }
 }
 
 async function finishGoogleConnected(userIdFromRedirect, { showAlert = true } = {}) {
-    if (showAlert) {
-        alert("Google account connected successfully. Clerk will sync Gmail, Classroom, and Calendar automatically.");
-    }
     if (userIdFromRedirect) {
         window.CURRENT_USER_ID = userIdFromRedirect;
         document.getElementById('login-overlay').style.display = 'none';
@@ -5521,7 +5520,16 @@ async function finishGoogleConnected(userIdFromRedirect, { showAlert = true } = 
         await fetchUserSettings();
         window.USER_SETTINGS.google_connected = true;
         updateGoogleSyncStatus();
-        await syncAllGoogleSources({ silent: true });
+        const googleStatus = document.getElementById('google-status');
+        if (googleStatus) googleStatus.textContent = "Importing Google Calendar events into Clerk...";
+        const syncData = await syncAllGoogleSources({ silent: true, viewAfterSync: 'calendar' });
+        updateGoogleSyncStatus();
+        if (showAlert) {
+            alert(syncData
+                ? "Google account connected. Calendar events have been imported into Clerk Calendar."
+                : "Google account connected, but Clerk could not finish importing Calendar events. Try reconnecting or syncing again later."
+            );
+        }
     }
 }
 

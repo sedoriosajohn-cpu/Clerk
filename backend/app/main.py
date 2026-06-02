@@ -830,7 +830,14 @@ def google_calendar_event_to_entry(event: dict):
 
     is_all_day = len(str(start)) == 10
     due_date = f"{start}T12:00:00Z" if is_all_day else start
-    end_date = f"{end}T13:00:00Z" if end and len(str(end)) == 10 else end
+    end_date = end
+    if is_all_day and end and len(str(end)) == 10:
+        try:
+            exclusive_end = datetime.fromisoformat(end)
+            inclusive_end = exclusive_end - timedelta(days=1)
+            end_date = f"{inclusive_end.strftime('%Y-%m-%d')}T13:00:00Z"
+        except ValueError:
+            end_date = due_date
     title = event.get("summary", "Google Calendar Event")
     description = event.get("description", "")
     content = f"Calendar Event: {title} starting {start}. Description: {description}"
@@ -848,13 +855,14 @@ def google_calendar_event_to_entry(event: dict):
 def collect_google_calendar_entries(calendar, db: Session, user_id: int, max_results: int = 2500):
     summary = {"calendar": 0, "calendar_already_scanned": 0, "calendar_skipped": 0}
     sync_entries = []
-    now = datetime.utcnow().isoformat() + 'Z'
+    past_days = int(os.environ.get("GOOGLE_CALENDAR_SYNC_PAST_DAYS", "30"))
+    time_min = (datetime.utcnow() - timedelta(days=past_days)).isoformat() + 'Z'
     page_token = None
 
     while True:
         request = calendar.events().list(
             calendarId='primary',
-            timeMin=now,
+            timeMin=time_min,
             maxResults=min(max_results, 2500),
             singleEvents=True,
             orderBy='startTime',

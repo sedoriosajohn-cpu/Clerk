@@ -221,6 +221,8 @@ class BulkTaskAction(BaseModel):
 class UserSettingsUpdate(BaseModel):
     preferred_name: Optional[str] = None
     email: Optional[str] = None
+    preferred_work_start_hour: Optional[int] = None
+    preferred_work_end_hour: Optional[int] = None
     dark_mode: Optional[bool] = None
     notifications_enabled: Optional[bool] = None
     two_factor_enabled: Optional[bool] = None
@@ -1324,6 +1326,8 @@ async def get_user_settings(user_id: int, db: Session = Depends(get_db)):
     return {
         "preferred_name": user.preferred_name or user.username,
         "email": user.email or "",
+        "preferred_work_start_hour": user.preferred_work_start_hour if user.preferred_work_start_hour is not None else 9,
+        "preferred_work_end_hour": user.preferred_work_end_hour if user.preferred_work_end_hour is not None else 17,
         "dark_mode": bool(user.dark_mode),
         "notifications_enabled": bool(user.notifications_enabled),
         "two_factor_enabled": bool(user.two_factor_enabled),
@@ -1343,6 +1347,20 @@ async def update_user_settings(user_id: int, settings: UserSettingsUpdate, db: S
         if email and not is_valid_email(email):
             raise HTTPException(status_code=400, detail="Enter a valid email address.")
         user.email = email or None
+    if settings.preferred_work_start_hour is not None:
+        if settings.preferred_work_start_hour < 0 or settings.preferred_work_start_hour > 23:
+            raise HTTPException(status_code=400, detail="Work start hour must be between 0 and 23.")
+        user.preferred_work_start_hour = settings.preferred_work_start_hour
+    if settings.preferred_work_end_hour is not None:
+        if settings.preferred_work_end_hour < 1 or settings.preferred_work_end_hour > 24:
+            raise HTTPException(status_code=400, detail="Work end hour must be between 1 and 24.")
+        user.preferred_work_end_hour = settings.preferred_work_end_hour
+    if (
+        user.preferred_work_start_hour is not None
+        and user.preferred_work_end_hour is not None
+        and user.preferred_work_start_hour >= user.preferred_work_end_hour
+    ):
+        raise HTTPException(status_code=400, detail="Work start must be before work end.")
     if settings.dark_mode is not None:
         user.dark_mode = 1 if settings.dark_mode else 0
     if settings.notifications_enabled is not None:

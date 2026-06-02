@@ -2494,11 +2494,11 @@ button {
         </div>
 
         <nav class="nav" aria-label="Primary">
-            <a href="#" data-view="agenda" class="active" onclick="loadView('agenda'); return false;"><span class="nav-icon"></span>Dashboard</a>
-            <a href="#" data-view="my tasks" onclick="loadView('my tasks'); return false;"><span class="nav-icon"></span>Tasks</a>
+            <a href="#" data-view="agenda" class="active" onclick="loadView('agenda'); return false;"><span class="nav-icon"></span>Today</a>
+            <a href="#" data-view="my tasks" onclick="loadView('my tasks'); return false;"><span class="nav-icon"></span>Task Queue</a>
             <a href="#" data-view="reminders" onclick="loadView('reminders'); return false;"><span class="nav-icon"></span>Reminders</a>
             <a href="#" data-view="calendar" onclick="loadView('calendar'); return false;"><span class="nav-icon"></span>Calendar</a>
-            <a href="#" data-view="insights" onclick="loadView('insights'); return false;"><span class="nav-icon"></span>Insights</a>
+            <a href="#" data-view="insights" onclick="loadView('insights'); return false;"><span class="nav-icon"></span>Review</a>
             <a href="#" data-view="history" onclick="loadView('history'); return false;"><span class="nav-icon"></span>History</a>
         </nav>
 
@@ -2541,29 +2541,29 @@ button {
                 </header>
 
                 <section class="panel" id="agendaView">
-                    <h2>Dashboard</h2>
+                    <h2>Today</h2>
                     <div class="agenda-list" id="agendaList"></div>
                     <div id="newTasksList"></div>
                     <div id="statusMsg" style="display:none;">Task saved!</div>
                 </section>
 
                 <section class="composer" id="taskComposer">
-                    <h2>Add a Task</h2>
+                    <h2>Intake Pipeline</h2>
                     <div class="subline"></div>
                     <div class="input-group">
-                        <label for="taskInput">What would you like to add?</label>
-                        <textarea id="taskInput" placeholder="Enter a task or paste a syllabus..."></textarea>
+                        <label for="taskInput">Raw input</label>
+                        <textarea id="taskInput" placeholder="Paste messy notes, emails, deadlines, or phrases like 'finish the lab by next Tuesday at 4'..."></textarea>
                     </div>
                     <input type="file" id="fileInput" style="display: none;" accept=".pdf,.txt,.md">
                     
                     <div class="composer-actions">
                         <div class="left-buttons">
-                            <button class="ghost" id="voiceBtn" type="button">🎙️ Voice</button>
-                            <button class="ghost" id="syncGmailBtn" type="button" onclick="syncGmail()">📧 Sync Gmail</button>
-                            <button class="ghost" id="syncClassroomBtn" type="button" onclick="syncClassroom()">🏫 Sync Classroom</button>
-                            <button class="ghost" id="uploadBtn" type="button" onclick="document.getElementById('fileInput').click()">📎 Attach Doc</button>
+                            <button class="ghost" id="voiceBtn" type="button">Voice Note</button>
+                            <button class="ghost" id="syncGmailBtn" type="button" onclick="syncGmail()">Sync Gmail</button>
+                            <button class="ghost" id="syncClassroomBtn" type="button" onclick="syncClassroom()">Sync Classroom</button>
+                            <button class="ghost" id="uploadBtn" type="button" onclick="document.getElementById('fileInput').click()">Attach File</button>
                         </div>
-                        <button class="primary" id="processBtn" type="button">Process Input</button>
+                        <button class="primary" id="processBtn" type="button">Extract Tasks</button>
                     </div>
                     <div id="fileInfo" style="font-size: 12px; color: var(--teal-dark); margin-top: 8px; display: none;"></div>
                 </section>
@@ -2613,6 +2613,28 @@ button {
                                 <input type="checkbox" id="notificationToggle" onchange="saveUserSettings()">
                                 <span class="slider"></span>
                             </label>
+                        </div>
+                        <div class="settings-card">
+                            <div class="settings-row">
+                                <div class="settings-copy">
+                                    <div class="settings-icon">WH</div>
+                                    <div>
+                                        <h4>Adaptive Work Hours</h4>
+                                        <p>Clerk compares scheduled task patterns with your preferred work window when framing schedule suggestions.</p>
+                                    </div>
+                                </div>
+                                <span class="status-pill" id="work-hours-status">9:00 AM - 5:00 PM</span>
+                            </div>
+                            <div class="settings-grid">
+                                <div class="settings-field">
+                                    <label for="work-start-input">Start</label>
+                                    <input type="time" id="work-start-input" value="09:00" onchange="saveUserSettings()">
+                                </div>
+                                <div class="settings-field">
+                                    <label for="work-end-input">End</label>
+                                    <input type="time" id="work-end-input" value="17:00" onchange="saveUserSettings()">
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -2697,7 +2719,7 @@ button {
     <div id="login-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.98); z-index:9999; display:flex; justify-content:center; align-items:center;">
         <div style="background:#1e293b; padding:40px; border-radius:26px; text-align:center; border:1px solid var(--teal); box-shadow: var(--shadow); width: 350px;">
             <h2 id="auth-title" style="color:white; margin-bottom:10px; font-size: 28px;">Clerk Login</h2>
-            <p id="auth-subtitle" style="color:var(--muted); margin-bottom:25px;">Enter your credentials</p>
+            <p id="auth-subtitle" style="color:var(--muted); margin-bottom:25px;">Convert notes, emails, and voice into scheduled tasks.</p>
 
             <input type="text" id="username-input" placeholder="Username" oninput="updatePasswordStrength()" style="padding:15px; border-radius:12px; border:none; margin-bottom:15px; width:100%; font-size:16px;">
             <input type="password" id="password-input" placeholder="Password" oninput="updatePasswordStrength()" style="padding:15px; border-radius:12px; border:none; margin-bottom:20px; width:100%; font-size:16px;">
@@ -2803,6 +2825,21 @@ function getFriendlyGoogleError(message) {
     return text || "Google connection failed. Please try connecting again.";
 }
 
+function hourToTimeInput(hour) {
+    const normalized = Math.max(0, Math.min(23, Number(hour ?? 0)));
+    return `${String(normalized).padStart(2, '0')}:00`;
+}
+
+function timeInputToHour(value, fallback) {
+    const hour = Number(String(value || '').split(':')[0]);
+    return Number.isInteger(hour) ? hour : fallback;
+}
+
+function updateWorkHoursStatus() {
+    const status = document.getElementById('work-hours-status');
+    if (status) status.textContent = getWorkWindowLabel(window.USER_SETTINGS);
+}
+
 async function apiFetch(url, options = {}) {
     const method = (options.method || 'GET').toUpperCase();
     const throttleKey = options.throttleKey || `${method}:${url}`;
@@ -2889,6 +2926,8 @@ window.CURRENT_USER_ID = null;
 window.USER_SETTINGS = {
     preferred_name: "User",
     email: "",
+    preferred_work_start_hour: 9,
+    preferred_work_end_hour: 17,
     dark_mode: false,
     notifications_enabled: true,
     two_factor_enabled: false,
@@ -3137,6 +3176,9 @@ async function fetchUserSettings() {
             document.getElementById('darkThemeToggle').checked = window.USER_SETTINGS.dark_mode;
             document.getElementById('notificationToggle').checked = window.USER_SETTINGS.notifications_enabled;
             document.getElementById('security-email-input').value = window.USER_SETTINGS.email || "";
+            document.getElementById('work-start-input').value = hourToTimeInput(window.USER_SETTINGS.preferred_work_start_hour ?? 9);
+            document.getElementById('work-end-input').value = hourToTimeInput((window.USER_SETTINGS.preferred_work_end_hour ?? 17) % 24);
+            updateWorkHoursStatus();
             updateSecurityStatus();
             updateGoogleSyncStatus();
             
@@ -3154,6 +3196,8 @@ async function saveUserSettings() {
     const settings = {
         preferred_name: document.getElementById('preferred-name-input').value,
         email: securityEmail,
+        preferred_work_start_hour: timeInputToHour(document.getElementById('work-start-input').value, 9),
+        preferred_work_end_hour: timeInputToHour(document.getElementById('work-end-input').value, 17) || 24,
         dark_mode: document.getElementById('darkThemeToggle').checked,
         notifications_enabled: document.getElementById('notificationToggle').checked
     };
@@ -3169,6 +3213,7 @@ async function saveUserSettings() {
             throw new Error(data.detail || "Could not save settings.");
         }
         window.USER_SETTINGS = { ...window.USER_SETTINGS, ...settings };
+        updateWorkHoursStatus();
         updateSecurityStatus();
     } catch (err) {
         alert(err.message || getFriendlyApiError(err));
@@ -3331,11 +3376,11 @@ function setAuthFieldVisibility(mode) {
 
     if (mode === 'login') {
         document.getElementById('auth-title').textContent = "Clerk Login";
-        document.getElementById('auth-subtitle').textContent = "Enter your credentials";
+        document.getElementById('auth-subtitle').textContent = "Convert notes, emails, and voice into scheduled tasks.";
         toggleText.textContent = "Don't have an account?";
     } else if (mode === 'register') {
         document.getElementById('auth-title').textContent = "Create Account";
-        document.getElementById('auth-subtitle').textContent = "Choose a username and strong password";
+        document.getElementById('auth-subtitle').textContent = "Start a workspace for AI-assisted task extraction.";
         toggleText.textContent = "Already have an account?";
         updatePasswordStrength();
     } else if (mode === 'forgot') {
@@ -3940,6 +3985,48 @@ function isTaskDueToday(task) {
     return start <= todayEnd && end >= todayStart;
 }
 
+function formatHourLabel(hour) {
+    const normalized = Number(hour);
+    if (isNaN(normalized)) return "Not set";
+    const displayHour = normalized % 24;
+    const suffix = displayHour >= 12 ? "PM" : "AM";
+    const twelveHour = displayHour % 12 || 12;
+    return `${twelveHour}:00 ${suffix}`;
+}
+
+function getWorkWindowLabel(settings = window.USER_SETTINGS) {
+    const start = Number(settings.preferred_work_start_hour ?? 9);
+    const end = Number(settings.preferred_work_end_hour ?? 17);
+    return `${formatHourLabel(start)} - ${formatHourLabel(end)}`;
+}
+
+function getAdaptiveWorkSummary(tasks) {
+    const hourCounts = new Map();
+    getActiveTasks(tasks).forEach(task => {
+        if (task.is_all_day) return;
+        const start = parseWallTime(task.due_date);
+        if (!start) return;
+        const hour = start.getHours();
+        hourCounts.set(hour, (hourCounts.get(hour) || 0) + 1);
+    });
+
+    let peakHour = null;
+    let peakCount = 0;
+    hourCounts.forEach((count, hour) => {
+        if (count > peakCount) {
+            peakHour = hour;
+            peakCount = count;
+        }
+    });
+
+    return {
+        preferredWindow: getWorkWindowLabel(),
+        peakHourLabel: peakHour === null ? "No pattern yet" : formatHourLabel(peakHour),
+        sampleCount: Array.from(hourCounts.values()).reduce((sum, count) => sum + count, 0),
+        peakCount
+    };
+}
+
 function renderDashboardTaskRow(task, options = {}) {
     const isHistory = Boolean(options.isHistory);
     const showDescription = Boolean(options.showDescription);
@@ -3993,6 +4080,7 @@ function getDashboardData(tasks) {
         : 0;
     const conflictTaskCount = [...conflictMap.keys()].length;
     const lowConfidenceCount = activeTasks.filter(task => Number(task.confidence || 0) < 70).length;
+    const lowConfidenceTasks = sortByScheduleThenTitle(activeTasks.filter(task => Number(task.confidence || 0) < 70));
     const conflictPairs = getConflictPairs(activeTasks, 4);
 
     return {
@@ -4006,7 +4094,8 @@ function getDashboardData(tasks) {
         conflictPairs,
         averageConfidence,
         conflictTaskCount,
-        lowConfidenceCount
+        lowConfidenceCount,
+        lowConfidenceTasks
     };
 }
 
@@ -4025,8 +4114,10 @@ function renderDashboardPage(tasks, containerId = 'agendaList') {
         upcomingTasks,
         averageConfidence,
         conflictTaskCount,
-        lowConfidenceCount
+        lowConfidenceCount,
+        lowConfidenceTasks
     } = getDashboardData(tasks);
+    const adaptiveSummary = getAdaptiveWorkSummary(tasks);
 
     container.innerHTML = `
         <div class="dashboard-home">
@@ -4073,10 +4164,36 @@ function renderDashboardPage(tasks, containerId = 'agendaList') {
 
                 <section class="dashboard-section">
                     <div class="dashboard-section-header">
+                        <h3 class="dashboard-section-title">Adaptive Behavior</h3>
+                        <span class="dashboard-section-count">${adaptiveSummary.sampleCount} timed sample${adaptiveSummary.sampleCount === 1 ? '' : 's'}</span>
+                    </div>
+                    <div class="dashboard-focus-row">
+                        <div class="dashboard-stat">
+                            <div class="dashboard-stat-label">Work window</div>
+                            <div class="dashboard-stat-value" style="font-size: 16px;">${escapeHTML(adaptiveSummary.preferredWindow)}</div>
+                        </div>
+                        <div class="dashboard-stat">
+                            <div class="dashboard-stat-label">Observed peak</div>
+                            <div class="dashboard-stat-value" style="font-size: 16px;">${escapeHTML(adaptiveSummary.peakHourLabel)}</div>
+                        </div>
+                    </div>
+                    <div class="dashboard-empty">Clerk uses this preference and observed timing pattern to frame future schedule suggestions for review.</div>
+                </section>
+
+                <section class="dashboard-section">
+                    <div class="dashboard-section-header">
                         <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="openSectionModal('conflicts')">Schedule Conflicts</button></h3>
                         <span class="dashboard-section-count">${conflictTaskCount} involved</span>
                     </div>
                     ${renderConflictDetails(conflictPairs)}
+                </section>
+
+                <section class="dashboard-section">
+                    <div class="dashboard-section-header">
+                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="loadView('insights')">Confidence Review</button></h3>
+                        <span class="dashboard-section-count">${lowConfidenceCount} inferred</span>
+                    </div>
+                    ${renderDashboardList(lowConfidenceTasks, 'No ambiguous tasks need review.', { limit: 3 })}
                 </section>
 
                 ${remindersOnly.length ? `
@@ -4511,7 +4628,7 @@ async function loadView(view) {
             renderDashboardPage(allTasks, 'agendaList');
         }
         else if (view === 'my tasks') {
-            titleHeader.textContent = "All My Tasks";
+            titleHeader.textContent = "Task Queue";
             // Sort by priority before rendering
             const tasksOnly = allTasks.filter(t => t.item_type !== 'reminder');
             const priorityOrder = { 'high': 4, 'medium': 3, 'normal': 2, 'low': 1 };
@@ -4523,21 +4640,21 @@ async function loadView(view) {
             renderTaskList(tasksOnly, 'agendaList', false);
         }
         else if (view === 'reminders') {
-            titleHeader.textContent = "Time-Based Reminders";
+            titleHeader.textContent = "Reminders";
             const remindersOnly = allTasks.filter(t => t.item_type === 'reminder');
             renderTaskList(remindersOnly, 'agendaList', false);
         }
         else if (view === 'calendar') {
-            titleHeader.textContent = "Monthly Schedule";
+            titleHeader.textContent = "Schedule Recommendations";
             // Uses your global calendar variables
             renderBigCalendar(currentCalMonth, currentCalYear, allTasks.filter(t => t.status !== 'completed' && t.status !== 'deleted'));
         }
         else if (view === 'insights') {
-            titleHeader.textContent = "Clerk Insights";
+            titleHeader.textContent = "Review & Confidence";
             renderInsightsPage(allTasks, 'agendaList');
         }
         else if (view === 'history') {
-            titleHeader.textContent = "Recently Completed & Deleted Tasks";
+            titleHeader.textContent = "Completed & Dismissed Tasks";
             const historyResponse = await apiFetch(`${API_BASE}/tasks/history?user_id=${userId}`, {
                 throttleKey: `history:${userId}`,
                 minInterval: 350
@@ -5522,7 +5639,7 @@ async function uploadDocument(file) {
 document.getElementById('fileInput').addEventListener('change', function(e) {
     const fileInfo = document.getElementById('fileInfo');
     if (this.files && this.files[0]) {
-        fileInfo.innerText = "📄 Selected: " + this.files[0].name;
+        fileInfo.innerText = "Selected intake file: " + this.files[0].name;
         fileInfo.style.display = "block";
     }
 });
@@ -5728,7 +5845,7 @@ if (SpeechRecognition) {
   recognition = new SpeechRecognition();
   recognition.onstart = () => { listening = true; voiceBtn.textContent = 'Listening...'; };
   recognition.onresult = (event) => { taskInput.value = event.results[0][0].transcript; };
-  recognition.onend = () => { listening = false; voiceBtn.textContent = '🎤 Voice'; };
+  recognition.onend = () => { listening = false; voiceBtn.textContent = 'Voice Note'; };
   voiceBtn.addEventListener('click', () => listening ? recognition.stop() : recognition.start());
 }
 
@@ -5800,7 +5917,7 @@ processBtn.addEventListener('click', async () => {
 
     if (!userId) return alert("Please log in first.");
     
-    processBtn.innerText = "Processing...";
+    processBtn.innerText = "Extracting...";
     processBtn.disabled = true;
 
     // Capture local time for AI context
@@ -5865,7 +5982,7 @@ processBtn.addEventListener('click', async () => {
 });
 
 function resetBtn() {
-    processBtn.innerText = "Process Input";
+    processBtn.innerText = "Extract Tasks";
     processBtn.disabled = false;
 }
 

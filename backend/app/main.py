@@ -22,7 +22,7 @@ import smtplib
 import time
 import re
 from urllib.parse import quote
-from google.auth.transport.requests import Request
+from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -92,15 +92,20 @@ def is_valid_email(value: Optional[str]) -> bool:
 def hash_two_factor_code(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
+def hash_reset_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
 def send_email_message(to_email: str, subject: str, body: str):
     smtp_host = os.environ.get("SMTP_HOST")
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
     smtp_username = os.environ.get("SMTP_USERNAME")
     smtp_password = os.environ.get("SMTP_PASSWORD")
+    if smtp_password:
+        smtp_password = re.sub(r"\s+", "", smtp_password)
     smtp_from = os.environ.get("SMTP_FROM") or smtp_username
 
     if not smtp_host or not smtp_from:
-        print(f"[2FA email fallback] To: {to_email} | Subject: {subject} | {body}")
+        print(f"[email fallback] To: {to_email} | Subject: {subject} | {body}")
         return {"sent": False, "reason": "smtp_not_configured"}
 
     message = EmailMessage()
@@ -109,11 +114,15 @@ def send_email_message(to_email: str, subject: str, body: str):
     message["Subject"] = subject
     message.set_content(body)
 
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-        server.starttls()
-        if smtp_username and smtp_password:
-            server.login(smtp_username, smtp_password)
-        server.send_message(message)
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            server.starttls()
+            if smtp_username and smtp_password:
+                server.login(smtp_username, smtp_password)
+            server.send_message(message)
+    except Exception as exc:
+        print(f"[email send failed] To: {to_email} | Subject: {subject} | Reason: {exc}")
+        return {"sent": False, "reason": "smtp_error"}
 
     return {"sent": True}
 
@@ -223,6 +232,13 @@ class TwoFactorVerifyRequest(BaseModel):
     email: Optional[str] = None
     code: str
 
+class ForgotPasswordRequest(BaseModel):
+    email_or_username: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    password: str
+
 # --- FRONTEND ROUTE ---
 @app.get("/")
 async def read_index(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
@@ -265,6 +281,64 @@ async def register_user(data: LoginRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
     return {"message": "User created", "user_id": new_user.user_id}
+
+@app.post("/forgot-password")
+async def forgot_password(data: ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)):
+    lookup = data.email_or_username.strip()
+    if not lookup:
+        raise HTTPException(status_code=400, detail="Enter your username or security email.")
+
+    user = db.query(User).filter(
+        (User.username == lookup) | (User.email == lookup)
+    ).first()
+
+    # Avoid account enumeration: respond the same way even if no user/email exists.
+    generic_response = {"status": "success", "message": "If that account has a security email, a reset link was sent."}
+    if not user:
+        print(f"[password reset skipped] No account found for lookup: {lookup}")
+        return generic_response
+    if not is_valid_email(user.email):
+        print(f"[password reset skipped] User {user.user_id} does not have a valid security email.")
+        return generic_response
+
+    token = secrets.token_urlsafe(32)
+    user.reset_password_token_hash = hash_reset_token(token)
+    user.reset_password_expires_at = (datetime.utcnow() + timedelta(minutes=30)).isoformat()
+    db.commit()
+
+    frontend_url = get_frontend_url()
+    reset_url = f"{frontend_url}?reset_token={quote(token, safe='')}"
+    send_result = send_email_message(
+        user.email,
+        "Reset your Clerk password",
+        f"Use this link to reset your Clerk password. It expires in 30 minutes:\n\n{reset_url}"
+    )
+
+    if not send_result.get("sent"):
+        print(f"[password reset fallback] {reset_url}")
+    return generic_response
+
+@app.post("/reset-password")
+async def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_db)):
+    token_hash = hash_reset_token(data.token.strip())
+    user = db.query(User).filter(User.reset_password_token_hash == token_hash).first()
+    if not user or not user.reset_password_expires_at:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link.")
+    try:
+        expires_at = datetime.fromisoformat(user.reset_password_expires_at)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link.")
+    if datetime.utcnow() > expires_at:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link.")
+
+    validate_strong_password(data.password, user.username)
+    user.password_hash = data.password
+    user.reset_password_token_hash = None
+    user.reset_password_expires_at = None
+    user.two_factor_code_hash = None
+    user.two_factor_expires_at = None
+    db.commit()
+    return {"status": "success", "message": "Password reset. You can sign in with your new password."}
 
 # --- TASK INGESTION (TEXT) ---
 @app.post("/ingest")
@@ -462,7 +536,7 @@ def get_google_creds(user_id: int):
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             try:
-                creds.refresh(Request())
+                creds.refresh(GoogleAuthRequest())
                 with open(token_path, 'w') as token:
                     token.write(creds.to_json())
                 return creds # Credentials refreshed, return them
@@ -1125,6 +1199,7 @@ async def run_auto_sync_once():
         db.close()
 
 async def auto_sync_loop():
+    await asyncio.sleep(10)
     while True:
         try:
             await run_auto_sync_once()
@@ -1298,7 +1373,10 @@ async def send_two_factor_test(user_id: int, request: TwoFactorSendRequest, db: 
     db.commit()
     message = "Verification code sent."
     if not send_result.get("sent"):
-        message = "Verification code generated. Configure SMTP_HOST and SMTP_FROM to send email in production."
+        if send_result.get("reason") == "smtp_not_configured":
+            message = "Verification code generated. Configure SMTP_HOST and SMTP_FROM to send email in production."
+        else:
+            message = "Verification code generated, but email could not be sent. Check the SMTP settings and app password."
     return {"status": "success", "message": message}
 
 @app.post("/users/{user_id}/2fa/verify")

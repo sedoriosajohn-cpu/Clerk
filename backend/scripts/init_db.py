@@ -34,6 +34,8 @@ class User(Base):
     two_factor_enabled = Column(Integer, default=0)
     two_factor_code_hash = Column(String)
     two_factor_expires_at = Column(String)
+    reset_password_token_hash = Column(String)
+    reset_password_expires_at = Column(String)
 
 class RawInput(Base):
     __tablename__ = "raw_inputs"
@@ -82,6 +84,8 @@ def ensure_database_schema():
         "two_factor_enabled": "INTEGER DEFAULT 0",
         "two_factor_code_hash": "VARCHAR",
         "two_factor_expires_at": "VARCHAR",
+        "reset_password_token_hash": "VARCHAR",
+        "reset_password_expires_at": "VARCHAR",
     }
     with engine.begin() as connection:
         for column_name, column_type in user_columns.items():

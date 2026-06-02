@@ -2354,12 +2354,14 @@ button {
     }
 }
 
-#login-overlay {
+#login-overlay,
+#password-reset-overlay {
     background:
         linear-gradient(135deg, rgba(10, 15, 28, .96), rgba(23, 42, 69, .96)) !important;
 }
 
-#login-overlay > div {
+#login-overlay > div,
+#password-reset-overlay > div {
     width: min(390px, calc(100vw - 36px)) !important;
     border: 1px solid rgba(255, 255, 255, .12) !important;
     border-radius: 22px !important;
@@ -2367,7 +2369,8 @@ button {
     box-shadow: 0 30px 90px rgba(0, 0, 0, .35) !important;
 }
 
-#login-overlay input {
+#login-overlay input,
+#password-reset-overlay input {
     border: 1px solid rgba(255,255,255,.08) !important;
     background: rgba(255,255,255,.08) !important;
     color: #fff !important;
@@ -2698,6 +2701,8 @@ button {
 
             <input type="text" id="username-input" placeholder="Username" oninput="updatePasswordStrength()" style="padding:15px; border-radius:12px; border:none; margin-bottom:15px; width:100%; font-size:16px;">
             <input type="password" id="password-input" placeholder="Password" oninput="updatePasswordStrength()" style="padding:15px; border-radius:12px; border:none; margin-bottom:20px; width:100%; font-size:16px;">
+            <input type="text" id="forgot-lookup-input" placeholder="Username or security email" style="padding:15px; border-radius:12px; border:none; margin-bottom:15px; width:100%; font-size:16px; display:none;">
+            <input type="password" id="reset-password-input" placeholder="New password" oninput="updateResetPasswordStrength()" style="padding:15px; border-radius:12px; border:none; margin-bottom:20px; width:100%; font-size:16px; display:none;">
             <div class="password-strength" id="password-strength-panel">
                 <div class="strength-track"><div class="strength-fill" id="password-strength-fill"></div></div>
                 <div class="strength-label" id="password-strength-label">Password strength</div>
@@ -2714,12 +2719,42 @@ button {
 
             <button id="login-btn" onclick="login()" class="primary" style="width:100%;">Sign In</button>
             <button id="register-btn" onclick="register()" class="ghost" style="width:100%; margin-top:10px; display:none;">Create Account</button>
+            <button id="forgot-submit-btn" onclick="requestPasswordReset()" class="primary" style="width:100%; display:none;">Send Reset Email</button>
+            <button id="reset-submit-btn" onclick="submitPasswordReset()" class="primary" style="width:100%; display:none;">Reset Password</button>
 
             <p style="margin-top:20px; font-size:14px; color:var(--muted);">
                 <span id="toggle-text">Don't have an account?</span>
                 <a href="#" onclick="toggleAuthMode()" style="color:var(--teal); text-decoration:none; font-weight:bold;">Click here</a>
             </p>
+            <p id="forgot-password-row" style="margin-top:8px; font-size:14px;">
+                <a href="#" onclick="showForgotPasswordMode(); return false;" style="color:var(--teal); text-decoration:none; font-weight:bold;">Forgot password?</a>
+            </p>
             <p id="login-error" style="color:var(--pink); font-size:14px; margin-top:15px; display:none;"></p>
+        </div>
+    </div>
+    <div id="password-reset-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.98); z-index:10000; display:none; justify-content:center; align-items:center;">
+        <div style="background:#1e293b; padding:40px; border-radius:26px; text-align:center; border:1px solid var(--teal); box-shadow: var(--shadow); width: 390px;">
+            <h2 style="color:white; margin-bottom:10px; font-size: 28px;">Create New Password</h2>
+            <p style="color:var(--muted); margin-bottom:25px;">Choose a strong password for your Clerk account.</p>
+            <input type="password" id="new-reset-password-input" placeholder="New password" oninput="updateDedicatedResetStrength()" style="padding:15px; border-radius:12px; border:none; margin-bottom:20px; width:100%; font-size:16px;">
+            <div class="password-strength visible" id="dedicated-reset-strength-panel">
+                <div class="strength-track"><div class="strength-fill" id="dedicated-reset-strength-fill"></div></div>
+                <div class="strength-label" id="dedicated-reset-strength-label">Password strength</div>
+                <ul class="password-rules" id="dedicated-reset-rules">
+                    <li data-rule="length">At least 12 characters</li>
+                    <li data-rule="uppercase">One uppercase letter</li>
+                    <li data-rule="lowercase">One lowercase letter</li>
+                    <li data-rule="number">One number</li>
+                    <li data-rule="special">One symbol</li>
+                    <li data-rule="no_username">Does not include your username</li>
+                    <li data-rule="no_spaces">No spaces</li>
+                </ul>
+            </div>
+            <button onclick="submitDedicatedPasswordReset()" class="primary" style="width:100%; margin-top:16px;">Reset Password</button>
+            <p style="margin-top:20px; font-size:14px; color:var(--muted);">
+                Back to login? <a href="#" onclick="closePasswordResetPopup(); return false;" style="color:var(--teal); text-decoration:none; font-weight:bold;">Click here</a>
+            </p>
+            <p id="dedicated-reset-error" style="color:var(--pink); font-size:14px; margin-top:15px; display:none;"></p>
         </div>
     </div>
     <div class="two-factor-modal" id="twoFactorLoginModal" onclick="handleTwoFactorBackdrop(event)">
@@ -2860,15 +2895,6 @@ window.USER_SETTINGS = {
     google_connected: false
 };
 
-const oauthParams = new URLSearchParams(window.location.search);
-if (oauthParams.has('google_error')) {
-    alert(getFriendlyGoogleError(oauthParams.get('google_error')));
-    window.history.replaceState({}, document.title, window.location.pathname);
-} else if (oauthParams.has('google_connected')) {
-    handleGoogleConnectedRedirect(oauthParams.get('user_id'));
-    window.history.replaceState({}, document.title, window.location.pathname);
-}
-
 const notifiedTasks = new Set(); // To prevent duplicate alerts
 let currentTask = null; // This will hold the result from your FastAPI /ingest
 let currentView = 'agenda';
@@ -2877,6 +2903,37 @@ let selectedTaskIds = new Set();
 let lastRenderedTaskIds = [];
 let pendingTwoFactorLogin = false;
 let googleConnectPopup = null;
+let authMode = 'login';
+let activeResetToken = null;
+
+function getResetTokenFromLocation() {
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.has('reset_token')) {
+        return searchParams.get('reset_token');
+    }
+
+    const hashText = window.location.hash.startsWith('#')
+        ? window.location.hash.slice(1)
+        : window.location.hash;
+    const hashParams = new URLSearchParams(hashText);
+    return hashParams.get('reset_token');
+}
+
+const oauthParams = new URLSearchParams(window.location.search);
+if (oauthParams.has('google_error')) {
+    alert(getFriendlyGoogleError(oauthParams.get('google_error')));
+    window.history.replaceState({}, document.title, window.location.pathname);
+} else if (oauthParams.has('google_connected')) {
+    handleGoogleConnectedRedirect(oauthParams.get('user_id'));
+    window.history.replaceState({}, document.title, window.location.pathname);
+} else {
+    const resetTokenFromUrl = getResetTokenFromLocation();
+    if (resetTokenFromUrl) {
+        activeResetToken = resetTokenFromUrl;
+        openPasswordResetPopup(resetTokenFromUrl);
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
+}
 
 //for the calendar, it keeps track where the user is currently looking at
 let currentCalMonth = new Date().getMonth();
@@ -3000,8 +3057,10 @@ function getPasswordStrength(password, username = '') {
 
 function updatePasswordStrength() {
     const panel = document.getElementById('password-strength-panel');
-    if (!panel || isLoginMode) return;
-    const password = document.getElementById('password-input').value;
+    if (!panel || authMode === 'login' || authMode === 'forgot') return;
+    const password = authMode === 'reset'
+        ? document.getElementById('reset-password-input').value
+        : document.getElementById('password-input').value;
     const username = document.getElementById('username-input').value;
     const strength = getPasswordStrength(password, username);
     const percent = Math.round((strength.passed / strength.total) * 100);
@@ -3016,6 +3075,10 @@ function updatePasswordStrength() {
 
 function isStrongPassword(password, username = '') {
     return Object.values(getPasswordRuleResults(password, username)).every(Boolean);
+}
+
+function updateResetPasswordStrength() {
+    updatePasswordStrength();
 }
 
 async function submitTwoFactorLoginCode() {
@@ -3234,32 +3297,134 @@ async function disableTwoFactor() {
 //user login 
 let isLoginMode = true;
 
-function toggleAuthMode() {
-    isLoginMode = !isLoginMode;
-    const title = document.getElementById('auth-title');
+function setAuthFieldVisibility(mode) {
+    authMode = mode;
+    const username = document.getElementById('username-input');
+    const password = document.getElementById('password-input');
+    const forgotLookup = document.getElementById('forgot-lookup-input');
+    const resetPassword = document.getElementById('reset-password-input');
+    const strengthPanel = document.getElementById('password-strength-panel');
     const loginBtn = document.getElementById('login-btn');
     const registerBtn = document.getElementById('register-btn');
+    const forgotBtn = document.getElementById('forgot-submit-btn');
+    const resetBtn = document.getElementById('reset-submit-btn');
+    const forgotRow = document.getElementById('forgot-password-row');
     const toggleText = document.getElementById('toggle-text');
-    const strengthPanel = document.getElementById('password-strength-panel');
+    const errorMsg = document.getElementById('login-error');
+
+    errorMsg.style.display = 'none';
+    username.style.display = ['login', 'register'].includes(mode) ? 'block' : 'none';
+    password.style.display = ['login', 'register'].includes(mode) ? 'block' : 'none';
+    forgotLookup.style.display = mode === 'forgot' ? 'block' : 'none';
+    resetPassword.style.display = mode === 'reset' ? 'block' : 'none';
+    loginBtn.style.display = mode === 'login' ? 'block' : 'none';
+    registerBtn.style.display = mode === 'register' ? 'block' : 'none';
+    forgotBtn.style.display = mode === 'forgot' ? 'block' : 'none';
+    resetBtn.style.display = mode === 'reset' ? 'block' : 'none';
+    forgotRow.style.display = mode === 'login' ? 'block' : 'none';
+
+    if (mode === 'register' || mode === 'reset') {
+        strengthPanel.classList.add('visible');
+    } else {
+        strengthPanel.classList.remove('visible');
+    }
+
+    if (mode === 'login') {
+        document.getElementById('auth-title').textContent = "Clerk Login";
+        document.getElementById('auth-subtitle').textContent = "Enter your credentials";
+        toggleText.textContent = "Don't have an account?";
+    } else if (mode === 'register') {
+        document.getElementById('auth-title').textContent = "Create Account";
+        document.getElementById('auth-subtitle').textContent = "Choose a username and strong password";
+        toggleText.textContent = "Already have an account?";
+        updatePasswordStrength();
+    } else if (mode === 'forgot') {
+        document.getElementById('auth-title').textContent = "Reset Password";
+        document.getElementById('auth-subtitle').textContent = "Enter your username or security email.";
+        toggleText.textContent = "Back to login?";
+        forgotLookup.focus();
+    } else if (mode === 'reset') {
+        document.getElementById('auth-title').textContent = "Create New Password";
+        document.getElementById('auth-subtitle').textContent = "Choose a strong new password.";
+        toggleText.textContent = "Back to login?";
+        updateResetPasswordStrength();
+        resetPassword.focus();
+    }
+}
+
+function toggleAuthMode() {
+    if (authMode === 'forgot' || authMode === 'reset') {
+        isLoginMode = true;
+        setAuthFieldVisibility('login');
+        return;
+    }
+    isLoginMode = !isLoginMode;
     pendingTwoFactorLogin = false;
     closeTwoFactorLoginModal();
-    loginBtn.textContent = "Sign In";
+    document.getElementById('login-btn').textContent = "Sign In";
+    setAuthFieldVisibility(isLoginMode ? 'login' : 'register');
+}
 
-    if (isLoginMode) {
-        title.textContent = "Clerk Login";
-        document.getElementById('auth-subtitle').textContent = "Enter your credentials";
-        loginBtn.style.display = "block";
-        registerBtn.style.display = "none";
-        strengthPanel.classList.remove('visible');
-        toggleText.textContent = "Don't have an account?";
-    } else {
-        title.textContent = "Create Account";
-        document.getElementById('auth-subtitle').textContent = "Choose a username and password";
-        loginBtn.style.display = "none";
-        registerBtn.style.display = "block";
-        updatePasswordStrength();
-        toggleText.textContent = "Already have an account?";
-    }
+function showForgotPasswordMode() {
+    setAuthFieldVisibility('forgot');
+}
+
+function showResetPasswordMode(token) {
+    activeResetToken = token;
+    document.getElementById('login-overlay').style.display = 'flex';
+    isLoginMode = true;
+    setAuthFieldVisibility('reset');
+}
+
+function paintPasswordStrength(password, username, fillId, labelId, rulesId) {
+    const strength = getPasswordStrength(password, username);
+    const percent = Math.round((strength.passed / strength.total) * 100);
+    const fill = document.getElementById(fillId);
+    const label = document.getElementById(labelId);
+    const rules = document.querySelectorAll(`#${rulesId} li`);
+
+    fill.style.width = `${percent}%`;
+    fill.style.background = percent >= 85 ? '#14b8a6' : percent >= 60 ? '#f59e0b' : '#fb7185';
+    label.textContent = percent >= 85 ? "Strong password" : percent >= 60 ? "Almost there" : "Weak password";
+
+    rules.forEach(item => {
+        const passed = strength.rules[item.dataset.rule];
+        item.classList.toggle('passed', Boolean(passed));
+    });
+}
+
+function openPasswordResetPopup(token) {
+    activeResetToken = token;
+    const loginOverlay = document.getElementById('login-overlay');
+    const resetOverlay = document.getElementById('password-reset-overlay');
+    const input = document.getElementById('new-reset-password-input');
+    const error = document.getElementById('dedicated-reset-error');
+
+    loginOverlay.style.display = 'none';
+    resetOverlay.style.display = 'flex';
+    input.value = "";
+    error.style.display = 'none';
+    error.textContent = "";
+    updateDedicatedResetStrength();
+    setTimeout(() => input.focus(), 50);
+}
+
+function closePasswordResetPopup() {
+    activeResetToken = null;
+    document.getElementById('password-reset-overlay').style.display = 'none';
+    document.getElementById('login-overlay').style.display = 'flex';
+    setAuthFieldVisibility('login');
+}
+
+function updateDedicatedResetStrength() {
+    const password = document.getElementById('new-reset-password-input').value;
+    paintPasswordStrength(
+        password,
+        '',
+        'dedicated-reset-strength-fill',
+        'dedicated-reset-strength-label',
+        'dedicated-reset-rules'
+    );
 }
 
 async function register() {
@@ -3294,6 +3459,105 @@ async function register() {
         }
     } catch (err) {
         alert(getFriendlyApiError(err));
+    }
+}
+
+async function requestPasswordReset() {
+    const lookup = document.getElementById('forgot-lookup-input').value.trim();
+    const errorMsg = document.getElementById('login-error');
+    if (!lookup) {
+        errorMsg.textContent = "Enter your username or security email.";
+        errorMsg.style.display = 'block';
+        return;
+    }
+
+    try {
+        const response = await apiFetch(`${API_BASE}/forgot-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email_or_username: lookup }),
+            throttleKey: 'forgot-password',
+            minInterval: 30000
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || "Could not send reset email.");
+        alert(data.message || "If that account has a security email, a reset link was sent.");
+        setAuthFieldVisibility('login');
+    } catch (err) {
+        errorMsg.textContent = err.message || getFriendlyApiError(err);
+        errorMsg.style.display = 'block';
+    }
+}
+
+async function submitPasswordReset() {
+    const newPassword = document.getElementById('reset-password-input').value;
+    const errorMsg = document.getElementById('login-error');
+    if (!activeResetToken) {
+        errorMsg.textContent = "Reset link is missing or expired.";
+        errorMsg.style.display = 'block';
+        return;
+    }
+    if (!isStrongPassword(newPassword, document.getElementById('username-input').value)) {
+        updateResetPasswordStrength();
+        errorMsg.textContent = "Please choose a strong password that meets every rule.";
+        errorMsg.style.display = 'block';
+        return;
+    }
+
+    try {
+        const response = await apiFetch(`${API_BASE}/reset-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: activeResetToken, password: newPassword }),
+            throttleKey: 'reset-password',
+            minInterval: 1000
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || "Could not reset password.");
+        alert(data.message || "Password reset. You can sign in with your new password.");
+        activeResetToken = null;
+        document.getElementById('reset-password-input').value = "";
+        setAuthFieldVisibility('login');
+    } catch (err) {
+        errorMsg.textContent = err.message || getFriendlyApiError(err);
+        errorMsg.style.display = 'block';
+    }
+}
+
+async function submitDedicatedPasswordReset() {
+    const newPassword = document.getElementById('new-reset-password-input').value;
+    const errorMsg = document.getElementById('dedicated-reset-error');
+    if (!activeResetToken) {
+        errorMsg.textContent = "Reset link is missing or expired.";
+        errorMsg.style.display = 'block';
+        return;
+    }
+    if (!isStrongPassword(newPassword, '')) {
+        updateDedicatedResetStrength();
+        errorMsg.textContent = "Please choose a strong password that meets every rule.";
+        errorMsg.style.display = 'block';
+        return;
+    }
+
+    try {
+        const response = await apiFetch(`${API_BASE}/reset-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: activeResetToken, password: newPassword }),
+            throttleKey: 'reset-password',
+            minInterval: 1000
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || "Could not reset password.");
+        alert(data.message || "Password reset. You can sign in with your new password.");
+        activeResetToken = null;
+        document.getElementById('new-reset-password-input').value = "";
+        document.getElementById('password-reset-overlay').style.display = 'none';
+        document.getElementById('login-overlay').style.display = 'flex';
+        setAuthFieldVisibility('login');
+    } catch (err) {
+        errorMsg.textContent = err.message || getFriendlyApiError(err);
+        errorMsg.style.display = 'block';
     }
 }
 

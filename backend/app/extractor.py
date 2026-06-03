@@ -1,6 +1,7 @@
 import os
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 from openai import OpenAI
@@ -17,6 +18,7 @@ client = OpenAI(
 
 MAX_AI_INPUT_CHARS = int(os.getenv("EXTRACTOR_MAX_AI_INPUT_CHARS", "18000"))
 MAX_AI_CHUNKS = int(os.getenv("EXTRACTOR_MAX_AI_CHUNKS", "3"))
+MAX_AI_WORKERS = int(os.getenv("EXTRACTOR_MAX_AI_WORKERS", "3"))
 CHUNK_OVERLAP_CHARS = 500
 
 ACTION_WORDS = {
@@ -381,6 +383,16 @@ def local_nlp_extract_tasks(text: str, current_time: Optional[str] = None) -> Li
 
     return tasks
 
+def extract_json_from_chunk(chunk: str, now_iso: str) -> list:
+    prompt = build_prompt(chunk, now_iso)
+    response = client.chat.completions.create(
+        model=os.getenv("OPENAI_MODEL", "gpt-5.4"),
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+        max_completion_tokens=int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "2500"))
+    )
+    return extract_json(response.choices[0].message.content)
+
 def extract_task_from_text(text: str, current_time: Optional[str] = None) -> list:
     if not text or not text.strip():
         return []
@@ -394,17 +406,15 @@ def extract_task_from_text(text: str, current_time: Optional[str] = None) -> lis
         # not every policy paragraph or page footer in the source.
         now_iso = current_time if current_time else datetime.now(timezone.utc).isoformat()
         raw_tasks = []
-        for chunk in split_text_for_ai(text):
-            prompt = build_prompt(chunk, now_iso)
-            response = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL", "gpt-5.4"),
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0,
-                max_completion_tokens=int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "2500"))
-            )
-
-            raw_content = response.choices[0].message.content
-            raw_tasks.extend(extract_json(raw_content))
+        chunks = split_text_for_ai(text)
+        if len(chunks) == 1:
+            raw_tasks.extend(extract_json_from_chunk(chunks[0], now_iso))
+        else:
+            worker_count = max(1, min(MAX_AI_WORKERS, len(chunks)))
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = [executor.submit(extract_json_from_chunk, chunk, now_iso) for chunk in chunks]
+                for future in as_completed(futures):
+                    raw_tasks.extend(future.result())
         
         processed_tasks = []
         for t in raw_tasks:

@@ -2803,7 +2803,7 @@ const statusMsg = document.getElementById('statusMsg');
 const agendaList = document.getElementById('agendaList');
 const newTasksList = document.getElementById('newTasksList');
 let API_BASE = window.location.port === "8000" ? window.location.origin : "http://127.0.0.1:8000";
-const REQUEST_TIMEOUT_MS = 12000;
+const REQUEST_TIMEOUT_MS = 20000;
 const requestBucket = new Map();
 
 function renderSkeleton(count = 4) {
@@ -2838,6 +2838,28 @@ function timeInputToHour(value, fallback) {
 function updateWorkHoursStatus() {
     const status = document.getElementById('work-hours-status');
     if (status) status.textContent = getWorkWindowLabel(window.USER_SETTINGS);
+}
+
+function applyUserSettings(settings = {}) {
+    window.USER_SETTINGS = { ...window.USER_SETTINGS, ...settings };
+    updateDisplayName(window.USER_SETTINGS.preferred_name, false);
+
+    const darkToggle = document.getElementById('darkThemeToggle');
+    const notificationToggle = document.getElementById('notificationToggle');
+    const securityEmail = document.getElementById('security-email-input');
+    const workStart = document.getElementById('work-start-input');
+    const workEnd = document.getElementById('work-end-input');
+
+    if (darkToggle) darkToggle.checked = Boolean(window.USER_SETTINGS.dark_mode);
+    if (notificationToggle) notificationToggle.checked = Boolean(window.USER_SETTINGS.notifications_enabled);
+    if (securityEmail) securityEmail.value = window.USER_SETTINGS.email || "";
+    if (workStart) workStart.value = hourToTimeInput(window.USER_SETTINGS.preferred_work_start_hour ?? 9);
+    if (workEnd) workEnd.value = hourToTimeInput((window.USER_SETTINGS.preferred_work_end_hour ?? 17) % 24);
+    updateWorkHoursStatus();
+    updateSecurityStatus();
+    updateGoogleSyncStatus();
+
+    if (window.USER_SETTINGS.dark_mode) toggleDarkTheme(false);
 }
 
 async function apiFetch(url, options = {}) {
@@ -3016,8 +3038,7 @@ window.login = async function() {
             window.CURRENT_USER_ID = data.user_id;
             pendingTwoFactorLogin = false;
             document.getElementById('login-btn').textContent = "Sign In";
-            
-            await fetchUserSettings();
+            applyUserSettings(data.settings || { preferred_name: data.username });
             
             // Hide login and show agenda
             document.getElementById('login-overlay').style.display = 'none';
@@ -3153,7 +3174,7 @@ async function submitTwoFactorLoginCode() {
         const data = await response.json();
         window.CURRENT_USER_ID = data.user_id;
         closeTwoFactorLoginModal();
-        await fetchUserSettings();
+        applyUserSettings(data.settings || { preferred_name: data.username });
         document.getElementById('login-overlay').style.display = 'none';
         loadView('agenda');
         if (window.USER_SETTINGS.google_connected) {
@@ -3169,20 +3190,7 @@ async function fetchUserSettings() {
     try {
         const response = await apiFetch(`${API_BASE}/users/${window.CURRENT_USER_ID}/settings`);
         if (response.ok) {
-            window.USER_SETTINGS = await response.json();
-            
-            // Apply to UI
-            updateDisplayName(window.USER_SETTINGS.preferred_name, false);
-            document.getElementById('darkThemeToggle').checked = window.USER_SETTINGS.dark_mode;
-            document.getElementById('notificationToggle').checked = window.USER_SETTINGS.notifications_enabled;
-            document.getElementById('security-email-input').value = window.USER_SETTINGS.email || "";
-            document.getElementById('work-start-input').value = hourToTimeInput(window.USER_SETTINGS.preferred_work_start_hour ?? 9);
-            document.getElementById('work-end-input').value = hourToTimeInput((window.USER_SETTINGS.preferred_work_end_hour ?? 17) % 24);
-            updateWorkHoursStatus();
-            updateSecurityStatus();
-            updateGoogleSyncStatus();
-            
-            if (window.USER_SETTINGS.dark_mode) toggleDarkTheme(false);
+            applyUserSettings(await response.json());
         }
     } catch (err) {
         console.error("Failed to fetch settings:", err);

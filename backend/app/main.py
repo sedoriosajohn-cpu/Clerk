@@ -154,6 +154,18 @@ def verify_two_factor_code(user: User, code: Optional[str]) -> bool:
 def has_google_token(user_id: int) -> bool:
     return os.path.exists(get_google_token_path(user_id))
 
+def user_settings_payload(user: User) -> dict:
+    return {
+        "preferred_name": user.preferred_name or user.username,
+        "email": user.email or "",
+        "preferred_work_start_hour": user.preferred_work_start_hour if user.preferred_work_start_hour is not None else 9,
+        "preferred_work_end_hour": user.preferred_work_end_hour if user.preferred_work_end_hour is not None else 17,
+        "dark_mode": bool(user.dark_mode),
+        "notifications_enabled": bool(user.notifications_enabled),
+        "two_factor_enabled": bool(user.two_factor_enabled),
+        "google_connected": has_google_token(user.user_id)
+    }
+
 def ensure_user_exists(user_id: int, db: Session):
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
@@ -221,6 +233,8 @@ class BulkTaskAction(BaseModel):
 class UserSettingsUpdate(BaseModel):
     preferred_name: Optional[str] = None
     email: Optional[str] = None
+    preferred_work_start_hour: Optional[int] = None
+    preferred_work_end_hour: Optional[int] = None
     dark_mode: Optional[bool] = None
     notifications_enabled: Optional[bool] = None
     two_factor_enabled: Optional[bool] = None
@@ -268,7 +282,7 @@ async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
                 detail = "Verification code generated. Configure SMTP_HOST and SMTP_FROM to send email in production."
             return {"requires_2fa": True, "message": detail, "email": user.email}
 
-    return {"user_id": user.user_id, "username": user.username}
+    return {"user_id": user.user_id, "username": user.username, "settings": user_settings_payload(user)}
 
 @app.post("/register")
 async def register_user(data: LoginRequest, db: Session = Depends(get_db)):
@@ -674,11 +688,44 @@ def task_to_dict(task: Task) -> dict:
 def normalize_title_for_match(title: Optional[str]) -> str:
     text = re.sub(r'[^a-z0-9\s]', ' ', str(title or "").lower())
     text = re.sub(
-        r'\b(google classroom|classroom|assignment|new|posted|assigned|due|please|reminder|notification)\b',
+        r'\b(google classroom|classroom|calendar|event|assignment|new|posted|assigned|due|please|reminder|notification)\b',
         ' ',
         text
     )
     return re.sub(r'\s+', ' ', text).strip()
+
+def title_tokens_for_match(title: Optional[str]) -> set:
+    normalized = normalize_title_for_match(title)
+    stop_words = {
+        "the", "and", "for", "with", "from", "into", "onto", "task",
+        "submit", "finish", "complete", "turn", "read", "write", "review",
+        "prepare", "study", "work", "make", "create"
+    }
+    return {
+        token for token in normalized.split()
+        if len(token) >= 3 and token not in stop_words
+    }
+
+def titles_are_similar(left_title: Optional[str], right_title: Optional[str]) -> bool:
+    left_normalized = normalize_title_for_match(left_title)
+    right_normalized = normalize_title_for_match(right_title)
+    if not left_normalized or not right_normalized:
+        return False
+    if left_normalized == right_normalized:
+        return True
+
+    left_tokens = title_tokens_for_match(left_normalized)
+    right_tokens = title_tokens_for_match(right_normalized)
+    if not left_tokens or not right_tokens:
+        return False
+
+    intersection = left_tokens & right_tokens
+    smaller_count = min(len(left_tokens), len(right_tokens))
+    if smaller_count == 1:
+        shared = next(iter(intersection), "")
+        return bool(shared and len(shared) >= 5 and (left_normalized in right_normalized or right_normalized in left_normalized))
+
+    return (len(intersection) / smaller_count) >= 0.75
 
 def due_day_key(due_date: Optional[str]) -> str:
     if not due_date:
@@ -699,11 +746,12 @@ def build_duplicate_index(db: Session, user_id: int) -> dict:
         Task.status != "deleted"
     ).all()
 
-    duplicate_index = {}
+    duplicate_index = {"__items__": []}
     for task in existing_tasks:
         key = task_match_key({"title": task.title, "due_date": task.due_date})
         if key:
             duplicate_index[key] = task
+            duplicate_index["__items__"].append(task)
 
     return duplicate_index
 
@@ -717,11 +765,14 @@ def find_duplicate_task(duplicate_index: dict, task_data) -> Optional[Task]:
         return exact_match
 
     title_key, due_key = key
-    if due_key:
+    if not due_key:
+        for existing in duplicate_index.get("__items__", []):
+            if normalize_title_for_match(existing.title) == title_key:
+                return existing
         return None
 
-    for (existing_title, _existing_due), existing in duplicate_index.items():
-        if existing_title == title_key:
+    for existing in duplicate_index.get("__items__", []):
+        if due_day_key(existing.due_date) == due_key and titles_are_similar(existing.title, task_data.get("title")):
             return existing
 
     return None
@@ -828,7 +879,14 @@ def google_calendar_event_to_entry(event: dict):
 
     is_all_day = len(str(start)) == 10
     due_date = f"{start}T12:00:00Z" if is_all_day else start
-    end_date = f"{end}T13:00:00Z" if end and len(str(end)) == 10 else end
+    end_date = end
+    if is_all_day and end and len(str(end)) == 10:
+        try:
+            exclusive_end = datetime.fromisoformat(end)
+            inclusive_end = exclusive_end - timedelta(days=1)
+            end_date = f"{inclusive_end.strftime('%Y-%m-%d')}T13:00:00Z"
+        except ValueError:
+            end_date = due_date
     title = event.get("summary", "Google Calendar Event")
     description = event.get("description", "")
     content = f"Calendar Event: {title} starting {start}. Description: {description}"
@@ -846,13 +904,14 @@ def google_calendar_event_to_entry(event: dict):
 def collect_google_calendar_entries(calendar, db: Session, user_id: int, max_results: int = 2500):
     summary = {"calendar": 0, "calendar_already_scanned": 0, "calendar_skipped": 0}
     sync_entries = []
-    now = datetime.utcnow().isoformat() + 'Z'
+    past_days = int(os.environ.get("GOOGLE_CALENDAR_SYNC_PAST_DAYS", "30"))
+    time_min = (datetime.utcnow() - timedelta(days=past_days)).isoformat() + 'Z'
     page_token = None
 
     while True:
         request = calendar.events().list(
             calendarId='primary',
-            timeMin=now,
+            timeMin=time_min,
             maxResults=min(max_results, 2500),
             singleEvents=True,
             orderBy='startTime',
@@ -1223,7 +1282,7 @@ async def stop_auto_sync():
 
 # --- REUSABLE PROCESSING LOGIC ---
 async def process_and_save_tasks(text_content, user_id, source_info, db, current_time=None):
-    structured_tasks = extract_task_from_text(text_content, current_time)
+    structured_tasks = await asyncio.to_thread(extract_task_from_text, text_content, current_time)
     return await save_structured_tasks(structured_tasks, text_content, user_id, source_info, db)
 
 async def save_structured_tasks(structured_tasks, text_content, user_id, source_info, db):
@@ -1283,6 +1342,7 @@ async def save_structured_task_entries(entries, user_id, db):
             key = task_match_key({"title": new_task.title, "due_date": new_task.due_date})
             if key:
                 duplicate_index[key] = new_task
+                duplicate_index["__items__"].append(new_task)
 
         db.commit()
         return {"status": "success", "task_ids": task_ids, "message": f"Extracted {len(task_ids)} tasks"}
@@ -1322,12 +1382,7 @@ async def get_user_settings(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return {
-        "preferred_name": user.preferred_name or user.username,
-        "email": user.email or "",
-        "dark_mode": bool(user.dark_mode),
-        "notifications_enabled": bool(user.notifications_enabled),
-        "two_factor_enabled": bool(user.two_factor_enabled),
-        "google_connected": has_google_token(user_id)
+        **user_settings_payload(user)
     }
 
 @app.patch("/users/{user_id}/settings")
@@ -1343,6 +1398,20 @@ async def update_user_settings(user_id: int, settings: UserSettingsUpdate, db: S
         if email and not is_valid_email(email):
             raise HTTPException(status_code=400, detail="Enter a valid email address.")
         user.email = email or None
+    if settings.preferred_work_start_hour is not None:
+        if settings.preferred_work_start_hour < 0 or settings.preferred_work_start_hour > 23:
+            raise HTTPException(status_code=400, detail="Work start hour must be between 0 and 23.")
+        user.preferred_work_start_hour = settings.preferred_work_start_hour
+    if settings.preferred_work_end_hour is not None:
+        if settings.preferred_work_end_hour < 1 or settings.preferred_work_end_hour > 24:
+            raise HTTPException(status_code=400, detail="Work end hour must be between 1 and 24.")
+        user.preferred_work_end_hour = settings.preferred_work_end_hour
+    if (
+        user.preferred_work_start_hour is not None
+        and user.preferred_work_end_hour is not None
+        and user.preferred_work_start_hour >= user.preferred_work_end_hour
+    ):
+        raise HTTPException(status_code=400, detail="Work start must be before work end.")
     if settings.dark_mode is not None:
         user.dark_mode = 1 if settings.dark_mode else 0
     if settings.notifications_enabled is not None:

@@ -2554,7 +2554,7 @@ button {
                         <label for="taskInput">Raw input</label>
                         <textarea id="taskInput" placeholder="Paste messy notes, emails, deadlines, or phrases like 'finish the lab by next Tuesday at 4'..."></textarea>
                     </div>
-                    <input type="file" id="fileInput" style="display: none;" accept=".pdf,.txt,.md">
+                    <input type="file" id="fileInput" style="display: none;" accept=".pdf,.txt,.md,.jpg,.jpeg,.png,image/jpeg,image/png">
                     
                     <div class="composer-actions">
                         <div class="left-buttons">
@@ -2579,7 +2579,10 @@ button {
                     <div style="margin-bottom: 32px;">
                         <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--teal-dark); margin-bottom: 16px;">Personalization</h3>
                         <label style="font-size: 14px; color: var(--text); margin-bottom: 8px; display: block;">What should Clerk call you?</label>
-                        <input type="text" id="preferred-name-input" placeholder="Enter your name..." onchange="updateDisplayName(this.value)" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text); outline: none;">
+                        <input type="text" id="preferred-name-input" placeholder="Enter your name..." onchange="updateDisplayName(this.value); saveUserSettings()" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text); outline: none;">
+                        <label style="font-size: 14px; color: var(--text); margin: 16px 0 8px; display: block;">Name on work schedules</label>
+                        <input type="text" id="schedule-name-input" placeholder="Example: John Sedoriosa" onchange="saveUserSettings()" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text); outline: none;">
+                        <p style="margin: 8px 0 0; font-size: 13px; color: var(--muted);">Used only to match your row on uploaded weekly work schedules.</p>
                     </div>
 
                     <div style="margin-bottom: 32px;">
@@ -2811,7 +2814,7 @@ function renderSkeleton(count = 4) {
 }
 
 function getFriendlyApiError(error) {
-    if (error && error.name === 'AbortError') return "The server took too long to respond.";
+    if (error && error.name === 'AbortError') return "The server is taking too long. Make sure the backend is running, then try again.";
     if (error && error.message) return error.message;
     return "Connection failed. Make sure the FastAPI backend is running on port 8000.";
 }
@@ -2847,12 +2850,14 @@ function applyUserSettings(settings = {}) {
     const darkToggle = document.getElementById('darkThemeToggle');
     const notificationToggle = document.getElementById('notificationToggle');
     const securityEmail = document.getElementById('security-email-input');
+    const scheduleName = document.getElementById('schedule-name-input');
     const workStart = document.getElementById('work-start-input');
     const workEnd = document.getElementById('work-end-input');
 
     if (darkToggle) darkToggle.checked = Boolean(window.USER_SETTINGS.dark_mode);
     if (notificationToggle) notificationToggle.checked = Boolean(window.USER_SETTINGS.notifications_enabled);
     if (securityEmail) securityEmail.value = window.USER_SETTINGS.email || "";
+    if (scheduleName) scheduleName.value = window.USER_SETTINGS.schedule_match_name || "";
     if (workStart) workStart.value = hourToTimeInput(window.USER_SETTINGS.preferred_work_start_hour ?? 9);
     if (workEnd) workEnd.value = hourToTimeInput((window.USER_SETTINGS.preferred_work_end_hour ?? 17) % 24);
     updateWorkHoursStatus();
@@ -2881,12 +2886,21 @@ async function apiFetch(url, options = {}) {
         try {
             return await fetch(url, { ...options, signal: controller.signal });
         } catch (error) {
+            if (error && error.name === 'AbortError') {
+                throw error;
+            }
             if (API_BASE.endsWith(':8000') && String(url).startsWith(API_BASE)) {
                 const fallbackBase = API_BASE.replace(':8000', ':8001');
                 const fallbackUrl = String(url).replace(API_BASE, fallbackBase);
-                const fallbackResponse = await fetch(fallbackUrl, { ...options, signal: controller.signal });
-                API_BASE = fallbackBase;
-                return fallbackResponse;
+                const fallbackController = new AbortController();
+                const fallbackTimer = setTimeout(() => fallbackController.abort(), Math.min(options.timeout || REQUEST_TIMEOUT_MS, 4000));
+                try {
+                    const fallbackResponse = await fetch(fallbackUrl, { ...options, signal: fallbackController.signal });
+                    API_BASE = fallbackBase;
+                    return fallbackResponse;
+                } finally {
+                    clearTimeout(fallbackTimer);
+                }
             }
             throw error;
         }
@@ -2947,6 +2961,7 @@ function escapeHTML(value) {
 window.CURRENT_USER_ID = null;
 window.USER_SETTINGS = {
     preferred_name: "User",
+    schedule_match_name: "",
     email: "",
     preferred_work_start_hour: 9,
     preferred_work_end_hour: 17,
@@ -3011,8 +3026,13 @@ window.login = async function() {
     const usernameInput = document.getElementById('username-input').value;
     const passwordInput = document.getElementById('password-input').value;
     const errorMsg = document.getElementById('login-error');
+    const loginBtn = document.getElementById('login-btn');
 
     try {
+        loginBtn.textContent = "Signing In...";
+        loginBtn.disabled = true;
+        errorMsg.style.display = 'none';
+
         const response = await apiFetch(`${API_BASE}/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -3022,7 +3042,8 @@ window.login = async function() {
                 two_factor_code: undefined
             }),
             throttleKey: 'login',
-            minInterval: 1000
+            minInterval: 1000,
+            timeout: 6000
         });
         
 
@@ -3037,7 +3058,7 @@ window.login = async function() {
             // Store the ID and Name
             window.CURRENT_USER_ID = data.user_id;
             pendingTwoFactorLogin = false;
-            document.getElementById('login-btn').textContent = "Sign In";
+            loginBtn.textContent = "Sign In";
             applyUserSettings(data.settings || { preferred_name: data.username });
             
             // Hide login and show agenda
@@ -3055,6 +3076,9 @@ window.login = async function() {
         console.error("Login Error:", err);
         errorMsg.textContent = getFriendlyApiError(err);
         errorMsg.style.display = 'block';
+    } finally {
+        loginBtn.textContent = "Sign In";
+        loginBtn.disabled = false;
     }
 };
 
@@ -3163,7 +3187,8 @@ async function submitTwoFactorLoginCode() {
                 two_factor_code: code
             }),
             throttleKey: 'login-2fa',
-            minInterval: 1000
+            minInterval: 1000,
+            timeout: 6000
         });
 
         if (!response.ok) {
@@ -3203,6 +3228,7 @@ async function saveUserSettings() {
     
     const settings = {
         preferred_name: document.getElementById('preferred-name-input').value,
+        schedule_match_name: document.getElementById('schedule-name-input').value,
         email: securityEmail,
         preferred_work_start_hour: timeInputToHour(document.getElementById('work-start-input').value, 9),
         preferred_work_end_hour: timeInputToHour(document.getElementById('work-end-input').value, 17) || 24,
@@ -5933,7 +5959,9 @@ processBtn.addEventListener('click', async () => {
 
     if (!userId) return alert("Please log in first.");
     
-    processBtn.innerText = "Extracting...";
+    const selectedFile = fileInput.files && fileInput.files[0];
+    const isImageUpload = Boolean(selectedFile && selectedFile.type && selectedFile.type.startsWith('image/'));
+    processBtn.innerText = isImageUpload ? "Reading Schedule..." : "Extracting...";
     processBtn.disabled = true;
 
     // Capture local time for AI context
@@ -5948,7 +5976,7 @@ processBtn.addEventListener('click', async () => {
         // Case A: File Upload
         if (fileInput.files.length > 0) {
             const formData = new FormData();
-            formData.append("file", fileInput.files[0]);
+            formData.append("file", selectedFile);
             formData.append("user_id", userId);
             formData.append("local_time", localTimeString);
 
@@ -5957,7 +5985,7 @@ processBtn.addEventListener('click', async () => {
                 body: formData,
                 throttleKey: `ingest-doc:${userId}`,
                 minInterval: 1000,
-                timeout: 60000
+                timeout: isImageUpload ? 150000 : 60000
             });
         } 
         // Case B: Text Input

@@ -29,6 +29,7 @@ class User(Base):
     password_hash = Column(String)
     email = Column(String)
     preferred_name = Column(String)
+    schedule_match_name = Column(String)
     preferred_work_start_hour = Column(Integer, default=9)
     preferred_work_end_hour = Column(Integer, default=17)
     dark_mode = Column(Integer, default=0)
@@ -83,6 +84,7 @@ def ensure_database_schema():
     existing_user_columns = {column["name"] for column in inspector.get_columns("users")}
     user_columns = {
         "email": "VARCHAR",
+        "schedule_match_name": "VARCHAR",
         "preferred_work_start_hour": "INTEGER DEFAULT 9",
         "preferred_work_end_hour": "INTEGER DEFAULT 17",
         "two_factor_enabled": "INTEGER DEFAULT 0",

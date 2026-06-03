@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.orm import Session
-from .extractor import extract_task_from_text
+from .extractor import extract_task_from_text, extract_work_schedule_from_image, extract_work_schedule_from_text
 try:
     from backend.scripts.init_db import SessionLocal, Task, RawInput, User, ensure_database_schema
 except ImportError:
@@ -98,6 +98,7 @@ def hash_reset_token(token: str) -> str:
 def send_email_message(to_email: str, subject: str, body: str):
     smtp_host = os.environ.get("SMTP_HOST")
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_timeout = float(os.environ.get("SMTP_TIMEOUT_SECONDS", "3"))
     smtp_username = os.environ.get("SMTP_USERNAME")
     smtp_password = os.environ.get("SMTP_PASSWORD")
     if smtp_password:
@@ -115,7 +116,7 @@ def send_email_message(to_email: str, subject: str, body: str):
     message.set_content(body)
 
     try:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=smtp_timeout) as server:
             server.starttls()
             if smtp_username and smtp_password:
                 server.login(smtp_username, smtp_password)
@@ -157,6 +158,7 @@ def has_google_token(user_id: int) -> bool:
 def user_settings_payload(user: User) -> dict:
     return {
         "preferred_name": user.preferred_name or user.username,
+        "schedule_match_name": user.schedule_match_name or "",
         "email": user.email or "",
         "preferred_work_start_hour": user.preferred_work_start_hour if user.preferred_work_start_hour is not None else 9,
         "preferred_work_end_hour": user.preferred_work_end_hour if user.preferred_work_end_hour is not None else 17,
@@ -165,6 +167,42 @@ def user_settings_payload(user: User) -> dict:
         "two_factor_enabled": bool(user.two_factor_enabled),
         "google_connected": has_google_token(user.user_id)
     }
+
+def split_name_candidate(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    text = re.sub(r'[_\-.]+', ' ', str(value)).strip()
+    text = re.sub(r'\s+', ' ', text)
+    if not text:
+        return []
+
+    candidates = [text]
+    parts = text.split()
+    if len(parts) >= 2:
+        candidates.append(f"{parts[-1]}, {' '.join(parts[:-1])}")
+        candidates.append(f"{' '.join(parts[:-1])} {parts[-1]}")
+    return candidates
+
+def get_user_name_candidates(user: User) -> List[str]:
+    if user.schedule_match_name:
+        return split_name_candidate(user.schedule_match_name)
+
+    candidates = []
+    for value in (
+        user.preferred_name,
+        user.username,
+        user.email.split("@", 1)[0] if user.email else None,
+    ):
+        candidates.extend(split_name_candidate(value))
+
+    seen = set()
+    unique = []
+    for candidate in candidates:
+        key = candidate.lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(candidate)
+    return unique
 
 def ensure_user_exists(user_id: int, db: Session):
     user = db.query(User).filter(User.user_id == user_id).first()
@@ -232,6 +270,7 @@ class BulkTaskAction(BaseModel):
 
 class UserSettingsUpdate(BaseModel):
     preferred_name: Optional[str] = None
+    schedule_match_name: Optional[str] = None
     email: Optional[str] = None
     preferred_work_start_hour: Optional[int] = None
     preferred_work_end_hour: Optional[int] = None
@@ -369,8 +408,13 @@ async def ingest_doc(
 ):
     content = ""
     file_type = file.content_type
+    source_info = f"file: {file.filename}"
 
     try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
         if file_type == "application/pdf":
             try:
                 import fitz
@@ -388,15 +432,44 @@ async def ingest_doc(
             # Read Text bytes
             text_bytes = await file.read()
             content = text_bytes.decode("utf-8")
+        elif file_type and file_type.startswith("image/"):
+            image_bytes = await file.read()
+            structured_tasks = await asyncio.to_thread(
+                extract_work_schedule_from_image,
+                image_bytes,
+                file_type,
+                get_user_name_candidates(user),
+                local_time
+            )
+            if not structured_tasks:
+                return {
+                    "status": "success",
+                    "task_ids": [],
+                    "message": "No work shifts matched your Clerk profile name. Add your full name in Settings and try again."
+                }
+
+            return await save_work_schedule_entries(structured_tasks, user, source_info, db)
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_type}")
 
         if not content.strip():
             raise HTTPException(status_code=400, detail="The uploaded file appears to be empty.")
 
-        # Reuse the saving logic
-        return await process_and_save_tasks(content, user_id, f"file: {file.filename}", db, local_time)
+        if looks_like_work_schedule(content):
+            structured_tasks = await asyncio.to_thread(
+                extract_work_schedule_from_text,
+                content,
+                get_user_name_candidates(user),
+                local_time
+            )
+            if structured_tasks:
+                return await save_work_schedule_entries(structured_tasks, user, source_info, db)
 
+        # Reuse the saving logic
+        return await process_and_save_tasks(content, user_id, source_info, db, local_time)
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"File processing error: {str(e)}")
 
@@ -871,6 +944,38 @@ def mark_source_scanned(db: Session, user_id: int, source_info: str, content: st
     ))
     db.commit()
 
+def looks_like_work_schedule(text: str) -> bool:
+    lowered = text.lower()
+    has_week_header = "wkly hrs" in lowered or "weekly" in lowered
+    has_day_headers = len(re.findall(r'\b(sun|mon|tue|wed|thu|fri|sat)\b', lowered)) >= 3
+    has_shift_times = bool(re.search(r'\b\d{1,2}:\d{2}\s*(?:am|pm)\s*[-–]\s*\d{1,2}:\d{2}\s*(?:am|pm)\b', lowered))
+    return has_week_header and has_day_headers and has_shift_times
+
+async def save_work_schedule_entries(structured_tasks, user: User, source_info: str, db: Session):
+    clear_existing_work_schedule_entries(user.user_id, source_info, db)
+    entries = []
+    for index, task_data in enumerate(structured_tasks):
+        shift_key = f"{task_data.get('due_date', 'no-date')}:{task_data.get('end_date', 'no-end')}:{index}"
+        shift_source = f"{source_info}:work-shift:{shift_key}"
+        shift_content = f"Uploaded work schedule for {user.preferred_name or user.username}: {task_data.get('title', 'Work shift')}"
+        entries.append((task_data, shift_content, shift_source))
+    return await save_structured_task_entries(entries, user.user_id, db)
+
+def clear_existing_work_schedule_entries(user_id: int, source_info: str, db: Session):
+    raw_rows = db.query(RawInput).filter(
+        RawInput.source_id.like(source_marker(user_id, f"{source_info}:work-shift:%"))
+    ).all()
+    raw_ids = [row.raw_id for row in raw_rows]
+    if not raw_ids:
+        return
+
+    db.query(Task).filter(
+        Task.owner_id == user_id,
+        Task.raw_id.in_(raw_ids)
+    ).delete(synchronize_session=False)
+    db.query(RawInput).filter(RawInput.raw_id.in_(raw_ids)).delete(synchronize_session=False)
+    db.commit()
+
 def google_calendar_event_to_entry(event: dict):
     start = event.get('start', {}).get('dateTime') or event.get('start', {}).get('date')
     end = event.get('end', {}).get('dateTime') or event.get('end', {}).get('date')
@@ -1081,7 +1186,11 @@ def collect_classroom_entries(classroom, db: Session, user_id: int):
     return sync_entries, summary
 
 @app.get("/sync-gmail")
-async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
+async def sync_gmail(user_id: int):
+    return await asyncio.to_thread(sync_gmail_blocking, user_id)
+
+def sync_gmail_blocking(user_id: int):
+    db = SessionLocal()
     try:
         ensure_user_exists(user_id, db)
         creds = get_google_creds(user_id)
@@ -1111,7 +1220,7 @@ async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
                 try:
                     if sender:
                         body = f"Email From: {sender}\n{body}"
-                    result = await process_and_save_tasks(body, user_id, source_info, db)
+                    result = asyncio.run(process_and_save_tasks(body, user_id, source_info, db))
                     if not result.get("task_ids"):
                         mark_source_scanned(db, user_id, source_info, body)
                     processed_count += 1
@@ -1120,9 +1229,15 @@ async def sync_gmail(user_id: int, db: Session = Depends(get_db)):
         return {"status": "success", "message": f"Scanned {processed_count} new emails, skipped {skipped_count} already scanned emails."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
 
 @app.get("/sync-classroom")
-async def sync_classroom(user_id: int, db: Session = Depends(get_db)):
+async def sync_classroom(user_id: int):
+    return await asyncio.to_thread(sync_classroom_blocking, user_id)
+
+def sync_classroom_blocking(user_id: int):
+    db = SessionLocal()
     try:
         ensure_user_exists(user_id, db)
         creds = get_google_creds(user_id)
@@ -1132,7 +1247,7 @@ async def sync_classroom(user_id: int, db: Session = Depends(get_db)):
         classroom = build('classroom', 'v1', credentials=creds)
         sync_entries, summary = collect_classroom_entries(classroom, db, user_id)
         if sync_entries:
-            await save_structured_task_entries(sync_entries, user_id, db)
+            asyncio.run(save_structured_task_entries(sync_entries, user_id, db))
 
         return {
             "status": "success",
@@ -1141,9 +1256,15 @@ async def sync_classroom(user_id: int, db: Session = Depends(get_db)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
 
 @app.get("/sync-all")
-async def sync_all(user_id: int, db: Session = Depends(get_db)):
+async def sync_all(user_id: int):
+    return await asyncio.to_thread(sync_all_blocking, user_id)
+
+def sync_all_blocking(user_id: int):
+    db = SessionLocal()
     try:
         ensure_user_exists(user_id, db)
         creds = get_google_creds(user_id)
@@ -1151,36 +1272,37 @@ async def sync_all(user_id: int, db: Session = Depends(get_db)):
             # If no credentials, return the auth URL for the frontend to redirect
             return google_auth_required_response(user_id)
 
+        classroom = build('classroom', 'v1', credentials=creds)
+        calendar = build('calendar', 'v3', credentials=creds)
+
+        summary = {"classroom": 0, "calendar": 0}
+        sync_entries = []
+
+        # 2. Fetch Classroom Assignments
+        try:
+            classroom_entries, classroom_summary = collect_classroom_entries(classroom, db, user_id)
+            sync_entries.extend(classroom_entries)
+            summary["classroom"] = classroom_summary["classroom"]
+            summary["classroom_skipped"] = classroom_summary["skipped"]
+        except Exception as e:
+            print(f"Classroom sync error: {e}")
+
+        # 3. Fetch all future Google Calendar events, idempotently by event id.
+        try:
+            calendar_entries, calendar_summary = collect_google_calendar_entries(calendar, db, user_id)
+            sync_entries.extend(calendar_entries)
+            summary.update(calendar_summary)
+        except Exception as e:
+            print(f"Calendar sync error: {e}")
+
+        if sync_entries:
+            asyncio.run(save_structured_task_entries(sync_entries, user_id, db))
+
+        return {"status": "success", "processed": summary}
     except HTTPException:
         raise
-
-    classroom = build('classroom', 'v1', credentials=creds)
-    calendar = build('calendar', 'v3', credentials=creds)
-
-    summary = {"classroom": 0, "calendar": 0}
-    sync_entries = []
-
-    # 2. Fetch Classroom Assignments
-    try:
-        classroom_entries, classroom_summary = collect_classroom_entries(classroom, db, user_id)
-        sync_entries.extend(classroom_entries)
-        summary["classroom"] = classroom_summary["classroom"]
-        summary["classroom_skipped"] = classroom_summary["skipped"]
-    except Exception as e:
-        print(f"Classroom sync error: {e}")
-
-    # 3. Fetch all future Google Calendar events, idempotently by event id.
-    try:
-        calendar_entries, calendar_summary = collect_google_calendar_entries(calendar, db, user_id)
-        sync_entries.extend(calendar_entries)
-        summary.update(calendar_summary)
-    except Exception as e:
-        print(f"Calendar sync error: {e}")
-
-    if sync_entries:
-        await save_structured_task_entries(sync_entries, user_id, db)
-
-    return {"status": "success", "processed": summary}
+    finally:
+        db.close()
 
 async def auto_sync_user(user_id: int, db: Session):
     creds = get_google_creds(user_id)
@@ -1249,13 +1371,16 @@ def get_auto_sync_user_ids(db: Session) -> List[int]:
             user_ids.append(user_id)
     return user_ids
 
-async def run_auto_sync_once():
+def run_auto_sync_once_blocking():
     db = SessionLocal()
     try:
         for user_id in get_auto_sync_user_ids(db):
-            await auto_sync_user(user_id, db)
+            asyncio.run(auto_sync_user(user_id, db))
     finally:
         db.close()
+
+async def run_auto_sync_once():
+    await asyncio.to_thread(run_auto_sync_once_blocking)
 
 async def auto_sync_loop():
     await asyncio.sleep(10)
@@ -1393,6 +1518,8 @@ async def update_user_settings(user_id: int, settings: UserSettingsUpdate, db: S
 
     if settings.preferred_name is not None:
         user.preferred_name = settings.preferred_name
+    if settings.schedule_match_name is not None:
+        user.schedule_match_name = settings.schedule_match_name.strip() or None
     if settings.email is not None:
         email = settings.email.strip()
         if email and not is_valid_email(email):

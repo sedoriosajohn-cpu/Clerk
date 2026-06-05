@@ -47,7 +47,7 @@ GOOGLE_TOKEN_DIR = os.path.join(BASE_DIR, "..", "..", "google_tokens")
 CREDS_PATH = os.path.join(BASE_DIR, "..", "..", "credentials.json")
 OAUTH_STATE_DIR = os.path.join(BASE_DIR, "..", "..", ".google_oauth_states")
 DEFAULT_GOOGLE_REDIRECT_URI = "http://localhost:8000/auth/google/callback"
-DEFAULT_FRONTEND_URL = "http://127.0.0.1:5500/frontend/clerk_website/index.html"
+DEFAULT_FRONTEND_URL = "http://127.0.0.1:8000"
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website")), name="static")
 
 app.add_middleware(
@@ -299,6 +299,10 @@ async def read_index(code: Optional[str] = None, state: Optional[str] = None, er
         return complete_google_oauth(code=code, state=state, error=error)
     return FileResponse(os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website", "index.html"))
 
+@app.get("/logo.png")
+async def read_logo():
+    return FileResponse(os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website", "logo.png"))
+
 # --- AUTH ROUTES ---
 @app.post("/login")
 async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
@@ -476,8 +480,15 @@ async def ingest_doc(
 # --- GMAIL SYNC ---
 
 def get_google_credentials_config():
+    credentials_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+    if credentials_json:
+        try:
+            return json.loads(credentials_json)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=500, detail="GOOGLE_CREDENTIALS_JSON is not valid JSON.")
+
     if not os.path.exists(CREDS_PATH):
-        raise HTTPException(status_code=500, detail=f"Google credentials.json missing at {CREDS_PATH}. Please add it to the project root.")
+        raise HTTPException(status_code=500, detail=f"Google credentials are missing. Set GOOGLE_CREDENTIALS_JSON or add credentials.json at {CREDS_PATH}.")
 
     with open(CREDS_PATH, "r", encoding="utf-8-sig") as creds_file:
         return json.load(creds_file)
@@ -490,6 +501,10 @@ def get_google_redirect_uri():
     configured_uri = os.environ.get("GOOGLE_REDIRECT_URI")
     if configured_uri:
         return configured_uri
+
+    render_hostname = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+    if render_hostname:
+        return f"https://{render_hostname}/auth/google/callback"
 
     client_config = get_google_client_config()
     redirect_uris = client_config.get("redirect_uris") or []
@@ -530,7 +545,15 @@ def create_google_auth_url(user_id: int):
     return auth_url
 
 def get_frontend_url():
-    return os.environ.get("CLERK_FRONTEND_URL", DEFAULT_FRONTEND_URL)
+    configured_url = os.environ.get("CLERK_FRONTEND_URL")
+    if configured_url:
+        return configured_url.rstrip("/")
+
+    render_hostname = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+    if render_hostname:
+        return f"https://{render_hostname}"
+
+    return DEFAULT_FRONTEND_URL
 
 def save_google_oauth_state(state: str, code_verifier: str, user_id: int):
     with open(get_oauth_state_path(state), "w", encoding="utf-8") as state_file:

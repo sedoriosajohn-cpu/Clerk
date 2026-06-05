@@ -6,17 +6,19 @@ from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 
 load_dotenv()
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
-    print("Error: DATABASE_URL not found in .env file!")
-    # For local debugging only, uncomment if needed:
-    # DATABASE_URL = "sqlite:///./clerk.db" 
+    local_db_path = os.path.join(PROJECT_ROOT, "clerk.db")
+    DATABASE_URL = f"sqlite:///{local_db_path.replace(os.sep, '/')}"
+    print(f"DATABASE_URL not found; using local SQLite database at {local_db_path}")
 else:
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
         
-engine = create_engine(DATABASE_URL)
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

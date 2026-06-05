@@ -14,6 +14,37 @@ The goal of Clerk is simple: **reduce manual task entry and make scheduling effo
 * **Heuristic Scheduling:** An adaptive engine that learns user work-hour preferences and optimizes the daily timeline.
 
 ---
+## Running Clerk
+
+On Windows, double-click `Start Clerk.bat`. Clerk will start the backend, open the website in your browser, and show the local URL.
+
+You can also run it from a terminal:
+
+```bash
+python run_clerk.py
+```
+
+The website is served by the app at `http://127.0.0.1:8000`, so users do not need to run a separate frontend server or type a `uvicorn` command.
+
+---
+## Deploying With A Free Render URL
+
+This project includes `render.yaml`, so Render can create a hosted Clerk web service from the repo.
+
+1. Push this project to GitHub.
+2. In Render, choose **New** > **Blueprint** and select this repo.
+3. Render will read `render.yaml` and create the web service.
+4. Add these environment variables:
+   - `OPENAI_API_KEY`: required for AI extraction.
+   - `DATABASE_URL`: recommended for real user data. Use a managed PostgreSQL URL.
+   - `GOOGLE_CREDENTIALS_JSON`: required only for Google sync. Paste the full Google OAuth JSON.
+5. Deploy. Render will give you a public URL automatically.
+
+For Google sync, add the Render callback URL to your Google OAuth client after Render gives you the URL. It will look like `https://your-service.onrender.com/auth/google/callback`.
+
+Without `DATABASE_URL`, Clerk falls back to SQLite. That is fine for a quick demo, but hosted SQLite data may not survive redeploys or restarts.
+
+---
 ## Languages and Software  
 
 | Component | Technology |

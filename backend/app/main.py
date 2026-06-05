@@ -1448,14 +1448,25 @@ async def save_structured_task_entries(entries, user_id, db):
     try:
         task_ids = []
         duplicate_index = build_duplicate_index(db, user_id)
+
+        # Pre-load all source markers for this batch in a single query
+        all_markers = {source_marker(user_id, src) for _, _, src in entries}
+        scanned_markers = set(
+            row[0] for row in db.query(RawInput.source_id).filter(
+                RawInput.source_id.in_(all_markers)
+            ).all()
+        )
+
         for task_data, text_content, source_info in entries:
-            if source_already_scanned(db, user_id, source_info):
+            if source_marker(user_id, source_info) in scanned_markers:
                 continue
 
+            marker = source_marker(user_id, source_info)
+            scanned_markers.add(marker)
             new_raw = RawInput(
-                content=text_content[:500], # Save snippet to avoid DB bloat
+                content=text_content[:500],
                 source_type=source_info,
-                source_id=source_marker(user_id, source_info),
+                source_id=marker,
                 received_at=datetime.now()
             )
             db.add(new_raw)
@@ -1503,17 +1514,18 @@ async def save_structured_task_entries(entries, user_id, db):
 @app.get("/tasks")
 async def get_tasks(user_id: int, db: Session = Depends(get_db)):
     tasks = db.query(Task).filter(Task.owner_id == user_id).all()
-    changed = False
-    for task in tasks:
-        if task.assignee and task.assignee != "me":
-            continue
-        if not task.raw_id:
-            continue
 
-        raw = db.query(RawInput).filter(RawInput.raw_id == task.raw_id).first()
+    needs_raw = [t for t in tasks if t.raw_id and (not t.assignee or t.assignee == "me")]
+    raw_map = {}
+    if needs_raw:
+        raw_ids = [t.raw_id for t in needs_raw]
+        raw_map = {r.raw_id: r for r in db.query(RawInput).filter(RawInput.raw_id.in_(raw_ids)).all()}
+
+    changed = False
+    for task in needs_raw:
+        raw = raw_map.get(task.raw_id)
         if not raw:
             continue
-
         inferred_assigner = normalize_task_assigner({}, raw.content, raw.source_type)
         if inferred_assigner != "me":
             task.assignee = inferred_assigner

@@ -30,10 +30,14 @@ from googleapiclient.discovery import build
 
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly',
-    'https://www.googleapis.com/auth/calendar.events.readonly',
+    'https://www.googleapis.com/auth/calendar.readonly',
+    'https://www.googleapis.com/auth/tasks.readonly',
     'https://www.googleapis.com/auth/classroom.courses.readonly',
     'https://www.googleapis.com/auth/classroom.coursework.me.readonly'
 ]
+
+# Calendar event types that are not meaningful tasks/reminders
+_SKIP_CALENDAR_EVENT_TYPES = {"focusTime", "outOfOffice", "workingLocation"}
 
 app = FastAPI()
 SYNC_THROTTLE_SECONDS = int(os.environ.get("SYNC_THROTTLE_SECONDS", "30"))
@@ -139,6 +143,9 @@ def send_two_factor_code(user: User):
         "Your Clerk verification code",
         f"Your Clerk verification code is {code}. It expires in 10 minutes."
     )
+    # When SMTP isn't configured, pass the code back so the UI can display it directly.
+    if not result.get("sent"):
+        result["dev_code"] = code
     return result
 
 def verify_two_factor_code(user: User, code: Optional[str]) -> bool:
@@ -320,10 +327,13 @@ async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
         else:
             send_result = send_two_factor_code(user)
             db.commit()
-            detail = "Verification code sent."
+            detail = "Verification code sent to your email."
             if not send_result.get("sent"):
-                detail = "Verification code generated. Configure SMTP_HOST and SMTP_FROM to send email in production."
-            return {"requires_2fa": True, "message": detail, "email": user.email}
+                detail = "Enter the code shown below to sign in."
+            response = {"requires_2fa": True, "message": detail, "email": user.email}
+            if send_result.get("dev_code"):
+                response["dev_code"] = send_result["dev_code"]
+            return response
 
     return {"user_id": user.user_id, "username": user.username, "settings": user_settings_payload(user)}
 
@@ -1034,40 +1044,140 @@ def collect_google_calendar_entries(calendar, db: Session, user_id: int, max_res
     sync_entries = []
     past_days = int(os.environ.get("GOOGLE_CALENDAR_SYNC_PAST_DAYS", "30"))
     time_min = (datetime.utcnow() - timedelta(days=past_days)).isoformat() + 'Z'
-    page_token = None
 
-    while True:
-        request = calendar.events().list(
-            calendarId='primary',
-            timeMin=time_min,
-            maxResults=min(max_results, 2500),
-            singleEvents=True,
-            orderBy='startTime',
-            pageToken=page_token
-        )
-        cal_result = request.execute()
-        for event in cal_result.get('items', []):
-            if event.get("status") == "cancelled" or not event.get("summary"):
-                summary["calendar_skipped"] += 1
-                continue
+    # Discover every calendar the user has (primary, birthdays, holidays, shared, etc.)
+    # Requires calendar.readonly scope; falls back to primary-only if scope is missing.
+    calendar_ids = []
+    try:
+        page_token = None
+        while True:
+            cal_list_result = calendar.calendarList().list(pageToken=page_token).execute()
+            for cal in cal_list_result.get('items', []):
+                calendar_ids.append(cal['id'])
+            page_token = cal_list_result.get('nextPageToken')
+            if not page_token:
+                break
+    except Exception:
+        calendar_ids = ['primary']
 
-            source_info = f"calendar: {event['id']}"
-            if source_already_scanned(db, user_id, source_info):
-                summary["calendar_already_scanned"] += 1
-                continue
+    if not calendar_ids:
+        calendar_ids = ['primary']
 
-            entry = google_calendar_event_to_entry(event)
-            if not entry:
-                summary["calendar_skipped"] += 1
-                mark_source_scanned(db, user_id, source_info, f"Skipped Calendar event: {event.get('summary', '')}")
-                continue
+    seen_event_ids = set()  # guard against the same event appearing in multiple calendar views
 
-            sync_entries.append(entry)
-            summary["calendar"] += 1
+    for cal_id in calendar_ids:
+        page_token = None
+        while True:
+            try:
+                cal_result = calendar.events().list(
+                    calendarId=cal_id,
+                    timeMin=time_min,
+                    maxResults=min(max_results, 2500),
+                    singleEvents=True,
+                    orderBy='startTime',
+                    pageToken=page_token
+                ).execute()
+            except Exception as exc:
+                print(f"Calendar sync skipped for {cal_id}: {exc}")
+                break
 
-        page_token = cal_result.get("nextPageToken")
-        if not page_token:
-            break
+            for event in cal_result.get('items', []):
+                event_id = event.get('id', '')
+                if not event_id or event_id in seen_event_ids:
+                    continue
+                seen_event_ids.add(event_id)
+
+                if event.get("status") == "cancelled" or not event.get("summary"):
+                    summary["calendar_skipped"] += 1
+                    continue
+
+                if event.get("eventType") in _SKIP_CALENDAR_EVENT_TYPES:
+                    summary["calendar_skipped"] += 1
+                    continue
+
+                source_info = f"calendar: {event_id}"
+                if source_already_scanned(db, user_id, source_info):
+                    summary["calendar_already_scanned"] += 1
+                    continue
+
+                entry = google_calendar_event_to_entry(event)
+                if not entry:
+                    summary["calendar_skipped"] += 1
+                    mark_source_scanned(db, user_id, source_info, f"Skipped Calendar event: {event.get('summary', '')}")
+                    continue
+
+                sync_entries.append(entry)
+                summary["calendar"] += 1
+
+            page_token = cal_result.get("nextPageToken")
+            if not page_token:
+                break
+
+    return sync_entries, summary
+
+
+def collect_google_tasks_entries(tasks_service, db: Session, user_id: int):
+    """Fetch all incomplete tasks from every Google Tasks list."""
+    summary = {"gtasks": 0, "gtasks_already_scanned": 0, "gtasks_skipped": 0}
+    sync_entries = []
+
+    try:
+        tasklists_result = tasks_service.tasklists().list(maxResults=20).execute()
+    except Exception as exc:
+        print(f"Google Tasks list error (scope may be missing): {exc}")
+        return sync_entries, summary
+
+    for tasklist in tasklists_result.get('items', []):
+        try:
+            page_token = None
+            while True:
+                tasks_result = tasks_service.tasks().list(
+                    tasklist=tasklist['id'],
+                    showCompleted=False,
+                    showHidden=False,
+                    maxResults=100,
+                    pageToken=page_token
+                ).execute()
+
+                for task in tasks_result.get('items', []):
+                    if task.get('status') == 'completed':
+                        continue
+
+                    title = str(task.get('title') or '').strip()
+                    if not title:
+                        summary["gtasks_skipped"] += 1
+                        continue
+
+                    source_info = f"gtask: {task['id']}"
+                    if source_already_scanned(db, user_id, source_info):
+                        summary["gtasks_already_scanned"] += 1
+                        continue
+
+                    due_raw = task.get('due')  # RFC 3339 — always T00:00:00.000Z when set
+                    due_date = None
+                    if due_raw:
+                        date_only = re.sub(r'T.*', '', due_raw)  # YYYY-MM-DD
+                        due_date = f"{date_only}T12:00:00"
+
+                    entry_task = make_structured_task(
+                        title=title,
+                        description=task.get('notes') or '',
+                        due_date=due_date,
+                        assigner="Google Tasks",
+                        item_type="task",
+                        is_all_day=True,
+                        confidence=97
+                    )
+                    content = f"Google Task: {title}. Due: {due_raw or 'No date'}. Notes: {task.get('notes', '')}"
+                    sync_entries.append((entry_task, content, source_info))
+                    summary["gtasks"] += 1
+
+                page_token = tasks_result.get('nextPageToken')
+                if not page_token:
+                    break
+
+        except Exception as exc:
+            print(f"Google Tasks sync error for list '{tasklist.get('title')}': {exc}")
 
     return sync_entries, summary
 
@@ -1113,21 +1223,20 @@ def is_actionable_classroom_item(item: dict) -> bool:
 
     title = str(item.get("title") or "")
     description = str(item.get("description") or "")
+
+    # Skip daily agenda posts unconditionally — titles like "Thursday May 28th"
+    # or "May 26th" are class-period plans, not student assignments.
+    if CLASSROOM_DAY_ONLY_TITLE_RE.match(title):
+        return False
+
     text = f"{title}\n{description}"
     has_due_date = bool(item.get("dueDate"))
     has_action_language = bool(CLASSROOM_TASK_WORD_RE.search(text))
-    has_meaningful_description = not CLASSROOM_MINIMAL_DESCRIPTION_RE.match(description)
-    is_day_only_post = bool(CLASSROOM_DAY_ONLY_TITLE_RE.match(title)) and not has_meaningful_description
     looks_reference_only = bool(CLASSROOM_REFERENCE_ONLY_RE.search(title)) and not has_due_date
-
-    if is_day_only_post:
-        return False
 
     if looks_reference_only:
         return False
 
-    # Posts like "Project example" with only an attachment and no due date are
-    # usually resources/examples, not new work Clerk should create.
     if not has_due_date and not has_action_language:
         return False
 
@@ -1139,12 +1248,18 @@ def cleanup_classroom_noise_tasks(db: Session, user_id: int) -> int:
         Task.status != "deleted"
     ).all()
 
+    # Collect raw_ids in one batch query
+    raw_ids_needed = [t.raw_id for t in tasks if t.raw_id and CLASSROOM_DAY_ONLY_TITLE_RE.match(t.title or "")]
+    raw_map = {}
+    if raw_ids_needed:
+        raw_map = {r.raw_id: r for r in db.query(RawInput).filter(RawInput.raw_id.in_(raw_ids_needed)).all()}
+
     cleaned = 0
     for task in tasks:
         if not CLASSROOM_DAY_ONLY_TITLE_RE.match(task.title or ""):
             continue
 
-        raw = db.query(RawInput).filter(RawInput.raw_id == task.raw_id).first() if task.raw_id else None
+        raw = raw_map.get(task.raw_id) if task.raw_id else None
         came_from_classroom = raw and str(raw.source_type or "").startswith("classroom")
         assigned_by_class = task.assignee and task.assignee != "me"
         if came_from_classroom or assigned_by_class:
@@ -1298,10 +1413,10 @@ def sync_all_blocking(user_id: int):
         classroom = build('classroom', 'v1', credentials=creds)
         calendar = build('calendar', 'v3', credentials=creds)
 
-        summary = {"classroom": 0, "calendar": 0}
+        summary = {"classroom": 0, "calendar": 0, "gtasks": 0}
         sync_entries = []
 
-        # 2. Fetch Classroom Assignments
+        # 1. Classroom assignments
         try:
             classroom_entries, classroom_summary = collect_classroom_entries(classroom, db, user_id)
             sync_entries.extend(classroom_entries)
@@ -1310,13 +1425,22 @@ def sync_all_blocking(user_id: int):
         except Exception as e:
             print(f"Classroom sync error: {e}")
 
-        # 3. Fetch all future Google Calendar events, idempotently by event id.
+        # 2. All Google Calendar events (all calendars, including birthdays)
         try:
             calendar_entries, calendar_summary = collect_google_calendar_entries(calendar, db, user_id)
             sync_entries.extend(calendar_entries)
             summary.update(calendar_summary)
         except Exception as e:
             print(f"Calendar sync error: {e}")
+
+        # 3. Google Tasks
+        try:
+            tasks_service = build('tasks', 'v1', credentials=creds)
+            tasks_entries, tasks_summary = collect_google_tasks_entries(tasks_service, db, user_id)
+            sync_entries.extend(tasks_entries)
+            summary["gtasks"] = tasks_summary["gtasks"]
+        except Exception as e:
+            print(f"Google Tasks sync error: {e}")
 
         if sync_entries:
             asyncio.run(save_structured_task_entries(sync_entries, user_id, db))
@@ -1377,7 +1501,17 @@ async def auto_sync_user(user_id: int, db: Session):
     except Exception as exc:
         print(f"Auto Calendar sync error for user {user_id}: {exc}")
 
-    return {"gmail": gmail_count, "classroom": classroom_count, "calendar": calendar_count}
+    gtasks_count = 0
+    try:
+        tasks_service = build('tasks', 'v1', credentials=creds)
+        entries, summary = collect_google_tasks_entries(tasks_service, db, user_id)
+        if entries:
+            await save_structured_task_entries(entries, user_id, db)
+        gtasks_count = summary.get("gtasks", 0)
+    except Exception as exc:
+        print(f"Auto Google Tasks sync error for user {user_id}: {exc}")
+
+    return {"gmail": gmail_count, "classroom": classroom_count, "calendar": calendar_count, "gtasks": gtasks_count}
 
 def get_auto_sync_user_ids(db: Session) -> List[int]:
     if not os.path.isdir(GOOGLE_TOKEN_DIR):
@@ -1477,6 +1611,16 @@ async def save_structured_task_entries(entries, user_id, db):
             if duplicate:
                 if normalized_assigner != "me" and (not duplicate.assignee or duplicate.assignee == "me"):
                     duplicate.assignee = normalized_assigner
+                # Calendar and Google Tasks are authoritative: update the existing task's
+                # dates so the calendar version always wins over Gmail/Classroom guesses.
+                is_authoritative = source_info.startswith("calendar:") or source_info.startswith("gtask:")
+                if is_authoritative:
+                    if task_data.get("due_date"):
+                        duplicate.due_date = task_data["due_date"]
+                    if task_data.get("end_date"):
+                        duplicate.end_date = task_data["end_date"]
+                    if task_data.get("is_all_day") is not None:
+                        duplicate.is_all_day = 1 if task_data["is_all_day"] else 0
                 task_ids.append(duplicate.task_id)
                 continue
 
@@ -1602,13 +1746,16 @@ async def send_two_factor_test(user_id: int, request: TwoFactorSendRequest, db: 
 
     send_result = send_two_factor_code(user)
     db.commit()
-    message = "Verification code sent."
+    message = "Verification code sent to your email."
     if not send_result.get("sent"):
         if send_result.get("reason") == "smtp_not_configured":
-            message = "Verification code generated. Configure SMTP_HOST and SMTP_FROM to send email in production."
+            message = "Code generated — enter it in the field below."
         else:
-            message = "Verification code generated, but email could not be sent. Check the SMTP settings and app password."
-    return {"status": "success", "message": message}
+            message = "Code generated, but email delivery failed. Check SMTP settings."
+    result = {"status": "success", "message": message}
+    if send_result.get("dev_code"):
+        result["dev_code"] = send_result["dev_code"]
+    return result
 
 @app.post("/users/{user_id}/2fa/verify")
 async def verify_two_factor_setup(user_id: int, request: TwoFactorVerifyRequest, db: Session = Depends(get_db)):

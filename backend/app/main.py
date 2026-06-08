@@ -102,7 +102,7 @@ def hash_reset_token(token: str) -> str:
 def send_email_message(to_email: str, subject: str, body: str):
     smtp_host = os.environ.get("SMTP_HOST")
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-    smtp_timeout = float(os.environ.get("SMTP_TIMEOUT_SECONDS", "3"))
+    smtp_timeout = float(os.environ.get("SMTP_TIMEOUT_SECONDS", "15"))
     smtp_username = os.environ.get("SMTP_USERNAME")
     smtp_password = os.environ.get("SMTP_PASSWORD")
     if smtp_password:
@@ -143,8 +143,9 @@ def send_two_factor_code(user: User):
         "Your Clerk verification code",
         f"Your Clerk verification code is {code}. It expires in 10 minutes."
     )
-    # When SMTP isn't configured, pass the code back so the UI can display it directly.
-    if not result.get("sent"):
+    # When SMTP is genuinely not configured, pass the code back so the UI can display it.
+    # If SMTP IS configured but delivery failed, surface the error instead of silently hiding it.
+    if not result.get("sent") and result.get("reason") == "smtp_not_configured":
         result["dev_code"] = code
     return result
 
@@ -1752,9 +1753,11 @@ async def send_two_factor_test(user_id: int, request: TwoFactorSendRequest, db: 
             message = "Code generated — enter it in the field below."
         else:
             message = "Code generated, but email delivery failed. Check SMTP settings."
-    result = {"status": "success", "message": message}
+    result = {"status": "success" if send_result.get("sent") or send_result.get("dev_code") else "warning", "message": message}
     if send_result.get("dev_code"):
         result["dev_code"] = send_result["dev_code"]
+    if not send_result.get("sent") and not send_result.get("dev_code"):
+        result["smtp_error"] = True
     return result
 
 @app.post("/users/{user_id}/2fa/verify")

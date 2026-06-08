@@ -34,7 +34,7 @@ body {
     background: var(--bg); /* Uses the variable! */
     background-attachment: fixed; /* Keeps gradient smooth on scroll */
     color: var(--text);
-    transition: all 0.3s ease;
+    transition: background-color 0.3s ease, color 0.3s ease;
     min-height: 100vh;
     overflow-x: hidden;
     overflow-y: auto;
@@ -259,7 +259,7 @@ textarea {
     justify-content: center;
     font-size: 14px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s, color 0.2s, transform 0.2s;
 }
 
 .done-btn:hover {
@@ -271,7 +271,7 @@ textarea {
 .agenda-item.removing {
     transform: translateX(100px);
     opacity: 0;
-    transition: all 0.4s ease;
+    transition: transform 0.4s ease, opacity 0.4s ease;
     pointer-events: none;
 }
 
@@ -1358,7 +1358,7 @@ body.dark-mode .expanded-task-row {
     gap: 14px;
     min-width: 280px;
     animation: toastIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-    transition: all 0.3s ease;
+    transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
 @keyframes toastIn {
@@ -2810,6 +2810,12 @@ const isStaticFrontend = window.location.protocol === "file:" || STATIC_FRONTEND
 let API_BASE = window.CLERK_API_BASE || (isStaticFrontend ? "http://127.0.0.1:8000" : window.location.origin);
 const REQUEST_TIMEOUT_MS = 20000;
 const requestBucket = new Map();
+const LOCAL_API_BASES = [
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8001",
+    "http://localhost:8001"
+];
 
 function renderSkeleton(count = 4) {
     return `<div class="skeleton-list">${Array.from({ length: count }, () => '<div class="skeleton-card"></div>').join('')}</div>`;
@@ -2817,8 +2823,34 @@ function renderSkeleton(count = 4) {
 
 function getFriendlyApiError(error) {
     if (error && error.name === 'AbortError') return "The server is taking too long. Make sure the backend is running, then try again.";
+    if (error && isNetworkFetchError(error)) return "Could not reach the Clerk backend. Start Clerk, then open the URL shown in the terminal.";
     if (error && error.message) return error.message;
     return "Connection failed. Make sure the FastAPI backend is running on port 8000.";
+}
+
+function isLocalApiHost(hostname) {
+    return ["127.0.0.1", "localhost", "::1"].includes(hostname);
+}
+
+function isNetworkFetchError(error) {
+    const message = String(error?.message || "");
+    return error instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(message);
+}
+
+function getApiAttemptUrls(url) {
+    const primaryUrl = new URL(String(url), window.location.href);
+    const baseUrl = new URL(API_BASE, window.location.href);
+    const shouldTryLocalFallbacks = isStaticFrontend || isLocalApiHost(window.location.hostname) || isLocalApiHost(baseUrl.hostname);
+    const bases = shouldTryLocalFallbacks ? [API_BASE, ...LOCAL_API_BASES] : [API_BASE];
+    const seen = new Set();
+
+    return bases
+        .map(base => new URL(`${primaryUrl.pathname}${primaryUrl.search}`, base).href)
+        .filter(candidate => {
+            if (seen.has(candidate)) return false;
+            seen.add(candidate);
+            return true;
+        });
 }
 
 function getFriendlyGoogleError(message) {
@@ -2873,6 +2905,8 @@ async function apiFetch(url, options = {}) {
     const method = (options.method || 'GET').toUpperCase();
     const throttleKey = options.throttleKey || `${method}:${url}`;
     const minInterval = options.minInterval || 0;
+    const timeout = options.timeout || REQUEST_TIMEOUT_MS;
+    const { throttleKey: _throttleKey, minInterval: _minInterval, timeout: _timeout, ...fetchOptions } = options;
     const now = Date.now();
     const lastRun = requestBucket.get(throttleKey) || 0;
 
@@ -2881,34 +2915,29 @@ async function apiFetch(url, options = {}) {
     }
 
     requestBucket.set(throttleKey, now);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), options.timeout || REQUEST_TIMEOUT_MS);
+    let lastNetworkError = null;
 
-    try {
+    for (const attemptUrl of getApiAttemptUrls(url)) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeout);
         try {
-            return await fetch(url, { ...options, signal: controller.signal });
+            const response = await fetch(attemptUrl, { ...fetchOptions, signal: controller.signal });
+            API_BASE = new URL(attemptUrl).origin;
+            return response;
         } catch (error) {
             if (error && error.name === 'AbortError') {
                 throw error;
             }
-            if (API_BASE.endsWith(':8000') && String(url).startsWith(API_BASE)) {
-                const fallbackBase = API_BASE.replace(':8000', ':8001');
-                const fallbackUrl = String(url).replace(API_BASE, fallbackBase);
-                const fallbackController = new AbortController();
-                const fallbackTimer = setTimeout(() => fallbackController.abort(), Math.min(options.timeout || REQUEST_TIMEOUT_MS, 4000));
-                try {
-                    const fallbackResponse = await fetch(fallbackUrl, { ...options, signal: fallbackController.signal });
-                    API_BASE = fallbackBase;
-                    return fallbackResponse;
-                } finally {
-                    clearTimeout(fallbackTimer);
-                }
+            if (!isNetworkFetchError(error)) {
+                throw error;
             }
-            throw error;
+            lastNetworkError = error;
+        } finally {
+            clearTimeout(timer);
         }
-    } finally {
-        clearTimeout(timer);
     }
+
+    throw lastNetworkError || new Error("Could not reach the Clerk backend.");
 }
 
 // Helper to parse dates as "Wall Time" (ignoring UTC shift)
@@ -3052,7 +3081,7 @@ window.login = async function() {
         if (response.ok) {
             const data = await response.json();
             if (data.requires_2fa) {
-                openTwoFactorLoginModal(data.message || "Enter the verification code sent to your email.");
+                openTwoFactorLoginModal(data.message || "Enter the verification code sent to your email.", data.dev_code);
                 errorMsg.style.display = 'none';
                 return;
             }
@@ -3084,16 +3113,17 @@ window.login = async function() {
     }
 };
 
-function openTwoFactorLoginModal(message) {
+function openTwoFactorLoginModal(message, devCode = null) {
     pendingTwoFactorLogin = true;
     const modal = document.getElementById('twoFactorLoginModal');
     const input = document.getElementById('two-factor-login-code');
     const error = document.getElementById('two-factor-login-error');
+    // Never expose the code in the visible message
     document.getElementById('twoFactorLoginMessage').textContent = message;
-    input.value = "";
     error.style.display = 'none';
     error.textContent = "";
     modal.classList.add('open');
+    input.value = "";
     setTimeout(() => input.focus(), 50);
 }
 
@@ -3310,11 +3340,17 @@ async function sendTwoFactorTestCode({ quiet = false } = {}) {
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.detail || "Could not send verification code.");
-        if (!quiet) alert(data.message || "Verification code sent.");
         window.USER_SETTINGS.email = email;
+        const codeInput = document.getElementById('two-factor-setup-code');
         document.getElementById('two-factor-code-row').style.display = 'block';
         document.getElementById('verify2faBtn').style.display = 'inline-flex';
-        document.getElementById('two-factor-setup-code').focus();
+        if (data.dev_code) {
+            if (!quiet) showToast("Check the server console for your verification code.", 'info');
+            codeInput.focus();
+        } else {
+            if (!quiet) showToast(data.message || "Verification code sent to your email.", 'success');
+            codeInput.focus();
+        }
     } catch (err) {
         alert(err.message || getFriendlyApiError(err));
     } finally {

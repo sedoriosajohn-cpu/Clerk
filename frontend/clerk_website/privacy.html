@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy | Clerk</title>
+<style>
+:root {
+  --teal: #5eead4;
+  --teal-dark: #47b9b2;
+  --teal-soft: #dff4f2;
+  --bg: radial-gradient(circle at top left, #dff5f2 0%, #eef3f5 32%, #f7f8fa 100%);
+  --panel-bg: rgba(255, 255, 255, 0.86);
+  --text: #436172;
+  --muted: #7f98a5;
+  --border: #e2e8f0;
+  --shadow: 0 10px 28px rgba(79, 113, 130, .12);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: Inter, Arial, sans-serif;
+  background: var(--bg);
+  background-attachment: fixed;
+  color: var(--text);
+  line-height: 1.65;
+}
+.topbar {
+  min-height: 74px;
+  background: rgba(255, 255, 255, .75);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 0 24px;
+  backdrop-filter: blur(10px);
+}
+.brand { display: flex; align-items: center; gap: 14px; font-weight: 700; font-size: 24px; text-decoration: none; color: var(--text); }
+.brand img { width: 42px; height: 42px; border-radius: 50%; background: white; object-fit: cover; }
+.nav { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.nav a { color: var(--text); text-decoration: none; padding: 9px 14px; border-radius: 12px; font-weight: 500; font-size: 14px; }
+.nav a:hover, .nav a.active { background: var(--teal-soft); color: var(--teal-dark); }
+.page { max-width: 980px; margin: 0 auto; padding: 34px 20px 54px; }
+.hero, .panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 24px;
+  margin-bottom: 18px;
+}
+.hero h1 { margin: 0 0 8px; font-size: clamp(30px, 5vw, 48px); line-height: 1.1; color: #365568; }
+.hero p { margin: 0; color: var(--muted); font-size: 16px; }
+h2 { color: #365568; margin-top: 0; font-size: 22px; }
+h3 { color: #365568; margin-bottom: 6px; }
+ul { padding-left: 22px; }
+li { margin: 7px 0; }
+a { color: #249a93; font-weight: 700; }
+.notice { border-left: 5px solid var(--teal); background: rgba(94,234,212,.14); padding: 14px 16px; border-radius: 14px; }
+.small { color: var(--muted); font-size: 14px; }
+.footer { text-align: center; color: var(--muted); font-size: 14px; padding: 18px; }
+@media (max-width: 720px) { .topbar { align-items: flex-start; flex-direction: column; padding: 18px 20px; } .nav { justify-content: flex-start; } .hero, .panel { padding: 20px; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><img src="/logo.png" alt="Clerk logo"><span>Clerk</span></a>
+  <nav class="nav" aria-label="Legal pages">
+    <a href="/">Home</a>
+    <a class="active" href="/static/privacy.html">Privacy</a>
+    <a href="/static/terms.html">Terms</a>
+  </nav>
+</header>
+<main class="page">
+  <section class="hero">
+    <h1>Privacy Policy</h1>
+    <p>Effective Date: June 8, 2026</p>
+  </section>
+
+  <section class="panel notice">
+    <strong>Clerk is a student capstone project.</strong> This policy explains how Clerk handles information used to turn notes, files, schedules, and connected Google data into tasks and reminders. For privacy questions or deletion requests, contact <a href="mailto:supportclerk@gmail.com">supportclerk@gmail.com</a>.
+  </section>
+
+  <section class="panel">
+    <h2>1. What Clerk Does</h2>
+    <p>Clerk helps users organize school, work, and personal responsibilities by converting information into tasks, reminders, deadlines, and schedule entries. Users may type notes, upload documents or images, and optionally connect Google services so Clerk can read relevant information and create a task list inside the app.</p>
+  </section>
+
+  <section class="panel">
+    <h2>2. Information We Collect</h2>
+    <p>Depending on how you use Clerk, we may collect the following information:</p>
+    <ul>
+      <li><strong>Account information:</strong> username, security email, preferred name, schedule matching name, notification preferences, dark mode preference, two-factor authentication settings, and password reset information.</li>
+      <li><strong>User-provided content:</strong> typed notes, pasted text, uploaded text files, PDFs, markdown files, images, work schedules, due dates, assignment details, and other information you choose to submit.</li>
+      <li><strong>Task information:</strong> generated tasks, titles, descriptions, dates, times, assignees, priorities, completion status, confidence scores, and source labels.</li>
+      <li><strong>Google connection data:</strong> if you connect Google, Clerk may request read-only access to Gmail, Google Calendar, Google Tasks, and Google Classroom information needed to identify assignments, events, reminders, and deadlines.</li>
+      <li><strong>Technical information:</strong> basic request data, error logs, app settings, and authentication state needed to keep the app working and secure.</li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <h2>3. Google API Data and Limited Use</h2>
+    <p>Clerk uses Google data only to provide user-facing task organization features, such as finding assignments, deadlines, email reminders, calendar events, and task items. Clerk does not sell Google user data, does not use Google user data for advertising, and does not allow humans to read Google user data unless needed for security, debugging with user permission, legal compliance, or abuse prevention.</p>
+    <p>Clerk requests read-only Google access where possible. Disconnecting Google from Clerk stops future syncing, but previously generated tasks may remain until deleted.</p>
+  </section>
+
+  <section class="panel">
+    <h2>4. How We Use Information</h2>
+    <ul>
+      <li>To create, display, update, complete, and organize tasks and reminders.</li>
+      <li>To extract dates, titles, priorities, schedules, and deadlines from user-provided content.</li>
+      <li>To sync information from connected Google services when the user chooses to connect them.</li>
+      <li>To authenticate users, support password resets, and support optional two-factor verification.</li>
+      <li>To detect errors, prevent abuse, improve reliability, and protect the app.</li>
+      <li>To respond to support requests sent to <a href="mailto:supportclerk@gmail.com">supportclerk@gmail.com</a>.</li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <h2>5. AI Processing</h2>
+    <p>Clerk may send user-provided text, extracted document text, image content, schedule information, or connected-service content to an AI processing service to identify tasks, dates, and reminders. The AI is used to produce structured task information. Users should not submit sensitive information that is not needed for task organization.</p>
+  </section>
+
+  <section class="panel">
+    <h2>6. How Information Is Stored</h2>
+    <p>Clerk stores account settings, raw inputs, and generated tasks in the app database. Google authorization tokens may be stored separately so the app can continue syncing after a user connects Google. Clerk keeps information only as long as reasonably needed for the project, app functionality, security, debugging, or legal obligations.</p>
+  </section>
+
+  <section class="panel">
+    <h2>7. Sharing and Disclosure</h2>
+    <p>Clerk does not sell personal information. Clerk may share information only in the following limited situations:</p>
+    <ul>
+      <li>With service providers needed to run the app, such as hosting, database, email, Google APIs, and AI processing providers.</li>
+      <li>When required to comply with law, school rules, legal process, or safety obligations.</li>
+      <li>To protect Clerk, users, or others from security threats, abuse, fraud, or misuse.</li>
+      <li>With the user’s direction or consent.</li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <h2>8. User Choices</h2>
+    <ul>
+      <li>You can choose not to connect Google services.</li>
+      <li>You can edit or delete tasks inside the app where those controls are available.</li>
+      <li>You can request account, task, raw input, or Google token deletion by contacting <a href="mailto:supportclerk@gmail.com">supportclerk@gmail.com</a>.</li>
+      <li>You can revoke Google access through your Google Account permissions page.</li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <h2>9. Security</h2>
+    <p>Clerk uses reasonable technical and organizational safeguards for a student project, including account authentication, optional two-factor verification, reset tokens, database controls, and limited Google scopes. No app can guarantee perfect security. Users are responsible for using strong passwords and keeping login information private.</p>
+  </section>
+
+  <section class="panel">
+    <h2>10. Children and Student Users</h2>
+    <p>Clerk is intended for students and general productivity use, but it is not directed to children under 13. Users under 13 should not create an account or submit personal information without verifiable parent, guardian, or school authorization. If you believe a child under 13 submitted personal information without proper permission, contact <a href="mailto:supportclerk@gmail.com">supportclerk@gmail.com</a> so it can be reviewed and deleted where appropriate.</p>
+  </section>
+
+  <section class="panel">
+    <h2>11. Data Accuracy</h2>
+    <p>AI-generated tasks may be incomplete, incorrect, duplicated, or outdated. Users should review all extracted tasks, deadlines, and reminders before relying on them.</p>
+  </section>
+
+  <section class="panel">
+    <h2>12. Changes to This Policy</h2>
+    <p>Clerk may update this Privacy Policy as the project changes. The effective date above will be updated when changes are made. Continued use of Clerk after an update means the user accepts the revised policy.</p>
+  </section>
+
+  <section class="panel">
+    <h2>13. Contact</h2>
+    <p>Questions, deletion requests, or privacy concerns should be sent to <a href="mailto:supportclerk@gmail.com">supportclerk@gmail.com</a>.</p>
+  </section>
+</main>
+<footer class="footer">© 2026 Clerk. Student capstone project.</footer>
+</body>
+</html>

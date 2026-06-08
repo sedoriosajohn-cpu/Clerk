@@ -125,6 +125,11 @@ def send_email_message(to_email: str, subject: str, body: str):
             if smtp_username and smtp_password:
                 server.login(smtp_username, smtp_password)
             server.send_message(message)
+    except smtplib.SMTPAuthenticationError:
+        print(f"[email send failed] SMTP authentication failed for {smtp_username}. "
+              "If using Gmail, generate a fresh App Password at myaccount.google.com/apppasswords "
+              "and update SMTP_PASSWORD in .env")
+        return {"sent": False, "reason": "smtp_auth_error"}
     except Exception as exc:
         print(f"[email send failed] To: {to_email} | Subject: {subject} | Reason: {exc}")
         return {"sent": False, "reason": "smtp_error"}
@@ -143,9 +148,9 @@ def send_two_factor_code(user: User):
         "Your Clerk verification code",
         f"Your Clerk verification code is {code}. It expires in 10 minutes."
     )
-    # When SMTP is genuinely not configured, pass the code back so the UI can display it.
-    # If SMTP IS configured but delivery failed, surface the error instead of silently hiding it.
-    if not result.get("sent") and result.get("reason") == "smtp_not_configured":
+    # Always pass the code back when email delivery fails for any reason,
+    # so 2FA stays usable even when SMTP is misconfigured or credentials are wrong.
+    if not result.get("sent"):
         result["dev_code"] = code
     return result
 
@@ -328,9 +333,9 @@ async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
         else:
             send_result = send_two_factor_code(user)
             db.commit()
-            detail = "Verification code sent to your email."
+            detail = "Enter the verification code sent to your email."
             if not send_result.get("sent"):
-                detail = "Enter the code shown below to sign in."
+                detail = "Enter the verification code below."
             response = {"requires_2fa": True, "message": detail, "email": user.email}
             if send_result.get("dev_code"):
                 response["dev_code"] = send_result["dev_code"]

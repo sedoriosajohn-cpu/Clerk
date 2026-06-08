@@ -3118,17 +3118,13 @@ function openTwoFactorLoginModal(message, devCode = null) {
     const modal = document.getElementById('twoFactorLoginModal');
     const input = document.getElementById('two-factor-login-code');
     const error = document.getElementById('two-factor-login-error');
-    document.getElementById('twoFactorLoginMessage').textContent = devCode
-        ? `${message} Code: ${devCode}`
-        : message;
-    input.value = devCode || "";
+    // Never expose the code in the visible message
+    document.getElementById('twoFactorLoginMessage').textContent = message;
     error.style.display = 'none';
     error.textContent = "";
     modal.classList.add('open');
-    setTimeout(() => {
-        input.focus();
-        if (devCode) input.select();
-    }, 50);
+    input.value = "";
+    setTimeout(() => input.focus(), 50);
 }
 
 function closeTwoFactorLoginModal() {
@@ -3346,19 +3342,12 @@ async function sendTwoFactorTestCode({ quiet = false } = {}) {
         if (!response.ok) throw new Error(data.detail || "Could not send verification code.");
         window.USER_SETTINGS.email = email;
         const codeInput = document.getElementById('two-factor-setup-code');
+        document.getElementById('two-factor-code-row').style.display = 'block';
+        document.getElementById('verify2faBtn').style.display = 'inline-flex';
         if (data.dev_code) {
-            // SMTP not configured — show code directly in the input
-            document.getElementById('two-factor-code-row').style.display = 'block';
-            document.getElementById('verify2faBtn').style.display = 'inline-flex';
-            codeInput.value = data.dev_code;
-            if (!quiet) showToast(`Your verification code is: ${data.dev_code}`, 'info');
-        } else if (data.smtp_error) {
-            // SMTP configured but delivery failed
-            if (!quiet) showToast(data.message || "Email delivery failed. Check your SMTP settings in .env.", 'error');
+            if (!quiet) showToast("Check the server console for your verification code.", 'info');
+            codeInput.focus();
         } else {
-            // Email sent successfully
-            document.getElementById('two-factor-code-row').style.display = 'block';
-            document.getElementById('verify2faBtn').style.display = 'inline-flex';
             if (!quiet) showToast(data.message || "Verification code sent to your email.", 'success');
             codeInput.focus();
         }

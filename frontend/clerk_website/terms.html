@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terms of Service | Clerk</title>
+<style>
+:root {
+  --teal: #5eead4;
+  --teal-dark: #47b9b2;
+  --teal-soft: #dff4f2;
+  --bg: radial-gradient(circle at top left, #dff5f2 0%, #eef3f5 32%, #f7f8fa 100%);
+  --panel-bg: rgba(255, 255, 255, 0.86);
+  --text: #436172;
+  --muted: #7f98a5;
+  --border: #e2e8f0;
+  --shadow: 0 10px 28px rgba(79, 113, 130, .12);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: Inter, Arial, sans-serif;
+  background: var(--bg);
+  background-attachment: fixed;
+  color: var(--text);
+  line-height: 1.65;
+}
+.topbar {
+  min-height: 74px;
+  background: rgba(255, 255, 255, .75);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 0 24px;
+  backdrop-filter: blur(10px);
+}
+.brand { display: flex; align-items: center; gap: 14px; font-weight: 700; font-size: 24px; text-decoration: none; color: var(--text); }
+.brand img { width: 42px; height: 42px; border-radius: 50%; background: white; object-fit: cover; }
+.nav { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.nav a { color: var(--text); text-decoration: none; padding: 9px 14px; border-radius: 12px; font-weight: 500; font-size: 14px; }
+.nav a:hover, .nav a.active { background: var(--teal-soft); color: var(--teal-dark); }
+.page { max-width: 980px; margin: 0 auto; padding: 34px 20px 54px; }
+.hero, .panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 24px;
+  margin-bottom: 18px;
+}
+.hero h1 { margin: 0 0 8px; font-size: clamp(30px, 5vw, 48px); line-height: 1.1; color: #365568; }
+.hero p { margin: 0; color: var(--muted); font-size: 16px; }
+h2 { color: #365568; margin-top: 0; font-size: 22px; }
+h3 { color: #365568; margin-bottom: 6px; }
+ul { padding-left: 22px; }
+li { margin: 7px 0; }
+a { color: #249a93; font-weight: 700; }
+.notice { border-left: 5px solid var(--teal); background: rgba(94,234,212,.14); padding: 14px 16px; border-radius: 14px; }
+.small { color: var(--muted); font-size: 14px; }
+.footer { text-align: center; color: var(--muted); font-size: 14px; padding: 18px; }
+@media (max-width: 720px) { .topbar { align-items: flex-start; flex-direction: column; padding: 18px 20px; } .nav { justify-content: flex-start; } .hero, .panel { padding: 20px; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><img src="/logo.png" alt="Clerk logo"><span>Clerk</span></a>
+  <nav class="nav" aria-label="Legal pages">
+    <a href="/">Home</a>
+    <a href="/static/privacy.html">Privacy</a>
+    <a class="active" href="/static/terms.html">Terms</a>
+  </nav>
+</header>
+<main class="page">
+  <section class="hero">
+    <h1>Terms of Service</h1>
+    <p>Effective Date: June 8, 2026</p>
+  </section>
+
+  <section class="panel notice">
+    <strong>Clerk is a student capstone project.</strong> These Terms explain the rules for using Clerk, including the task extraction, file upload, notification, account, and optional Google sync features. Questions should be sent to <a href="mailto:supportclerk@gmail.com">supportclerk@gmail.com</a>.
+  </section>
+
+  <section class="panel">
+    <h2>1. Acceptance of These Terms</h2>
+    <p>By accessing or using Clerk, you agree to these Terms of Service and the Clerk Privacy Policy. If you do not agree, do not use Clerk. If you use Clerk for a class, school project, or organization, you are responsible for following the rules that apply to that setting.</p>
+  </section>
+
+  <section class="panel">
+    <h2>2. What Clerk Provides</h2>
+    <p>Clerk is a productivity app designed to help users convert notes, uploaded documents, images, schedules, Google Classroom items, Gmail messages, Google Calendar events, and Google Tasks information into organized tasks and reminders. Clerk may provide AI-generated task titles, descriptions, dates, priorities, confidence scores, and schedule entries.</p>
+  </section>
+
+  <section class="panel">
+    <h2>3. Accounts and Security</h2>
+    <ul>
+      <li>You are responsible for the accuracy of account information you provide.</li>
+      <li>You are responsible for keeping your username, password, reset links, and verification codes private.</li>
+      <li>You may not access another user’s account or attempt to bypass security features.</li>
+      <li>Clerk may suspend or remove access if an account is used in a way that harms the app, other users, the project, or connected services.</li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <h2>4. User Content</h2>
+    <p>You keep ownership of content you submit to Clerk, including notes, files, images, schedules, and connected account data. You give Clerk permission to process, store, display, transform, and use that content only as needed to provide the app’s features, maintain the service, debug errors, enforce these Terms, and comply with legal or school-related obligations.</p>
+    <p>You are responsible for making sure you have the right to upload or connect any content you submit to Clerk.</p>
+  </section>
+
+  <section class="panel">
+    <h2>5. Google Sync</h2>
+    <p>If you choose to connect Google, you authorize Clerk to use the approved Google scopes for read-only task organization features. Clerk may read relevant Gmail, Calendar, Tasks, and Classroom information to identify assignments, events, deadlines, and reminders. You can disconnect Clerk by revoking access through your Google Account permissions or by contacting support.</p>
+  </section>
+
+  <section class="panel">
+    <h2>6. AI and Accuracy Disclaimer</h2>
+    <p>Clerk uses automated and AI-assisted processing. AI-generated results may be incorrect, incomplete, duplicated, misread, delayed, or formatted incorrectly. Clerk is not a replacement for checking your teacher’s instructions, work schedule, email, calendar, school portal, or official deadlines. You are responsible for verifying every task, reminder, due date, and schedule entry before relying on it.</p>
+  </section>
+
+  <section class="panel">
+    <h2>7. Acceptable Use</h2>
+    <p>You agree not to use Clerk to:</p>
+    <ul>
+      <li>Break the law or violate school, workplace, or platform rules.</li>
+      <li>Upload content you do not have permission to use.</li>
+      <li>Submit malware, harmful code, spam, or intentionally misleading content.</li>
+      <li>Attempt to reverse engineer, overload, scrape, attack, or disrupt Clerk or its hosting providers.</li>
+      <li>Access, collect, or expose another person’s private information without permission.</li>
+      <li>Use Clerk for high-risk decisions where a missed or wrong reminder could cause serious harm, legal consequences, financial loss, or safety issues.</li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <h2>8. Uploaded Files and Sensitive Information</h2>
+    <p>Clerk may process text files, PDFs, markdown files, images, work schedules, and similar documents. Do not upload Social Security numbers, bank information, medical records, private family information, or other sensitive information unless it is truly necessary for the task you want Clerk to organize. Clerk is designed for productivity reminders, not secure storage of sensitive records.</p>
+  </section>
+
+  <section class="panel">
+    <h2>9. Notifications and Deadlines</h2>
+    <p>Clerk may show reminders or notifications for upcoming tasks. Notifications may be delayed, blocked by browser settings, fail to appear, or contain errors from extracted data. You remain responsible for tracking your own deadlines and obligations.</p>
+  </section>
+
+  <section class="panel">
+    <h2>10. Availability and Project Status</h2>
+    <p>Clerk is provided as a capstone project and may change, break, lose features, go offline, or be discontinued at any time. Clerk is provided on an “as is” and “as available” basis without warranties of any kind, including warranties of accuracy, reliability, availability, fitness for a particular purpose, or non-infringement.</p>
+  </section>
+
+  <section class="panel">
+    <h2>11. Limitation of Liability</h2>
+    <p>To the maximum extent allowed by law, Clerk and its creators are not responsible for missed deadlines, lost work, incorrect reminders, lost data, sync failures, account issues, schedule mistakes, indirect damages, incidental damages, consequential damages, special damages, or other losses related to using or being unable to use Clerk.</p>
+  </section>
+
+  <section class="panel">
+    <h2>12. Third-Party Services</h2>
+    <p>Clerk may rely on third-party services such as hosting providers, databases, email providers, Google APIs, and AI processing providers. Those services may have their own terms and privacy rules. Clerk is not responsible for third-party service outages, changes, or errors.</p>
+  </section>
+
+  <section class="panel">
+    <h2>13. Termination</h2>
+    <p>You may stop using Clerk at any time. Clerk may suspend, restrict, or remove access if you violate these Terms, create security risks, misuse connected services, or interfere with the project. You may request deletion of your account-related information by contacting <a href="mailto:supportclerk@gmail.com">supportclerk@gmail.com</a>.</p>
+  </section>
+
+  <section class="panel">
+    <h2>14. Changes to These Terms</h2>
+    <p>Clerk may update these Terms as the project changes. The effective date above will be updated when changes are made. Continued use of Clerk after an update means you accept the revised Terms.</p>
+  </section>
+
+  <section class="panel">
+    <h2>15. Contact</h2>
+    <p>Questions about these Terms should be sent to <a href="mailto:supportclerk@gmail.com">supportclerk@gmail.com</a>.</p>
+  </section>
+</main>
+<footer class="footer">© 2026 Clerk. Student capstone project.</footer>
+</body>
+</html>

@@ -1366,6 +1366,29 @@ body.dark-mode .expanded-task-row {
     to { transform: translateX(0); opacity: 1; }
 }
 
+.app-toast {
+    background: var(--panel-bg);
+    padding: 12px 18px;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    min-width: 220px;
+    max-width: 340px;
+    border-left: 4px solid var(--teal);
+    animation: toastIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.app-toast.error { border-left-color: #ef4444; }
+.app-toast.info  { border-left-color: #3b82f6; }
+
+body.dark-mode .type-filter-btn.active {
+    background: rgba(94, 234, 212, 0.15);
+    border-color: var(--teal);
+    color: var(--teal);
+}
+
 /* ==========================================================================
    8. THEME TOGGLE (SLIDER)
    ========================================================================== */
@@ -1610,7 +1633,32 @@ body.dark-mode .nav a.active {
 }
 
 .nav a[data-view="calendar"] .nav-icon { background: var(--accent-blue); box-shadow: 0 0 0 3px rgba(37, 99, 235, .11); }
-.nav a[data-view="reminders"] .nav-icon { background: var(--accent-violet); box-shadow: 0 0 0 3px rgba(124, 58, 237, .11); }
+.type-filter-bar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+.type-filter-btn {
+    padding: 5px 14px;
+    border-radius: 20px;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.15s;
+}
+.type-filter-btn:hover {
+    border-color: var(--teal);
+    color: var(--teal-dark);
+}
+.type-filter-btn.active {
+    background: var(--teal-soft);
+    border-color: var(--teal);
+    color: var(--teal-dark);
+}
 .nav a[data-view="history"] .nav-icon { background: #64748b; box-shadow: 0 0 0 3px rgba(100, 116, 139, .12); }
 
 .user-profile {
@@ -1964,6 +2012,7 @@ body.dark-mode .dashboard-section-count {
 
 .dashboard-row {
     padding: 12px;
+    cursor: pointer;
     transition: transform .18s ease, box-shadow .18s ease;
 }
 
@@ -1971,6 +2020,31 @@ body.dark-mode .dashboard-section-count {
     transform: translateY(-1px);
     box-shadow: 0 10px 26px rgba(15, 23, 42, .08);
 }
+
+.dashboard-row-chevron {
+    float: right;
+    font-size: 10px;
+    opacity: 0.4;
+    margin-left: 6px;
+    transition: transform 0.2s;
+    display: inline-block;
+}
+
+.dashboard-row.is-expanded .dashboard-row-chevron { transform: rotate(180deg); }
+
+.dashboard-row-desc {
+    display: none;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.dashboard-row.is-expanded .dashboard-row-desc { display: block; }
 
 .dashboard-row.pink,
 .expanded-task-row.pink,
@@ -1987,6 +2061,12 @@ body.dark-mode .dashboard-section-count {
 .dashboard-row.reminder,
 .expanded-task-row.reminder,
 .calendar-event.reminder { border-left-color: var(--accent-violet); }
+.dashboard-row.event,
+.expanded-task-row.event,
+.calendar-event.event { border-left-color: #16a34a; background: rgba(22, 163, 74, 0.1); }
+body.dark-mode .dashboard-row.event,
+body.dark-mode .expanded-task-row.event { background: rgba(22, 163, 74, 0.15); }
+.dashboard-type-dot.event { background: #16a34a; }
 
 .dashboard-row-title,
 .task-title,
@@ -2507,7 +2587,6 @@ button {
         <nav class="nav" aria-label="Primary">
             <a href="#" data-view="agenda" class="active" onclick="loadView('agenda'); return false;"><span class="nav-icon"></span>Today</a>
             <a href="#" data-view="my tasks" onclick="loadView('my tasks'); return false;"><span class="nav-icon"></span>Task Queue</a>
-            <a href="#" data-view="reminders" onclick="loadView('reminders'); return false;"><span class="nav-icon"></span>Reminders</a>
             <a href="#" data-view="calendar" onclick="loadView('calendar'); return false;"><span class="nav-icon"></span>Calendar</a>
             <a href="#" data-view="insights" onclick="loadView('insights'); return false;"><span class="nav-icon"></span>Review</a>
             <a href="#" data-view="history" onclick="loadView('history'); return false;"><span class="nav-icon"></span>History</a>
@@ -2570,11 +2649,10 @@ button {
                     <div class="composer-actions">
                         <div class="left-buttons">
                             <button class="ghost" id="voiceBtn" type="button">Voice Note</button>
-                            <button class="ghost" id="syncGmailBtn" type="button" onclick="syncGmail()">Sync Gmail</button>
-                            <button class="ghost" id="syncClassroomBtn" type="button" onclick="syncClassroom()">Sync Classroom</button>
+                            <button class="ghost" id="syncAllBtn" type="button" onclick="syncAllGoogleSources()">Sync Google</button>
                             <button class="ghost" id="uploadBtn" type="button" onclick="document.getElementById('fileInput').click()">Attach File</button>
                         </div>
-                        <button class="primary" id="processBtn" type="button">Extract Tasks</button>
+                        <button class="primary" id="processBtn" type="button">Extract</button>
                     </div>
                     <div id="fileInfo" style="font-size: 12px; color: var(--teal-dark); margin-top: 8px; display: none;"></div>
                 </section>
@@ -3064,6 +3142,7 @@ let currentView = 'agenda';
 let latestTasks = [];
 let selectedTaskIds = new Set();
 let lastRenderedTaskIds = [];
+let taskQueueTypeFilter = 'all'; // 'all' | 'task' | 'reminder'
 let pendingTwoFactorLogin = false;
 let googleConnectPopup = null;
 let authMode = 'login';
@@ -3437,11 +3516,11 @@ async function verifyTwoFactorSetupCode() {
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.detail || "Could not enable 2FA.");
-        alert(data.message || "Two-factor authentication is now enabled.");
+        showToast(data.message || "Two-factor authentication is now enabled.");
         document.getElementById('two-factor-setup-code').value = "";
         await fetchUserSettings();
     } catch (err) {
-        alert(err.message || getFriendlyApiError(err));
+        showToast(err.message || getFriendlyApiError(err), 'error');
     } finally {
         btn.textContent = originalText;
         btn.disabled = false;
@@ -3449,7 +3528,7 @@ async function verifyTwoFactorSetupCode() {
 }
 
 async function disableTwoFactor() {
-    if (!window.CURRENT_USER_ID) return alert("Please log in first.");
+    if (!window.CURRENT_USER_ID) return showToast("Please log in first.", 'error');
     if (!confirm("Disable two-factor authentication for this account?")) return;
 
     try {
@@ -3460,10 +3539,10 @@ async function disableTwoFactor() {
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.detail || "Could not disable 2FA.");
-        alert("Two-factor authentication disabled.");
+        showToast("Two-factor authentication disabled.");
         await fetchUserSettings();
     } catch (err) {
-        alert(err.message || getFriendlyApiError(err));
+        showToast(err.message || getFriendlyApiError(err), 'error');
     }
 }
 
@@ -3623,15 +3702,16 @@ async function register() {
         });
 
         if (response.ok) {
-            alert("Account created! You can now log in.");
-            toggleAuthMode(); // Switch back to login mode
+            showToast("Account created! You can now log in.");
+            toggleAuthMode();
         } else {
             const data = await response.json();
             errorMsg.textContent = data.detail || "Registration failed";
             errorMsg.style.display = 'block';
         }
     } catch (err) {
-        alert(getFriendlyApiError(err));
+        errorMsg.textContent = getFriendlyApiError(err);
+        errorMsg.style.display = 'block';
     }
 }
 
@@ -3654,7 +3734,7 @@ async function requestPasswordReset() {
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.detail || "Could not send reset email.");
-        alert(data.message || "If that account has a security email, a reset link was sent.");
+        showToast(data.message || "If that account has a security email, a reset link was sent.");
         setAuthFieldVisibility('login');
     } catch (err) {
         errorMsg.textContent = err.message || getFriendlyApiError(err);
@@ -3687,7 +3767,7 @@ async function submitPasswordReset() {
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.detail || "Could not reset password.");
-        alert(data.message || "Password reset. You can sign in with your new password.");
+        showToast(data.message || "Password reset. You can sign in with your new password.");
         activeResetToken = null;
         document.getElementById('reset-password-input').value = "";
         setAuthFieldVisibility('login');
@@ -3722,7 +3802,7 @@ async function submitDedicatedPasswordReset() {
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.detail || "Could not reset password.");
-        alert(data.message || "Password reset. You can sign in with your new password.");
+        showToast(data.message || "Password reset. You can sign in with your new password.");
         activeResetToken = null;
         document.getElementById('new-reset-password-input').value = "";
         document.getElementById('password-reset-overlay').style.display = 'none';
@@ -3734,10 +3814,39 @@ async function submitDedicatedPasswordReset() {
     }
 }
 
+function setTaskQueueFilter(type) {
+    taskQueueTypeFilter = type;
+    if (!latestTasks) return;
+    const active = getActiveTasks(latestTasks);
+    const filtered = type === 'all' ? active : active.filter(t => t.item_type === type);
+    const priorityOrder = { 'high': 4, 'medium': 3, 'normal': 2, 'low': 1 };
+    filtered.sort((a, b) => {
+        if (a.item_type !== b.item_type) return a.item_type === 'reminder' ? 1 : -1;
+        const pA = priorityOrder[String(a.priority).toLowerCase()] || 0;
+        const pB = priorityOrder[String(b.priority).toLowerCase()] || 0;
+        return pA !== pB ? pB - pA : new Date(a.due_date || 0) - new Date(b.due_date || 0);
+    });
+    renderTaskList(filtered, 'agendaList', false);
+}
+
 function renderTaskList(tasks, containerId, isHistoryView = false) {
     const container = document.getElementById(containerId);
     if (!container) return;
     container.innerHTML = '';
+
+    if (currentView === 'my tasks' && !isHistoryView && latestTasks) {
+        const allActive = getActiveTasks(latestTasks);
+        const taskCount = allActive.filter(t => t.item_type !== 'reminder').length;
+        const reminderCount = allActive.filter(t => t.item_type === 'reminder').length;
+        const filterBar = document.createElement('div');
+        filterBar.className = 'type-filter-bar';
+        filterBar.innerHTML = `
+            <button class="type-filter-btn${taskQueueTypeFilter === 'all' ? ' active' : ''}" onclick="setTaskQueueFilter('all')">All (${allActive.length})</button>
+            <button class="type-filter-btn${taskQueueTypeFilter === 'task' ? ' active' : ''}" onclick="setTaskQueueFilter('task')">📋 Tasks (${taskCount})</button>
+            <button class="type-filter-btn${taskQueueTypeFilter === 'reminder' ? ' active' : ''}" onclick="setTaskQueueFilter('reminder')">🔔 Reminders (${reminderCount})</button>
+        `;
+        container.appendChild(filterBar);
+    }
 
     const tasksToShow = isHistoryView ? tasks : tasks.filter(t => t.status !== 'completed' && t.status !== 'deleted');
     lastRenderedTaskIds = tasksToShow.map(task => Number(task.task_id));
@@ -3745,11 +3854,10 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
 
     if (tasksToShow.length === 0) {
         selectedTaskIds.clear();
-        if (isHistoryView) {
-            container.innerHTML = '<p style="color:var(--muted); padding:20px;">No history yet!</p>';
-        } else {
-            container.innerHTML = '<p style="color:var(--muted); padding:20px;">All clear!</p>';
-        }
+        const emptyMsg = document.createElement('p');
+        emptyMsg.style.cssText = 'color:var(--muted); padding:20px;';
+        emptyMsg.textContent = isHistoryView ? 'No history yet!' : 'All clear!';
+        container.appendChild(emptyMsg);
         return;
     }
 
@@ -3843,7 +3951,7 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
               <div class="time">${timeStr}</div>
               <div class="task-main ${colorClass}" style="flex-grow: 1;">
                 <div style="font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--muted); margin-bottom: 2px;">
-                    ${itemType === 'reminder' ? '🔔 Reminder' : '📋 Task'}
+                    ${itemType === 'reminder' ? '🔔 Reminder' : itemType === 'event' ? '🗓️ Calendar Event' : '📋 Task'}
                 </div>
                 <div class="task-title">${task.title}</div>
                 <div class="task-sub">${[assignerText, task.description || ''].filter(Boolean).join(' • ')}</div>
@@ -4089,7 +4197,11 @@ function renderInsightsPage(tasks, containerId = 'agendaList') {
 }
 
 function getActiveTasks(tasks) {
-    return tasks.filter(task => task.status !== 'completed' && task.status !== 'deleted');
+    return tasks.filter(task =>
+        task.status !== 'completed' &&
+        task.status !== 'deleted' &&
+        task.item_type !== 'event'
+    );
 }
 
 function sortByScheduleThenTitle(tasks) {
@@ -4157,32 +4269,35 @@ function getAdaptiveWorkSummary(tasks) {
 
 function renderDashboardTaskRow(task, options = {}) {
     const isHistory = Boolean(options.isHistory);
-    const showDescription = Boolean(options.showDescription);
     const conflicts = options.conflictMap ? (options.conflictMap.get(Number(task.task_id)) || []) : [];
     const start = parseWallTime(task.due_date);
     const timedRange = getTimedTaskRange(task);
     const end = timedRange ? timedRange.end : (task.end_date ? parseWallTime(task.end_date) : null);
     const scheduleText = formatScheduleRange(start, end, Boolean(task.is_all_day));
-    const description = task.description ? ` · ${task.description}` : '';
     const confidenceScore = Number(task.confidence);
     const confidence = !isNaN(confidenceScore) ? ` · ${Math.round(confidenceScore)}%` : '';
     const conflictText = conflicts.length && options.showConflictTag ? ` · ${conflicts.length} conflict${conflicts.length === 1 ? '' : 's'}` : '';
-    const typeLabel = task.item_type === 'reminder' ? 'Reminder' : 'Task';
+    const typeLabel = task.item_type === 'reminder' ? 'Reminder' : task.item_type === 'event' ? 'Event' : 'Task';
     const colorClass = getTaskColorClass(task);
+    const descText = task.description || 'No description saved for this item.';
 
     return `
-        <div class="dashboard-row ${colorClass}" id="task-item-${task.task_id}">
+        <div class="dashboard-row ${colorClass}" id="task-item-${task.task_id}" onclick="toggleDashboardRowExpand(this)">
             <div>
-                <div class="dashboard-row-title">${escapeHTML(task.title || 'Untitled Task')}</div>
+                <div class="dashboard-row-title">${escapeHTML(task.title || 'Untitled Task')}<span class="dashboard-row-chevron">▾</span></div>
                 <div class="dashboard-row-meta">
                     <span class="dashboard-type-chip"><span class="dashboard-type-dot ${colorClass}"></span>${escapeHTML(typeLabel)}</span>
                     · ${escapeHTML(scheduleText)}${escapeHTML(confidence)}
-                    ${showDescription ? escapeHTML(description) : ''}
                     ${conflictText ? `<span style="color:#be123c;">${escapeHTML(conflictText)}</span>` : ''}
                 </div>
             </div>
+            <div class="dashboard-row-desc">${escapeHTML(descText)}</div>
         </div>
     `;
+}
+
+function toggleDashboardRowExpand(el) {
+    el.classList.toggle('is-expanded');
 }
 
 function renderDashboardList(tasks, emptyText, options = {}) {
@@ -4193,10 +4308,10 @@ function renderDashboardList(tasks, emptyText, options = {}) {
 
 function getDashboardData(tasks) {
     const activeTasks = getActiveTasks(tasks);
-    const todayTasks = sortByScheduleThenTitle(activeTasks.filter(task => task.item_type !== 'reminder' && isTaskDueToday(task)));
+    const todayTasks = sortByScheduleThenTitle(activeTasks.filter(task => isTaskDueToday(task)));
     const tasksOnly = sortByScheduleThenTitle(activeTasks.filter(task => task.item_type !== 'reminder'));
     const remindersOnly = sortByScheduleThenTitle(activeTasks.filter(task => task.item_type === 'reminder'));
-    const upcomingTasks = sortByScheduleThenTitle(activeTasks.filter(task => task.item_type !== 'reminder' && !isTaskDueToday(task)));
+    const upcomingTasks = sortByScheduleThenTitle(activeTasks.filter(task => !isTaskDueToday(task)));
     const historyTasks = [...tasks]
         .filter(task => task.status === 'completed' || task.status === 'deleted')
         .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
@@ -4252,7 +4367,7 @@ function renderDashboardPage(tasks, containerId = 'agendaList') {
             <div class="dashboard-home-column">
                 <section class="dashboard-section">
                     <div class="dashboard-section-header">
-                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="openSectionModal('agenda')">Today's Tasks</button></h3>
+                        <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="openSectionModal('agenda')">Today</button></h3>
                         <span class="dashboard-section-count">${todayTasks.length} due today</span>
                     </div>
                     ${renderDashboardList(todayTasks, 'Nothing scheduled for today.', { showDescription: true, conflictMap, showConflictTag: true, limit: 8 })}
@@ -4262,9 +4377,9 @@ function renderDashboardPage(tasks, containerId = 'agendaList') {
                 <section class="dashboard-section">
                     <div class="dashboard-section-header">
                         <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="loadView('my tasks')">Upcoming</button></h3>
-                        <span class="dashboard-section-count">${tasksOnly.length} open</span>
+                        <span class="dashboard-section-count">${activeTasks.length} open</span>
                     </div>
-                    ${renderDashboardList(upcomingTasks, 'No upcoming tasks beyond today.', { limit: 5 })}
+                    ${renderDashboardList(upcomingTasks, 'Nothing upcoming beyond today.', { limit: 5 })}
                 </section>
             </div>
 
@@ -4389,7 +4504,7 @@ function getSectionModalContent(section) {
 
     if (section === 'agenda') {
         return {
-            title: "Today's Tasks",
+            title: "Today",
             subtitle: `${data.todayTasks.length} due today · ${data.conflictTaskCount} schedule conflicts · ${data.averageConfidence}% average confidence`,
             body: `
                 <section class="expanded-section">
@@ -4508,7 +4623,7 @@ async function handleModalTaskAction(taskId, status) {
         loadView(currentView);
     } catch (err) {
         console.error("Modal task update failed:", err);
-        alert("Failed to update task.");
+        showToast("Failed to update task.", 'error');
     }
 }
 
@@ -4525,7 +4640,7 @@ async function handleModalPermanentDelete(taskId) {
         loadView(currentView);
     } catch (err) {
         console.error("Modal permanent delete failed:", err);
-        alert("Failed to permanently delete task.");
+        showToast("Failed to permanently delete task.", 'error');
     }
 }
 
@@ -4560,7 +4675,7 @@ function updateBulkToolbar() {
 
 async function bulkDeleteSelected(permanent = false) {
     const taskIds = [...selectedTaskIds];
-    if (!taskIds.length) return alert("Select at least one task first.");
+    if (!taskIds.length) return showToast("Select at least one item first.", 'info');
 
     const label = permanent ? "permanently delete" : "delete";
     if (!confirm(`Are you sure you want to ${label} ${taskIds.length} selected task${taskIds.length === 1 ? '' : 's'}?`)) return;
@@ -4578,7 +4693,7 @@ async function bulkDeleteSelected(permanent = false) {
         loadView(currentView);
     } catch (err) {
         console.error("Bulk delete failed:", err);
-        alert("Failed to delete selected tasks.");
+        showToast("Failed to delete selected tasks.", 'error');
     }
 }
 
@@ -4610,7 +4725,7 @@ async function dismissTask(taskId) {
         console.error("Dismiss failed:", err);
         // If server fails, bring it back
         if (element) element.classList.remove('removing');
-        alert("Couldn't remove task. Server might be down.");
+        showToast("Couldn't remove task. Server might be down.", 'error');
     }
 }
 
@@ -4623,13 +4738,11 @@ async function restoreTask(taskId) {
         });
 
         if (!response.ok) throw new Error("Restore failed");
-        
-        // Refresh history view
         loadView('history');
-        showNotificationToast({ title: "Task restored to Agenda", due_text: "" });
+        showToast("Task restored to Agenda.", 'success');
     } catch (err) {
         console.error("Restore failed:", err);
-        alert("Failed to restore task.");
+        showToast("Failed to restore task.", 'error');
     }
 }
 
@@ -4642,12 +4755,10 @@ async function permanentlyDeleteTask(taskId) {
         });
 
         if (!response.ok) throw new Error("Permanent delete failed");
-
-        // Refresh history view
         loadView('history');
     } catch (err) {
         console.error("Permanent delete failed:", err);
-        alert("Failed to delete task permanently.");
+        showToast("Failed to delete task permanently.", 'error');
     }
 }
 
@@ -4684,7 +4795,7 @@ async function completeTask(taskId) {
         console.error("Failed to complete task:", err);
         // If it fails, bring the task back visually
         if (element) element.classList.remove('removing');
-        alert("Couldn't update task status.");
+        showToast("Couldn't update task status.", 'error');
     }
 }
 
@@ -4757,20 +4868,21 @@ async function loadView(view) {
         }
         else if (view === 'my tasks') {
             titleHeader.textContent = "Task Queue";
-            // Sort by priority before rendering
-            const tasksOnly = allTasks.filter(t => t.item_type !== 'reminder');
+            const activeItems = getActiveTasks(allTasks);
+            const filtered = taskQueueTypeFilter === 'all' ? activeItems : activeItems.filter(t => t.item_type === taskQueueTypeFilter);
             const priorityOrder = { 'high': 4, 'medium': 3, 'normal': 2, 'low': 1 };
-            tasksOnly.sort((a, b) => {
+            filtered.sort((a, b) => {
+                if (a.item_type !== b.item_type) return a.item_type === 'reminder' ? 1 : -1;
                 const pA = priorityOrder[String(a.priority).toLowerCase()] || 0;
                 const pB = priorityOrder[String(b.priority).toLowerCase()] || 0;
-                return pA !== pB ? pB - pA : new Date(a.due_date) - new Date(b.due_date);
+                return pA !== pB ? pB - pA : new Date(a.due_date || 0) - new Date(b.due_date || 0);
             });
-            renderTaskList(tasksOnly, 'agendaList', false);
+            renderTaskList(filtered, 'agendaList', false);
         }
         else if (view === 'reminders') {
-            titleHeader.textContent = "Reminders";
-            const remindersOnly = allTasks.filter(t => t.item_type === 'reminder');
-            renderTaskList(remindersOnly, 'agendaList', false);
+            taskQueueTypeFilter = 'reminder';
+            loadView('my tasks');
+            return;
         }
         else if (view === 'calendar') {
             titleHeader.textContent = "Schedule Recommendations";
@@ -4819,6 +4931,7 @@ function getCalendarToolbar(label) {
 function getTaskColorClass(task) {
     const priority = String(task.priority || 'normal').toLowerCase();
     const itemType = String(task.item_type || 'task').toLowerCase();
+    if (itemType === 'event') return 'event';
     if (itemType === 'reminder') return 'reminder';
     if (priority === 'high') return 'pink';
     if (priority === 'medium') return 'amber';
@@ -5522,13 +5635,12 @@ window.addEventListener('keydown', (e) => {
 
 // Gmail Sync Function
 async function syncGmail() {
-    const btn = document.getElementById('syncGmailBtn');
+    const btn = document.getElementById('syncGmailBtn') || document.getElementById('syncAllBtn');
     const userId = window.CURRENT_USER_ID;
-    if (!userId) return alert("Please log in first.");
+    if (!userId) return showToast("Please log in first.", 'error');
 
-    const originalText = btn.textContent;
-    btn.textContent = "Extracting...";
-    btn.disabled = true;
+    const originalText = btn ? btn.textContent : '';
+    if (btn) { btn.textContent = "Syncing…"; btn.disabled = true; }
     
     try {
         const response = await apiFetch(`${API_BASE}/sync-gmail?user_id=${userId}`, {
@@ -5546,38 +5658,30 @@ async function syncGmail() {
         }
 
         if (response.ok && data.status === "success") {
-            btn.textContent = "Done";
-            setTimeout(() => {
-                btn.textContent = originalText;
-                btn.disabled = false;
-            }, 3000);
-            alert(data.message);
-            loadView(currentView); // Refresh the list to show new tasks
+            showToast(data.message || "Gmail sync complete.", 'success');
+            loadView(currentView);
         } else {
-            // Handle other errors from the backend
-            alert("Error: " + (data.message || data.detail || "Failed to extract emails"));
-            btn.textContent = originalText;
-            btn.disabled = false;
+            showToast("Error: " + (data.message || data.detail || "Failed to extract emails"), 'error');
         }
     } catch (err) {
         console.error("Gmail sync failed:", err);
-        alert(getFriendlyApiError(err));
-        btn.textContent = originalText;
-        btn.disabled = false;
+        showToast(getFriendlyApiError(err), 'error');
+    } finally {
+        if (btn) { btn.textContent = originalText; btn.disabled = false; }
     }
 }
 
 async function syncClassroom() {
-    const btn = document.getElementById('syncClassroomBtn');
+    const btn = document.getElementById('syncClassroomBtn') || document.getElementById('syncAllBtn');
     const userId = window.CURRENT_USER_ID;
-    if (!userId) return alert("Please log in first.");
+    if (!userId) return showToast("Please log in first.", 'error');
 
-    const originalText = btn.textContent;
-    btn.textContent = "Extracting...";
-    btn.disabled = true;
+    const originalText = btn ? btn.textContent : '';
+    if (btn) { btn.textContent = "Syncing…"; btn.disabled = true; }
 
     try {
-        const response = await apiFetch(`${API_BASE}/sync-classroom?user_id=${userId}`, {
+        const tzOffset = new Date().getTimezoneOffset();
+        const response = await apiFetch(`${API_BASE}/sync-classroom?user_id=${userId}&tz_offset=${tzOffset}`, {
             throttleKey: `sync-classroom:${userId}`,
             minInterval: 30000,
             timeout: 45000
@@ -5585,29 +5689,21 @@ async function syncClassroom() {
         const data = await response.json().catch(() => ({}));
 
         if (data.auth_url) {
-            console.log("Redirecting to Google for authentication...");
             window.location.href = data.auth_url;
             return;
         }
 
         if (response.ok && data.status === "success") {
-            btn.textContent = "Done";
-            setTimeout(() => {
-                btn.textContent = originalText;
-                btn.disabled = false;
-            }, 3000);
-            alert(data.message || "Classroom sync complete.");
+            showToast(data.message || "Classroom sync complete.", 'success');
             loadView(currentView);
         } else {
-            alert("Error: " + (data.message || data.detail || "Failed to extract Classroom tasks"));
-            btn.textContent = originalText;
-            btn.disabled = false;
+            showToast("Error: " + (data.message || data.detail || "Failed to extract Classroom tasks"), 'error');
         }
     } catch (err) {
         console.error("Classroom sync failed:", err);
-        alert(getFriendlyApiError(err));
-        btn.textContent = originalText;
-        btn.disabled = false;
+        showToast(getFriendlyApiError(err), 'error');
+    } finally {
+        if (btn) { btn.textContent = originalText; btn.disabled = false; }
     }
 }
 
@@ -5615,8 +5711,13 @@ async function syncAllGoogleSources({ silent = false, viewAfterSync = currentVie
     const userId = window.CURRENT_USER_ID;
     if (!userId) return;
 
+    const btn = document.getElementById('syncAllBtn');
+    const originalText = btn ? btn.textContent : null;
+    if (btn) { btn.textContent = 'Syncing…'; btn.disabled = true; }
+
     try {
-        const response = await apiFetch(`${API_BASE}/sync-all?user_id=${userId}`, {
+        const tzOffset = new Date().getTimezoneOffset();
+        const response = await apiFetch(`${API_BASE}/sync-all?user_id=${userId}&tz_offset=${tzOffset}`, {
             throttleKey: `sync-all:${userId}`,
             minInterval: 30000,
             timeout: 60000
@@ -5629,13 +5730,15 @@ async function syncAllGoogleSources({ silent = false, viewAfterSync = currentVie
         }
 
         if (!response.ok) throw new Error(data.detail || data.message || "Google sync failed.");
-        if (!silent) alert("Google sync complete.");
+        if (!silent) showToast('Google sync complete.', 'success');
         if (viewAfterSync) loadView(viewAfterSync);
         return data;
     } catch (err) {
         console.error("Google auto-sync failed:", err);
-        if (!silent) alert(getFriendlyApiError(err));
+        if (!silent) showToast(getFriendlyApiError(err), 'error');
         return null;
+    } finally {
+        if (btn && originalText) { btn.textContent = originalText; btn.disabled = false; }
     }
 }
 
@@ -5820,7 +5923,7 @@ async function updateTaskSchedule(id, startDate, endDate = null, isAllDay = fals
         if (!response.ok) throw new Error('Update failed');
     } catch (err) {
         console.error("Error updating task schedule:", err);
-        alert("Couldn't move that task. Please try again.");
+        showToast("Couldn't move that task. Please try again.", 'error');
         throw err;
     }
 }
@@ -5833,10 +5936,9 @@ async function handleDateChange(taskId, newFullDate) {
         await updateTaskDate(taskId, newFullDate);
         console.log(`Task ${taskId} updated to ${newFullDate}`);
         
-        // Optional: Provide visual feedback that it saved
-        // showToast("Date updated!"); 
+        showToast("Date updated.");
     } catch (error) {
-        alert("Failed to save new date. Please try again.");
+        showToast("Failed to save new date. Please try again.", 'error');
     }
 }
 
@@ -5854,7 +5956,7 @@ async function handleAllDayToggle(taskId, isChecked) {
         loadView(currentView);
     } catch (err) {
         console.error("Failed to toggle All Day:", err);
-        alert("Failed to update task.");
+        showToast("Failed to update task.", 'error');
     }
 }
 
@@ -6047,7 +6149,7 @@ async function _onRecordingStop() {
         const text = (data.text || '').trim();
         if (text) {
             taskInput.value = taskInput.value ? taskInput.value + '\n' + text : text;
-            showToast('Voice note transcribed — click Extract Tasks!', 'success');
+            showToast('Voice note transcribed — click Extract!', 'success');
         } else {
             showToast('No speech detected in the recording.', 'info');
         }
@@ -6106,6 +6208,20 @@ async function checkUpcomingTasks() {
     } catch (err) {
         console.error("Failed to check upcoming tasks:", err);
     }
+}
+
+function showToast(message, type = 'success', duration = 4000) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = `app-toast${type !== 'success' ? ' ' + type : ''}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(20px)';
+        setTimeout(() => toast.remove(), 260);
+    }, duration);
 }
 
 function showNotificationToast(task) {
@@ -6185,30 +6301,39 @@ processBtn.addEventListener('click', async () => {
                 timeout: 45000
             });
         } else {
-            alert("Please enter text or select a file.");
+            showToast("Please enter text or select a file.", 'info');
             resetBtn();
             return;
         }
 
         if (response.ok) {
-            taskInput.value = "";
-            fileInput.value = "";
-            document.getElementById('fileInfo').style.display = "none";
-            loadView(currentView); // Refresh the list
+            const data = await response.json().catch(() => ({}));
+            const ids = data.task_ids || [];
+            if (ids.length === 0) {
+                // Backend processed the file but found nothing to save — show the reason.
+                const msg = data.message || "Nothing extracted. Try adding your full name in Settings so Clerk can match your schedule row.";
+                showToast(msg, 'info', 7000);
+            } else {
+                taskInput.value = "";
+                fileInput.value = "";
+                document.getElementById('fileInfo').style.display = "none";
+                showToast(`Extracted ${ids.length} item${ids.length === 1 ? '' : 's'}.`, 'success');
+                loadView(currentView);
+            }
         } else {
-            const err = await response.json();
-            alert("Error: " + err.detail);
+            const err = await response.json().catch(() => ({}));
+            showToast("Error: " + (err.detail || "Something went wrong."), 'error');
         }
     } catch (error) {
         console.error("Connection failed:", error);
-        alert(getFriendlyApiError(error));
+        showToast(getFriendlyApiError(error), 'error');
     } finally {
         resetBtn();
     }
 });
 
 function resetBtn() {
-    processBtn.innerText = "Extract Tasks";
+    processBtn.innerText = "Extract";
     processBtn.disabled = false;
 }
 

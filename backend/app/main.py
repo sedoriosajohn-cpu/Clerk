@@ -81,6 +81,12 @@ async def throttle_expensive_sync_routes(request: Request, call_next):
         )
 
     sync_request_log[key] = now
+    # Prune stale entries to prevent unbounded growth
+    if len(sync_request_log) > 500:
+        cutoff = now - SYNC_THROTTLE_SECONDS * 10
+        stale = [k for k, t in sync_request_log.items() if t < cutoff]
+        for k in stale:
+            sync_request_log.pop(k, None)
     return await call_next(request)
 
 def get_db():
@@ -536,8 +542,15 @@ async def ingest_doc(
             )
             if structured_tasks:
                 return await save_work_schedule_entries(structured_tasks, user, source_info, db)
+            # Detected as a work schedule but couldn't match any shifts to this user.
+            # Return a clear message rather than falling through to generic extraction.
+            return {
+                "status": "success",
+                "task_ids": [],
+                "message": "This looks like a work schedule but no shifts matched your Clerk profile name. Make sure your full name in Settings matches how it appears on the schedule (e.g. 'Last, First' or 'First Last')."
+            }
 
-        # Reuse the saving logic
+        # Generic document — extract tasks normally
         return await process_and_save_tasks(content, user_id, source_info, db, local_time)
 
     except HTTPException:
@@ -697,7 +710,7 @@ def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = Non
             message = "Google access expired. Please connect your Google account again."
         else:
             message = str(exc) or exc.__class__.__name__
-    return RedirectResponse(url=f"{frontend_url}?google_error={quote(message, safe='')}")
+        return RedirectResponse(url=f"{frontend_url}?google_error={quote(message, safe='')}")
 
     return RedirectResponse(url=f"{frontend_url}?google_connected=1&user_id={saved_state['user_id']}")
 
@@ -939,6 +952,13 @@ def find_duplicate_task(duplicate_index: dict, task_data) -> Optional[Task]:
         if due_day_key(existing.due_date) == due_key and titles_are_similar(existing.title, task_data.get("title")):
             return existing
 
+    # Cross-date pass: new task has a real date, existing task has none.
+    # Catches Gmail/announcement tasks that were saved without a due date
+    # and are later superseded by the authoritative Classroom entry.
+    for existing in duplicate_index.get("__items__", []):
+        if not existing.due_date and titles_are_similar(existing.title, task_data.get("title")):
+            return existing
+
     return None
 
 def has_google_due_time(due_time: Optional[dict]) -> bool:
@@ -946,7 +966,7 @@ def has_google_due_time(due_time: Optional[dict]) -> bool:
         return False
     return any(due_time.get(key) is not None for key in ("hours", "minutes", "seconds", "nanos"))
 
-def google_due_to_iso(due: dict, due_time: Optional[dict] = None) -> Optional[str]:
+def google_due_to_iso(due: dict, due_time: Optional[dict] = None, utc_offset_minutes: int = 0) -> Optional[str]:
     if not due:
         return None
 
@@ -959,14 +979,15 @@ def google_due_to_iso(due: dict, due_time: Optional[dict] = None) -> Optional[st
     if not has_google_due_time(due_time):
         return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
 
-    hour = 12
-    minute = 0
-    second = 0
-    hour = due_time.get("hours", hour)
-    minute = due_time.get("minutes", minute)
-    second = due_time.get("seconds", second)
+    hour = due_time.get("hours", 12)
+    minute = due_time.get("minutes", 0)
+    second = due_time.get("seconds", 0)
 
-    return datetime(int(year), int(month), int(day), int(hour), int(minute), int(second)).strftime("%Y-%m-%dT%H:%M:%S")
+    # Google Classroom dueTime is UTC. Convert to local wall-clock time using the
+    # client's UTC offset (JS getTimezoneOffset convention: positive = west of UTC).
+    utc_dt = datetime(int(year), int(month), int(day), int(hour), int(minute), int(second))
+    local_dt = utc_dt - timedelta(minutes=utc_offset_minutes)
+    return local_dt.strftime("%Y-%m-%dT%H:%M:%S")
 
 def format_due_for_frontend(due_date: Optional[str], is_all_day: bool = True) -> dict:
     if not due_date:
@@ -1037,9 +1058,14 @@ def mark_source_scanned(db: Session, user_id: int, source_info: str, content: st
 
 def looks_like_work_schedule(text: str) -> bool:
     lowered = text.lower()
-    has_week_header = "wkly hrs" in lowered or "weekly" in lowered
-    has_day_headers = len(re.findall(r'\b(sun|mon|tue|wed|thu|fri|sat)\b', lowered)) >= 3
-    has_shift_times = bool(re.search(r'\b\d{1,2}:\d{2}\s*(?:am|pm)\s*[-–]\s*\d{1,2}:\d{2}\s*(?:am|pm)\b', lowered))
+    has_week_header = any(kw in lowered for kw in ("wkly hrs", "weekly", "schedule", "week of", "week ending"))
+    has_day_headers = len(re.findall(r'\b(sun|mon|tue|wed|thu|fri|sat)\b', lowered)) >= 2
+    # Match both "9:00 am - 5:00 pm" and "9am - 5pm" and "09:00 - 17:00" (24-hour)
+    has_shift_times = bool(re.search(
+        r'\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*[-–]\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)\b'
+        r'|\b\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}\b',
+        lowered
+    ))
     return has_week_header and has_day_headers and has_shift_times
 
 async def save_work_schedule_entries(structured_tasks, user: User, source_info: str, db: Session):
@@ -1067,7 +1093,7 @@ def clear_existing_work_schedule_entries(user_id: int, source_info: str, db: Ses
     db.query(RawInput).filter(RawInput.raw_id.in_(raw_ids)).delete(synchronize_session=False)
     db.commit()
 
-def google_calendar_event_to_entry(event: dict):
+def google_calendar_event_to_entry(event: dict, cal_name: str = ""):
     start = event.get('start', {}).get('dateTime') or event.get('start', {}).get('date')
     end = event.get('end', {}).get('dateTime') or event.get('end', {}).get('date')
     if not start:
@@ -1083,8 +1109,21 @@ def google_calendar_event_to_entry(event: dict):
             end_date = f"{inclusive_end.strftime('%Y-%m-%d')}T13:00:00Z"
         except ValueError:
             end_date = due_date
+
     title = event.get("summary", "Google Calendar Event")
     description = event.get("description", "")
+
+    # Birthday events arrive with just the person's name as the summary.
+    # Tag them so they're recognisable in the task list.
+    is_birthday = (
+        event.get("eventType") == "birthday"
+        or "birthday" in cal_name.lower()
+    )
+    if is_birthday and "birthday" not in title.lower():
+        title = f"{title}'s Birthday"
+    if is_birthday and not description:
+        description = "Birthday from Google Calendar"
+
     content = f"Calendar Event: {title} starting {start}. Description: {description}"
     task = make_structured_task(
         title=title,
@@ -1092,7 +1131,7 @@ def google_calendar_event_to_entry(event: dict):
         due_date=due_date,
         end_date=end_date,
         assigner="Google Calendar",
-        item_type="reminder",
+        item_type="event",
         is_all_day=is_all_day
     )
     return task, content, f"calendar: {event['id']}"
@@ -1105,25 +1144,26 @@ def collect_google_calendar_entries(calendar, db: Session, user_id: int, max_res
 
     # Discover every calendar the user has (primary, birthdays, holidays, shared, etc.)
     # Requires calendar.readonly scope; falls back to primary-only if scope is missing.
-    calendar_ids = []
+    # Build list of (calendar_id, calendar_name) tuples so we can tag birthday events.
+    calendar_list: list[tuple[str, str]] = []
     try:
         page_token = None
         while True:
             cal_list_result = calendar.calendarList().list(pageToken=page_token).execute()
             for cal in cal_list_result.get('items', []):
-                calendar_ids.append(cal['id'])
+                calendar_list.append((cal['id'], cal.get('summary', '')))
             page_token = cal_list_result.get('nextPageToken')
             if not page_token:
                 break
     except Exception:
-        calendar_ids = ['primary']
+        calendar_list = [('primary', '')]
 
-    if not calendar_ids:
-        calendar_ids = ['primary']
+    if not calendar_list:
+        calendar_list = [('primary', '')]
 
     seen_event_ids = set()  # guard against the same event appearing in multiple calendar views
 
-    for cal_id in calendar_ids:
+    for cal_id, cal_name in calendar_list:
         page_token = None
         while True:
             try:
@@ -1158,7 +1198,7 @@ def collect_google_calendar_entries(calendar, db: Session, user_id: int, max_res
                     summary["calendar_already_scanned"] += 1
                     continue
 
-                entry = google_calendar_event_to_entry(event)
+                entry = google_calendar_event_to_entry(event, cal_name)
                 if not entry:
                     summary["calendar_skipped"] += 1
                     mark_source_scanned(db, user_id, source_info, f"Skipped Calendar event: {event.get('summary', '')}")
@@ -1328,7 +1368,7 @@ def cleanup_classroom_noise_tasks(db: Session, user_id: int) -> int:
         db.commit()
     return cleaned
 
-def classroom_item_to_entry(classroom, course: dict, item: dict):
+def classroom_item_to_entry(classroom, course: dict, item: dict, utc_offset_minutes: int = 0):
     due = item.get('dueDate', {})
     due_str = f"{due.get('month')}/{due.get('day')}/{due.get('year')}" if due else "No date"
     teacher_name = None
@@ -1342,7 +1382,7 @@ def classroom_item_to_entry(classroom, course: dict, item: dict):
 
     assigner = f"{course['name']}: {teacher_name}" if teacher_name else course["name"]
     content = f"Classroom Assignment: {item['title']} for {course['name']}. Assigned By: {assigner}. Due: {due_str}. Instructions: {item.get('description', '')}"
-    due_date = google_due_to_iso(item.get("dueDate", {}), item.get("dueTime"))
+    due_date = google_due_to_iso(item.get("dueDate", {}), item.get("dueTime"), utc_offset_minutes)
     is_all_day = not has_google_due_time(item.get("dueTime"))
     task = make_structured_task(
         title=item.get("title", "Classroom Assignment"),
@@ -1354,7 +1394,7 @@ def classroom_item_to_entry(classroom, course: dict, item: dict):
     )
     return task, content, f"classroom: {item['id']}"
 
-def collect_classroom_entries(classroom, db: Session, user_id: int):
+def collect_classroom_entries(classroom, db: Session, user_id: int, utc_offset_minutes: int = 0):
     summary = {"classroom": 0, "skipped": 0, "already_scanned": 0, "cleaned": cleanup_classroom_noise_tasks(db, user_id)}
     sync_entries = []
 
@@ -1373,7 +1413,7 @@ def collect_classroom_entries(classroom, db: Session, user_id: int):
                 continue
 
             try:
-                sync_entries.append(classroom_item_to_entry(classroom, course, item))
+                sync_entries.append(classroom_item_to_entry(classroom, course, item, utc_offset_minutes))
                 summary["classroom"] += 1
             except Exception:
                 summary["skipped"] += 1
@@ -1429,10 +1469,10 @@ def sync_gmail_blocking(user_id: int):
         db.close()
 
 @app.get("/sync-classroom")
-async def sync_classroom(user_id: int):
-    return await asyncio.to_thread(sync_classroom_blocking, user_id)
+async def sync_classroom(user_id: int, tz_offset: int = 0):
+    return await asyncio.to_thread(sync_classroom_blocking, user_id, tz_offset)
 
-def sync_classroom_blocking(user_id: int):
+def sync_classroom_blocking(user_id: int, tz_offset: int = 0):
     db = SessionLocal()
     try:
         ensure_user_exists(user_id, db)
@@ -1441,7 +1481,7 @@ def sync_classroom_blocking(user_id: int):
             return google_auth_required_response(user_id)
 
         classroom = build('classroom', 'v1', credentials=creds)
-        sync_entries, summary = collect_classroom_entries(classroom, db, user_id)
+        sync_entries, summary = collect_classroom_entries(classroom, db, user_id, tz_offset)
         if sync_entries:
             asyncio.run(save_structured_task_entries(sync_entries, user_id, db))
 
@@ -1456,10 +1496,10 @@ def sync_classroom_blocking(user_id: int):
         db.close()
 
 @app.get("/sync-all")
-async def sync_all(user_id: int):
-    return await asyncio.to_thread(sync_all_blocking, user_id)
+async def sync_all(user_id: int, tz_offset: int = 0):
+    return await asyncio.to_thread(sync_all_blocking, user_id, tz_offset)
 
-def sync_all_blocking(user_id: int):
+def sync_all_blocking(user_id: int, tz_offset: int = 0):
     db = SessionLocal()
     try:
         ensure_user_exists(user_id, db)
@@ -1476,7 +1516,7 @@ def sync_all_blocking(user_id: int):
 
         # 1. Classroom assignments
         try:
-            classroom_entries, classroom_summary = collect_classroom_entries(classroom, db, user_id)
+            classroom_entries, classroom_summary = collect_classroom_entries(classroom, db, user_id, tz_offset)
             sync_entries.extend(classroom_entries)
             summary["classroom"] = classroom_summary["classroom"]
             summary["classroom_skipped"] = classroom_summary["skipped"]
@@ -1669,9 +1709,13 @@ async def save_structured_task_entries(entries, user_id, db):
             if duplicate:
                 if normalized_assigner != "me" and (not duplicate.assignee or duplicate.assignee == "me"):
                     duplicate.assignee = normalized_assigner
-                # Calendar and Google Tasks are authoritative: update the existing task's
-                # dates so the calendar version always wins over Gmail/Classroom guesses.
-                is_authoritative = source_info.startswith("calendar:") or source_info.startswith("gtask:")
+                # Calendar, Google Tasks, and Classroom are authoritative: update the existing
+                # task's dates so these versions always win over Gmail/email guesses.
+                is_authoritative = (
+                    source_info.startswith("calendar:")
+                    or source_info.startswith("gtask:")
+                    or source_info.startswith("classroom:")
+                )
                 if is_authoritative:
                     if task_data.get("due_date"):
                         duplicate.due_date = task_data["due_date"]

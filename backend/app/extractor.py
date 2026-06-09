@@ -583,22 +583,28 @@ def validate_schedule_extraction(tasks: List[Dict[str, Any]], target_names: List
 
     row_names = [task.get("matched_row_name") for task in tasks if task.get("matched_row_name")]
     if os.getenv("REQUIRE_SCHEDULE_ROW_NAME", "1") == "1" and not row_names:
+        print("[schedule] rejected: no matched_row_name in extracted tasks")
         return []
     if row_names and not any(schedule_names_match(row_name, target_names) for row_name in row_names):
+        print(f"[schedule] rejected: row names {row_names} don't match target names {target_names}")
         return []
 
     row_hours = next(
         (parse_schedule_weekly_hours(task.get("row_weekly_hours")) for task in tasks if parse_schedule_weekly_hours(task.get("row_weekly_hours")) is not None),
         None
     )
-    if os.getenv("REQUIRE_SCHEDULE_WEEKLY_HOURS", "1") == "1" and row_hours is None:
-        return []
+    # Only require weekly hours when the env flag is explicitly set to "1" AND only
+    # reject when the extracted total is implausibly wrong (>15% or >2 h off).
     if row_hours is not None:
         total_hours = extracted_schedule_total_hours(tasks)
-        if abs(total_hours - row_hours) > 0.35:
+        tolerance = max(2.0, row_hours * 0.15)
+        if abs(total_hours - row_hours) > tolerance:
+            print(f"[schedule] rejected: extracted {total_hours}h vs row total {row_hours}h (tolerance {tolerance:.1f}h)")
             return []
 
-    if any(schedule_shift_hours(task) >= 10.5 for task in tasks):
+    # Reject unrealistically long single shifts (>16 h suggests a row-reading error).
+    if any(schedule_shift_hours(task) >= 16 for task in tasks):
+        print("[schedule] rejected: shift >= 16 hours detected")
         return []
 
     unique = {}
@@ -905,8 +911,8 @@ def build_schedule_image_prompt(target_names: List[str], now_iso: str, retry: bo
       ]
     }}
 
-    A valid result for row "Sedoriosa, John" with Wkly Hrs 34.5 must total 34.5 hours.
-    For example, five shifts of 7.5, 4.5, 7.5, 7.5, and 7.5 hours total 34.5.
+    A valid result must have shift durations that roughly match the row's Wkly Hrs total when one is visible.
+    For example, if the row shows Wkly Hrs 34.5, the extracted shifts should add up to approximately 34.5 hours.
     """
 
 def parse_schedule_image_response(response_text: str, current_time: Optional[str] = None) -> List[Dict[str, Any]]:

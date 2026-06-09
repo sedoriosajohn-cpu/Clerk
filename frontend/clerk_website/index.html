@@ -2836,6 +2836,16 @@ button {
             <button id="forgot-submit-btn" onclick="requestPasswordReset()" class="primary" style="width:100%; display:none;">Send Reset Email</button>
             <button id="reset-submit-btn" onclick="submitPasswordReset()" class="primary" style="width:100%; display:none;">Reset Password</button>
 
+            <div id="google-login-divider" style="display:flex; align-items:center; gap:10px; margin:18px 0 0;">
+                <hr style="flex:1; border:none; border-top:1px solid #334155;">
+                <span style="color:#64748b; font-size:13px; white-space:nowrap;">or</span>
+                <hr style="flex:1; border:none; border-top:1px solid #334155;">
+            </div>
+            <button id="google-login-btn" onclick="loginWithGoogle()" style="width:100%; margin-top:12px; background:#fff; color:#1f2937; border:1px solid #d1d5db; border-radius:12px; padding:12px 18px; font-size:15px; font-weight:600; display:flex; align-items:center; justify-content:center; gap:10px; cursor:pointer; transition:background 0.2s;">
+                <svg width="20" height="20" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.34-8.16 2.34-6.26 0-11.57-3.59-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
+                Continue with Google
+            </button>
+
             <p style="margin-top:20px; font-size:14px; color:var(--muted);">
                 <span id="toggle-text">Don't have an account?</span>
                 <a href="#" onclick="toggleAuthMode()" style="color:var(--teal); text-decoration:none; font-weight:bold;">Click here</a>
@@ -2871,6 +2881,31 @@ button {
             <p id="dedicated-reset-error" style="color:var(--pink); font-size:14px; margin-top:15px; display:none;"></p>
         </div>
     </div>
+    <div id="google-setup-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.98); z-index:10001; display:none; justify-content:center; align-items:center;">
+        <div style="background:#1e293b; padding:40px; border-radius:26px; text-align:center; border:1px solid var(--teal); box-shadow: var(--shadow); width: 390px;">
+            <h2 style="color:white; margin-bottom:6px; font-size: 26px;">One last step</h2>
+            <p style="color:var(--muted); margin-bottom:6px; font-size:14px;">Google sign-in successful!</p>
+            <p style="color:#94a3b8; margin-bottom:6px; font-size:13px;">Your username is: <strong id="google-setup-username" style="color:#e2e8f0;"></strong></p>
+            <p style="color:#94a3b8; margin-bottom:22px; font-size:13px;">Create a password so you can also sign in directly.</p>
+            <input type="password" id="google-setup-password-input" placeholder="Create a password" oninput="updateGoogleSetupStrength()" style="padding:15px; border-radius:12px; border:none; margin-bottom:20px; width:100%; font-size:16px;">
+            <div class="password-strength visible" id="google-setup-strength-panel">
+                <div class="strength-track"><div class="strength-fill" id="google-setup-strength-fill"></div></div>
+                <div class="strength-label" id="google-setup-strength-label">Password strength</div>
+                <ul class="password-rules" id="google-setup-rules">
+                    <li data-rule="length">At least 12 characters</li>
+                    <li data-rule="uppercase">One uppercase letter</li>
+                    <li data-rule="lowercase">One lowercase letter</li>
+                    <li data-rule="number">One number</li>
+                    <li data-rule="special">One symbol</li>
+                    <li data-rule="no_username">Does not include your username</li>
+                    <li data-rule="no_spaces">No spaces</li>
+                </ul>
+            </div>
+            <button onclick="submitGoogleSetupPassword()" class="primary" style="width:100%; margin-top:16px;">Create Password & Continue</button>
+            <p id="google-setup-error" style="color:#fb7185; font-size:14px; margin-top:15px; display:none;"></p>
+        </div>
+    </div>
+
     <div class="two-factor-modal" id="twoFactorLoginModal" onclick="handleTwoFactorBackdrop(event)">
         <div class="two-factor-card" role="dialog" aria-modal="true" aria-labelledby="twoFactorLoginTitle">
             <h2 id="twoFactorLoginTitle">Email verification</h2>
@@ -3168,12 +3203,97 @@ if (oauthParams.has('google_error')) {
 } else if (oauthParams.has('google_connected')) {
     handleGoogleConnectedRedirect(oauthParams.get('user_id'));
     window.history.replaceState({}, document.title, window.location.pathname);
+} else if (oauthParams.has('google_login')) {
+    handleGoogleLoginRedirect(parseInt(oauthParams.get('user_id')), oauthParams.get('username'));
+    window.history.replaceState({}, document.title, window.location.pathname);
+} else if (oauthParams.has('google_new_user')) {
+    handleGoogleNewUserRedirect(parseInt(oauthParams.get('user_id')), oauthParams.get('username'));
+    window.history.replaceState({}, document.title, window.location.pathname);
 } else {
     const resetTokenFromUrl = getResetTokenFromLocation();
     if (resetTokenFromUrl) {
         activeResetToken = resetTokenFromUrl;
         openPasswordResetPopup(resetTokenFromUrl);
         window.history.replaceState({}, document.title, window.location.pathname);
+    }
+}
+
+let googleSetupUserId = null;
+
+async function loginWithGoogle() {
+    const btn = document.getElementById('google-login-btn');
+    btn.textContent = "Redirecting to Google...";
+    btn.disabled = true;
+    try {
+        const response = await apiFetch(`${API_BASE}/auth/google/login`, { timeout: AUTH_TIMEOUT_MS });
+        if (response.ok) {
+            const data = await response.json();
+            window.location.href = data.auth_url;
+        } else {
+            btn.textContent = "Continue with Google";
+            btn.disabled = false;
+            alert("Could not start Google sign-in. Please try again.");
+        }
+    } catch (err) {
+        btn.textContent = "Continue with Google";
+        btn.disabled = false;
+        alert("Could not start Google sign-in: " + getFriendlyApiError(err));
+    }
+}
+
+async function handleGoogleLoginRedirect(userId, username) {
+    window.CURRENT_USER_ID = userId;
+    document.getElementById('login-overlay').style.display = 'none';
+    await fetchUserSettings();
+    loadView('agenda');
+    if (window.USER_SETTINGS && window.USER_SETTINGS.google_connected) {
+        syncAllGoogleSources({ silent: true });
+    }
+}
+
+function handleGoogleNewUserRedirect(userId, username) {
+    googleSetupUserId = userId;
+    document.getElementById('login-overlay').style.display = 'none';
+    document.getElementById('google-setup-username').textContent = username || '';
+    document.getElementById('google-setup-password-input').value = '';
+    document.getElementById('google-setup-error').style.display = 'none';
+    updateGoogleSetupStrength();
+    document.getElementById('google-setup-overlay').style.display = 'flex';
+    setTimeout(() => document.getElementById('google-setup-password-input').focus(), 50);
+}
+
+function updateGoogleSetupStrength() {
+    const username = document.getElementById('google-setup-username').textContent || '';
+    const password = document.getElementById('google-setup-password-input').value;
+    paintPasswordStrength(password, username, 'google-setup-strength-fill', 'google-setup-strength-label', 'google-setup-rules');
+}
+
+async function submitGoogleSetupPassword() {
+    const password = document.getElementById('google-setup-password-input').value;
+    const errorEl = document.getElementById('google-setup-error');
+    errorEl.style.display = 'none';
+
+    try {
+        const response = await apiFetch(`${API_BASE}/auth/google/set-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: googleSetupUserId, password }),
+            timeout: AUTH_TIMEOUT_MS
+        });
+        if (response.ok) {
+            const data = await response.json();
+            window.CURRENT_USER_ID = data.user_id;
+            document.getElementById('google-setup-overlay').style.display = 'none';
+            applyUserSettings(data.settings || { preferred_name: data.username });
+            loadView('agenda');
+        } else {
+            const data = await response.json().catch(() => ({}));
+            errorEl.textContent = data.detail || "Could not set password. Please try again.";
+            errorEl.style.display = 'block';
+        }
+    } catch (err) {
+        errorEl.textContent = getFriendlyApiError(err);
+        errorEl.style.display = 'block';
     }
 }
 
@@ -3574,6 +3694,11 @@ function setAuthFieldVisibility(mode) {
     forgotBtn.style.display = mode === 'forgot' ? 'block' : 'none';
     resetBtn.style.display = mode === 'reset' ? 'block' : 'none';
     forgotRow.style.display = mode === 'login' ? 'block' : 'none';
+    const googleDivider = document.getElementById('google-login-divider');
+    const googleBtn = document.getElementById('google-login-btn');
+    const showGoogle = mode === 'login' || mode === 'register';
+    if (googleDivider) googleDivider.style.display = showGoogle ? 'flex' : 'none';
+    if (googleBtn) googleBtn.style.display = showGoogle ? 'flex' : 'none';
 
     if (mode === 'register' || mode === 'reset') {
         strengthPanel.classList.add('visible');

@@ -52,6 +52,7 @@ class User(Base):
     two_factor_expires_at = Column(String)
     reset_password_token_hash = Column(String)
     reset_password_expires_at = Column(String)
+    google_sub = Column(String)
 
 class RawInput(Base):
     __tablename__ = "raw_inputs"
@@ -106,6 +107,7 @@ def ensure_database_schema():
         "reset_password_token_hash": "VARCHAR",
         "reset_password_expires_at": "VARCHAR",
     }
+    user_columns["google_sub"] = "VARCHAR"
     with engine.begin() as connection:
         for column_name, column_type in user_columns.items():
             if column_name not in existing_user_columns:

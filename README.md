@@ -40,6 +40,16 @@ This project includes `render.yaml`, so Render can create a hosted Clerk web ser
    - `GOOGLE_CREDENTIALS_JSON`: required only for Google sync. Paste the full Google OAuth JSON.
 5. Deploy. Render will give you a public URL automatically.
 
+Open the Render URL directly when possible, for example `https://your-service.onrender.com`.
+If you open the frontend from a local file or a static frontend server while the backend is on Render,
+open it once with the backend URL in the query string:
+
+```text
+frontend/clerk_website/index.html?api_base=https://your-service.onrender.com
+```
+
+The frontend remembers that hosted API URL for later visits in the same browser.
+
 For Google sync, add the Render callback URL to your Google OAuth client after Render gives you the URL. It will look like `https://your-service.onrender.com/auth/google/callback`.
 
 Without `DATABASE_URL`, Clerk falls back to SQLite. That is fine for a quick demo, but hosted SQLite data may not survive redeploys or restarts.

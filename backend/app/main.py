@@ -777,32 +777,39 @@ def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = Non
 
 def _complete_google_login(code: str, state: Optional[str], saved_state: dict, frontend_url: str):
     """Handle the OAuth callback for a login/registration flow."""
+    import requests as _requests
+    client_config = get_google_client_config()
+
+    # Exchange authorization code for access token directly via HTTP (avoids Flow state issues).
     try:
-        login_scopes = saved_state.get("login_scopes") or [
-            'openid',
-            'https://www.googleapis.com/auth/userinfo.email',
-            'https://www.googleapis.com/auth/userinfo.profile'
-        ]
-        flow = Flow.from_client_config(
-            get_google_credentials_config(),
-            scopes=login_scopes,
-            redirect_uri=get_google_redirect_uri()
+        token_resp = _requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": code,
+                "client_id": client_config["client_id"],
+                "client_secret": client_config["client_secret"],
+                "redirect_uri": get_google_redirect_uri(),
+                "grant_type": "authorization_code",
+            },
+            timeout=10,
         )
-        os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
-        flow.fetch_token(code=code)
-        creds = flow.credentials
+        token_data = token_resp.json()
+        if "error" in token_data:
+            error_msg = f"{token_data['error']}: {token_data.get('error_description', '')}"
+            return RedirectResponse(url=f"{frontend_url}?google_error={quote(error_msg, safe='')}")
+        access_token = token_data.get("access_token")
+        if not access_token:
+            return RedirectResponse(url=f"{frontend_url}?google_error={quote('No access token received from Google', safe='')}")
         clear_google_oauth_state(state)
     except Exception as exc:
-        message = str(exc) or exc.__class__.__name__
-        return RedirectResponse(url=f"{frontend_url}?google_error={quote(message, safe='')}")
+        return RedirectResponse(url=f"{frontend_url}?google_error={quote(str(exc) or exc.__class__.__name__, safe='')}")
 
     # Fetch user info from Google
     try:
-        import requests as _requests
         userinfo_resp = _requests.get(
             "https://www.googleapis.com/oauth2/v3/userinfo",
-            headers={"Authorization": f"Bearer {creds.token}"},
-            timeout=10
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
         )
         userinfo = userinfo_resp.json()
     except Exception as exc:

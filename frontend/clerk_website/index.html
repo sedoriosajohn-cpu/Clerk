@@ -2807,8 +2807,9 @@ const agendaList = document.getElementById('agendaList');
 const newTasksList = document.getElementById('newTasksList');
 const STATIC_FRONTEND_PORTS = new Set(["", "3000", "5173", "5500", "5501"]);
 const isStaticFrontend = window.location.protocol === "file:" || STATIC_FRONTEND_PORTS.has(window.location.port);
-let API_BASE = window.CLERK_API_BASE || (isStaticFrontend ? "http://127.0.0.1:8000" : window.location.origin);
+const API_BASE_STORAGE_KEY = "CLERK_API_BASE";
 const REQUEST_TIMEOUT_MS = 20000;
+const AUTH_TIMEOUT_MS = 45000;
 const requestBucket = new Map();
 const LOCAL_API_BASES = [
     "http://127.0.0.1:8000",
@@ -2816,16 +2817,58 @@ const LOCAL_API_BASES = [
     "http://127.0.0.1:8001",
     "http://localhost:8001"
 ];
+const queryApiBase = getQueryApiBase();
+const explicitApiBase = normalizeApiBase(window.CLERK_API_BASE || queryApiBase || getStoredApiBase());
+let API_BASE = explicitApiBase || (isStaticFrontend ? "http://127.0.0.1:8000" : window.location.origin);
+if (explicitApiBase) persistApiBase(explicitApiBase);
 
 function renderSkeleton(count = 4) {
     return `<div class="skeleton-list">${Array.from({ length: count }, () => '<div class="skeleton-card"></div>').join('')}</div>`;
 }
 
 function getFriendlyApiError(error) {
-    if (error && error.name === 'AbortError') return "The server is taking too long. Make sure the backend is running, then try again.";
-    if (error && isNetworkFetchError(error)) return "Could not reach the Clerk backend. Start Clerk, then open the URL shown in the terminal.";
+    if (error && error.name === 'AbortError') return "The server is taking too long. If Clerk is hosted on Render, wait for it to wake up, then try again.";
+    if (error && isNetworkFetchError(error)) {
+        if (isStaticFrontend && !explicitApiBase) {
+            return "Could not reach the Clerk backend. If you are using Render, open this page once with ?api_base=https://your-service.onrender.com.";
+        }
+        if (explicitApiBase && !isLocalApiHost(new URL(explicitApiBase).hostname)) {
+            return `Could not reach the Clerk backend at ${explicitApiBase}. Check that the Render service is deployed and awake.`;
+        }
+        return "Could not reach the Clerk backend. Start Clerk, then open the URL shown in the terminal.";
+    }
     if (error && error.message) return error.message;
     return "Connection failed. Make sure the FastAPI backend is running on port 8000.";
+}
+
+function getQueryApiBase() {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("api_base") || params.get("apiBase") || params.get("clerk_api_base") || "";
+}
+
+function normalizeApiBase(value) {
+    if (!value) return "";
+    try {
+        return new URL(String(value).trim(), window.location.href).origin;
+    } catch (_error) {
+        return "";
+    }
+}
+
+function getStoredApiBase() {
+    try {
+        return localStorage.getItem(API_BASE_STORAGE_KEY) || "";
+    } catch (_error) {
+        return "";
+    }
+}
+
+function persistApiBase(value) {
+    try {
+        localStorage.setItem(API_BASE_STORAGE_KEY, value);
+    } catch (_error) {
+        // Some browser privacy modes disable localStorage; the current page still works.
+    }
 }
 
 function isLocalApiHost(hostname) {
@@ -2923,6 +2966,7 @@ async function apiFetch(url, options = {}) {
         try {
             const response = await fetch(attemptUrl, { ...fetchOptions, signal: controller.signal });
             API_BASE = new URL(attemptUrl).origin;
+            persistApiBase(API_BASE);
             return response;
         } catch (error) {
             if (error && error.name === 'AbortError') {
@@ -3074,7 +3118,7 @@ window.login = async function() {
             }),
             throttleKey: 'login',
             minInterval: 1000,
-            timeout: 6000
+            timeout: AUTH_TIMEOUT_MS
         });
         
 
@@ -3220,7 +3264,7 @@ async function submitTwoFactorLoginCode() {
             }),
             throttleKey: 'login-2fa',
             minInterval: 1000,
-            timeout: 6000
+            timeout: AUTH_TIMEOUT_MS
         });
 
         if (!response.ok) {
@@ -3238,7 +3282,7 @@ async function submitTwoFactorLoginCode() {
             syncAllGoogleSources({ silent: true });
         }
     } catch (err) {
-        error.textContent = err.message || getFriendlyApiError(err);
+        error.textContent = getFriendlyApiError(err);
         error.style.display = 'block';
     }
 }

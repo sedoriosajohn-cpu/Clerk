@@ -2086,6 +2086,17 @@ button {
     color: var(--teal-dark);
 }
 
+#voiceBtn.recording {
+    background: rgba(220, 38, 38, 0.12);
+    color: #ef4444;
+    border-color: rgba(220, 38, 38, 0.5);
+    animation: pulse-rec 1.1s ease-in-out infinite;
+}
+@keyframes pulse-rec {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.55; }
+}
+
 .done-btn {
     width: 30px;
     height: 30px;
@@ -5961,18 +5972,106 @@ window.addEventListener('DOMContentLoaded', () => {
 // Checks for a date change every minute
 setInterval(setLiveDates, 60000);
 
-// --- VOICE RECOGNITION (KEEP THIS) ---
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognition = null;
-let listening = false;
+// --- VOICE RECORDING (MediaRecorder → Whisper) ---
+let _mediaRecorder = null;
+let _audioChunks   = [];
+let _isRecording   = false;
+let _micStream     = null;
 
-if (SpeechRecognition) {
-  recognition = new SpeechRecognition();
-  recognition.onstart = () => { listening = true; voiceBtn.textContent = 'Listening...'; };
-  recognition.onresult = (event) => { taskInput.value = event.results[0][0].transcript; };
-  recognition.onend = () => { listening = false; voiceBtn.textContent = 'Voice Note'; };
-  voiceBtn.addEventListener('click', () => listening ? recognition.stop() : recognition.start());
+async function _startVoiceRecording() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showToast('Your browser does not support microphone access. Try Chrome or Firefox.', 'error');
+        return;
+    }
+    try {
+        _micStream   = await navigator.mediaDevices.getUserMedia({ audio: true });
+        _audioChunks = [];
+
+        // Pick best supported MIME type
+        const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']
+            .find(t => MediaRecorder.isTypeSupported(t)) || '';
+
+        _mediaRecorder = new MediaRecorder(_micStream, mime ? { mimeType: mime } : {});
+        _mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) _audioChunks.push(e.data); };
+        _mediaRecorder.onstop = _onRecordingStop;
+        _mediaRecorder.start(250); // collect chunks every 250 ms
+
+        _isRecording = true;
+        voiceBtn.textContent = '⏹ Stop';
+        voiceBtn.classList.add('recording');
+
+    } catch (err) {
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+            showToast('Microphone access denied. Allow it in your browser and try again.', 'error');
+        } else {
+            showToast('Could not start recording: ' + err.message, 'error');
+        }
+    }
 }
+
+function _stopVoiceRecording() {
+    if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
+        _mediaRecorder.stop();
+    }
+    if (_micStream) {
+        _micStream.getTracks().forEach(t => t.stop());
+        _micStream = null;
+    }
+    _isRecording = false;
+    voiceBtn.textContent = 'Transcribing…';
+    voiceBtn.disabled = true;
+    voiceBtn.classList.remove('recording');
+}
+
+async function _onRecordingStop() {
+    if (!_audioChunks.length) {
+        showToast('No audio recorded. Make sure your microphone is working.', 'error');
+        _resetVoiceBtn();
+        return;
+    }
+
+    const mimeType = _mediaRecorder ? (_mediaRecorder.mimeType || 'audio/webm') : 'audio/webm';
+    const ext = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+    const blob = new Blob(_audioChunks, { type: mimeType });
+
+    try {
+        const formData = new FormData();
+        formData.append('file', blob, `recording.${ext}`);
+
+        const res = await fetch(`${API_BASE}/transcribe`, { method: 'POST', body: formData });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `Server error ${res.status}`);
+        }
+        const data = await res.json();
+        const text = (data.text || '').trim();
+        if (text) {
+            taskInput.value = taskInput.value ? taskInput.value + '\n' + text : text;
+            showToast('Voice note transcribed — click Extract Tasks!', 'success');
+        } else {
+            showToast('No speech detected in the recording.', 'info');
+        }
+    } catch (err) {
+        showToast('Transcription failed: ' + err.message, 'error');
+    } finally {
+        _resetVoiceBtn();
+    }
+}
+
+function _resetVoiceBtn() {
+    voiceBtn.textContent = 'Voice Note';
+    voiceBtn.disabled = false;
+    voiceBtn.classList.remove('recording');
+    _isRecording = false;
+}
+
+voiceBtn.addEventListener('click', () => {
+    if (_isRecording) {
+        _stopVoiceRecording();
+    } else {
+        _startVoiceRecording();
+    }
+});
 
 // --- NOTIFICATION SYSTEM ---
 async function checkUpcomingTasks() {

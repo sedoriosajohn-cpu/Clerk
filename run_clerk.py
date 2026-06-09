@@ -98,14 +98,23 @@ def open_browser_when_ready(url: str, timeout: float = 15.0) -> None:
 
 
 def check_env() -> None:
-    """Warn about common missing configuration."""
+    """Warn about common missing configuration; create a starter .env if absent."""
     env_path = ROOT_DIR / ".env"
     if not env_path.exists():
-        print(yellow("⚠️   No .env file found — creating a starter one."))
         env_path.write_text(
             "# Clerk local configuration\n"
+            "#\n"
+            "# Clerk runs without any of these set — you can add tasks manually right away.\n"
+            "# Uncomment and fill in the keys below to unlock additional features.\n"
+            "#\n"
+            "# --- AI extraction (smart task parsing, voice notes, image schedules) ---\n"
             "# OPENAI_API_KEY=sk-...\n"
-            "# DATABASE_URL=   (leave blank to use the local clerk.db SQLite file)\n"
+            "# OPENAI_MODEL=gpt-4o-mini\n"
+            "#\n"
+            "# --- Database (leave blank to use local SQLite — fine for personal use) ---\n"
+            "# DATABASE_URL=postgresql://user:pass@host/dbname\n"
+            "#\n"
+            "# --- Email (password reset emails; app works without this) ---\n"
             "# SMTP_HOST=smtp.gmail.com\n"
             "# SMTP_PORT=587\n"
             "# SMTP_USERNAME=you@gmail.com\n"
@@ -113,12 +122,24 @@ def check_env() -> None:
             "# SMTP_FROM=you@gmail.com\n",
             encoding="utf-8",
         )
-        print(f"    Created {env_path} — fill in your API keys and restart.")
 
-    if not (ROOT_DIR / "credentials.json").exists():
-        print(yellow("⚠️   credentials.json not found."))
-        print("    Google login/sync won't work until you add it.")
-        print("    See: https://console.cloud.google.com/apis/credentials")
+    # Print feature availability summary
+    from dotenv import dotenv_values
+    env = dotenv_values(env_path)
+
+    has_openai  = bool(env.get("OPENAI_API_KEY"))
+    has_google  = (ROOT_DIR / "credentials.json").exists() or bool(env.get("GOOGLE_CREDENTIALS_JSON"))
+    has_smtp    = bool(env.get("SMTP_HOST"))
+    has_db      = bool(env.get("DATABASE_URL"))
+
+    print()
+    print(bold("  Feature availability:"))
+    print(f"    {'✅' if True      else '❌'}  Task manager (manual entry, basic matching) — always on")
+    print(f"    {'✅' if has_openai else '⬜'}  AI extraction, voice notes, image schedules  {'(OPENAI_API_KEY set)' if has_openai else '— add OPENAI_API_KEY to .env'}")
+    print(f"    {'✅' if has_google else '⬜'}  Gmail / Calendar / Classroom sync            {'(credentials.json found)' if has_google else '— add credentials.json'}")
+    print(f"    {'✅' if has_smtp   else '⬜'}  Password-reset emails                        {'(SMTP configured)' if has_smtp else '— add SMTP settings to .env'}")
+    print(f"    {'✅' if has_db     else '⬜'}  PostgreSQL database                          {'(DATABASE_URL set)' if has_db else '— using local SQLite (default)'}")
+    print()
 
 
 def main() -> int:

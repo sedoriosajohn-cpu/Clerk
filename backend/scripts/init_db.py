@@ -9,16 +9,32 @@ load_dotenv()
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-if not DATABASE_URL:
+def _sqlite_fallback():
     local_db_path = os.path.join(PROJECT_ROOT, "clerk.db")
-    DATABASE_URL = f"sqlite:///{local_db_path.replace(os.sep, '/')}"
-    print(f"DATABASE_URL not found; using local SQLite database at {local_db_path}")
+    url = f"sqlite:///{local_db_path.replace(os.sep, '/')}"
+    return url, local_db_path
+
+if not DATABASE_URL:
+    DATABASE_URL, _local_db_path = _sqlite_fallback()
+    print(f"DATABASE_URL not set; using local SQLite database at {_local_db_path}")
 else:
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-        
+
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
+
+try:
+    engine = create_engine(DATABASE_URL, connect_args=connect_args)
+    # Quick connectivity test so we fail fast rather than at first request.
+    if not DATABASE_URL.startswith("sqlite"):
+        with engine.connect():
+            pass
+except Exception as _db_err:
+    print(f"⚠️  Could not connect to the configured database ({_db_err}).")
+    print("   Falling back to local SQLite database.")
+    DATABASE_URL, _local_db_path = _sqlite_fallback()
+    connect_args = {"check_same_thread": False}
+    engine = create_engine(DATABASE_URL, connect_args=connect_args)
 
 if DATABASE_URL.startswith("sqlite"):
     from sqlalchemy import event as _sa_event
@@ -52,6 +68,7 @@ class User(Base):
     two_factor_expires_at = Column(String)
     reset_password_token_hash = Column(String)
     reset_password_expires_at = Column(String)
+    google_token_json = Column(Text)  # Stores OAuth token JSON (replaces filesystem file)
 
 class RawInput(Base):
     __tablename__ = "raw_inputs"
@@ -105,6 +122,7 @@ def ensure_database_schema():
         "two_factor_expires_at": "VARCHAR",
         "reset_password_token_hash": "VARCHAR",
         "reset_password_expires_at": "VARCHAR",
+        "google_token_json": "TEXT",
     }
     with engine.begin() as connection:
         for column_name, column_type in user_columns.items():

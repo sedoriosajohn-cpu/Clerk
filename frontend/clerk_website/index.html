@@ -2630,6 +2630,15 @@ button {
                     <div class="line"></div>
                 </header>
 
+                <!-- Setup status banner — shown when optional integrations are missing -->
+                <div id="setupBanner" style="display:none; margin-bottom:16px; padding:14px 16px; border-radius:12px; border:1.5px solid var(--border); background:var(--panel-bg); font-size:13px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                        <strong style="font-size:14px;">🚀 Clerk is running — here's what you can add</strong>
+                        <button onclick="document.getElementById('setupBanner').style.display='none'; localStorage.setItem('clerk_banner_dismissed','1');" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--muted);line-height:1;" title="Dismiss">×</button>
+                    </div>
+                    <div id="setupBannerItems" style="display:flex;flex-direction:column;gap:6px;"></div>
+                </div>
+
                 <section class="panel" id="agendaView">
                     <h2>Today</h2>
                     <div class="agenda-list" id="agendaList"></div>
@@ -3230,6 +3239,7 @@ window.login = async function() {
             // Hide login and show agenda
             document.getElementById('login-overlay').style.display = 'none';
             loadView('agenda');
+            checkSetupStatus();
             if (window.USER_SETTINGS.google_connected) {
                 syncAllGoogleSources({ silent: true });
             }
@@ -3369,6 +3379,7 @@ async function submitTwoFactorLoginCode() {
         applyUserSettings(data.settings || { preferred_name: data.username });
         document.getElementById('login-overlay').style.display = 'none';
         loadView('agenda');
+        checkSetupStatus();
         if (window.USER_SETTINGS.google_connected) {
             syncAllGoogleSources({ silent: true });
         }
@@ -3386,6 +3397,45 @@ async function fetchUserSettings() {
         }
     } catch (err) {
         console.error("Failed to fetch settings:", err);
+    }
+}
+
+async function checkSetupStatus() {
+    if (localStorage.getItem('clerk_banner_dismissed') === '1') return;
+    try {
+        const res = await fetch(`${API_BASE}/setup-status`);
+        if (!res.ok) return;
+        const s = await res.json();
+
+        const items = [];
+        if (!s.openai) items.push({
+            ok: false,
+            text: '🤖 <strong>AI extraction is off</strong> — tasks can still be added manually or with basic text matching. Add <code>OPENAI_API_KEY</code> to <code>.env</code> to enable smart extraction, voice notes, and image parsing.'
+        });
+        if (!s.google) items.push({
+            ok: false,
+            text: '📅 <strong>Google sync is off</strong> — add <code>credentials.json</code> (Google OAuth client) to sync Gmail, Calendar, and Classroom.'
+        });
+        if (!s.smtp) items.push({
+            ok: false,
+            text: '📧 <strong>Email is off</strong> — password reset emails won\'t be sent. Add <code>SMTP_HOST</code> / <code>SMTP_USERNAME</code> / <code>SMTP_PASSWORD</code> to <code>.env</code> to enable.'
+        });
+
+        if (items.length === 0) return; // everything configured — no banner needed
+
+        const banner = document.getElementById('setupBanner');
+        const list   = document.getElementById('setupBannerItems');
+        if (!banner || !list) return;
+
+        list.innerHTML = items.map(i => `
+            <div style="display:flex;gap:8px;align-items:flex-start;">
+                <span style="font-size:11px;padding:2px 7px;border-radius:20px;font-weight:700;white-space:nowrap;margin-top:1px;background:rgba(239,68,68,.12);color:#ef4444;">missing</span>
+                <span style="color:var(--text);line-height:1.5;">${i.text}</span>
+            </div>`).join('');
+
+        banner.style.display = 'block';
+    } catch (e) {
+        // setup-status endpoint unreachable — don't show the banner
     }
 }
 

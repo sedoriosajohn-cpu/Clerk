@@ -47,11 +47,12 @@ sync_request_log = {}
 auto_sync_task = None
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-GOOGLE_TOKEN_DIR = os.path.join(BASE_DIR, "..", "..", "google_tokens")
 CREDS_PATH = os.path.join(BASE_DIR, "..", "..", "credentials.json")
-OAUTH_STATE_DIR = os.path.join(BASE_DIR, "..", "..", ".google_oauth_states")
 DEFAULT_GOOGLE_REDIRECT_URI = "http://localhost:8000/auth/google/callback"
 DEFAULT_FRONTEND_URL = "http://127.0.0.1:8000"
+
+# In-memory store for transient OAuth states (survives the round-trip; no disk needed).
+_oauth_states: dict = {}
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website")), name="static")
 
 app.add_middleware(
@@ -172,7 +173,12 @@ def verify_two_factor_code(user: User, code: Optional[str]) -> bool:
     return hash_two_factor_code(code.strip()) == user.two_factor_code_hash
 
 def has_google_token(user_id: int) -> bool:
-    return os.path.exists(get_google_token_path(user_id))
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        return bool(user and user.google_token_json)
+    finally:
+        db.close()
 
 def user_settings_payload(user: User) -> dict:
     return {
@@ -310,6 +316,26 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     password: str
+
+@app.get("/setup-status")
+async def setup_status():
+    """Return which optional integrations are configured. Used by the frontend to show a setup banner."""
+    try:
+        from .extractor import client as _openai_client
+    except ImportError:
+        from extractor import client as _openai_client
+
+    has_openai   = _openai_client is not None
+    has_google   = os.path.exists(os.path.join(BASE_DIR, "..", "..", "credentials.json")) \
+                   or bool(os.environ.get("GOOGLE_CREDENTIALS_JSON"))
+    has_smtp     = bool(os.environ.get("SMTP_HOST"))
+
+    return {
+        "openai":  has_openai,
+        "google":  has_google,
+        "smtp":    has_smtp,
+        "ai_model": os.environ.get("OPENAI_MODEL", "gpt-4o-mini") if has_openai else None,
+    }
 
 # --- FRONTEND ROUTES ---
 @app.get("/")
@@ -511,6 +537,17 @@ async def ingest_doc(
             text_bytes = await file.read()
             content = text_bytes.decode("utf-8")
         elif file_type and file_type.startswith("image/"):
+            # Check for API key before even reading the bytes so we give a helpful message.
+            try:
+                from .extractor import client as _img_client
+            except ImportError:
+                from extractor import client as _img_client
+            if not _img_client:
+                return {
+                    "status": "success",
+                    "task_ids": [],
+                    "message": "Image extraction requires an OpenAI API key. Add OPENAI_API_KEY to your .env file to enable this feature."
+                }
             image_bytes = await file.read()
             structured_tasks = await asyncio.to_thread(
                 extract_work_schedule_from_image,
@@ -607,14 +644,8 @@ def build_google_flow(state: Optional[str] = None, code_verifier: Optional[str] 
         **kwargs
     )
 
-def get_google_token_path(user_id: int):
-    os.makedirs(GOOGLE_TOKEN_DIR, exist_ok=True)
-    return os.path.join(GOOGLE_TOKEN_DIR, f"user_{user_id}.json")
-
-def get_oauth_state_path(state: str):
-    os.makedirs(OAUTH_STATE_DIR, exist_ok=True)
-    state_key = hashlib.sha256(state.encode("utf-8")).hexdigest()
-    return os.path.join(OAUTH_STATE_DIR, f"{state_key}.json")
+def _state_key(state: str) -> str:
+    return hashlib.sha256(state.encode("utf-8")).hexdigest()
 
 def create_google_auth_url(user_id: int):
     flow = build_google_flow()
@@ -637,37 +668,42 @@ def get_frontend_url():
     return DEFAULT_FRONTEND_URL
 
 def save_google_oauth_state(state: str, code_verifier: str, user_id: int):
-    with open(get_oauth_state_path(state), "w", encoding="utf-8") as state_file:
-        json.dump({
-            "state": state,
-            "code_verifier": code_verifier,
-            "user_id": user_id,
-            "created_at": datetime.utcnow().isoformat()
-        }, state_file)
+    _oauth_states[_state_key(state)] = {
+        "state": state,
+        "code_verifier": code_verifier,
+        "user_id": user_id,
+        "created_at": datetime.utcnow().isoformat(),
+    }
 
 def load_google_oauth_state(state: Optional[str]):
     if not state:
         return {}
-
-    state_path = get_oauth_state_path(state)
-    if not os.path.exists(state_path):
-        return {}
-
-    with open(state_path, "r", encoding="utf-8-sig") as state_file:
-        return json.load(state_file)
+    return _oauth_states.get(_state_key(state), {})
 
 def clear_google_oauth_state(state: Optional[str]):
     if not state:
         return
-
-    state_path = get_oauth_state_path(state)
-    if os.path.exists(state_path):
-        os.remove(state_path)
+    _oauth_states.pop(_state_key(state), None)
 
 def clear_google_token(user_id: int):
-    token_path = get_google_token_path(user_id)
-    if os.path.exists(token_path):
-        os.remove(token_path)
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if user:
+            user.google_token_json = None
+            db.commit()
+    finally:
+        db.close()
+
+def _save_google_token(user_id: int, token_json: str):
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if user:
+            user.google_token_json = token_json
+            db.commit()
+    finally:
+        db.close()
 
 def is_invalid_google_grant(error: Exception) -> bool:
     message = str(error).lower()
@@ -700,8 +736,7 @@ def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = Non
         os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
         flow.fetch_token(code=code)
         creds = flow.credentials
-        with open(get_google_token_path(saved_state["user_id"]), 'w') as token:
-            token.write(creds.to_json())
+        _save_google_token(saved_state["user_id"], creds.to_json())
         clear_google_oauth_state(state)
     except Exception as exc:
         if is_invalid_google_grant(exc):
@@ -715,22 +750,28 @@ def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = Non
     return RedirectResponse(url=f"{frontend_url}?google_connected=1&user_id={saved_state['user_id']}")
 
 def get_google_creds(user_id: int):
-    creds = None
-    token_path = get_google_token_path(user_id)
+    # Read token JSON from the database
+    db = SessionLocal()
     try:
-        if os.path.exists(token_path):
-            creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-    except Exception:
-        clear_google_token(user_id)
-        return None
+        user = db.query(User).filter(User.user_id == user_id).first()
+        token_json = user.google_token_json if user else None
+    finally:
+        db.close()
+
+    creds = None
+    if token_json:
+        try:
+            creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
+        except Exception:
+            clear_google_token(user_id)
+            return None
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             try:
                 creds.refresh(GoogleAuthRequest())
-                with open(token_path, 'w') as token:
-                    token.write(creds.to_json())
-                return creds # Credentials refreshed, return them
+                _save_google_token(user_id, creds.to_json())
+                return creds
             except RefreshError:
                 clear_google_token(user_id)
                 return None
@@ -742,7 +783,7 @@ def get_google_creds(user_id: int):
         else:
             # No valid creds and no refresh token — caller must trigger OAuth
             clear_google_token(user_id)
-            return None # Indicate that credentials are not available
+            return None
     return creds
 
 def get_gmail_service(user_id: int):
@@ -1431,9 +1472,6 @@ def sync_gmail_blocking(user_id: int):
         ensure_user_exists(user_id, db)
         creds = get_google_creds(user_id)
         if not creds:
-            if not os.path.exists(CREDS_PATH):
-                return {"error": "credentials_missing", "message": "Google credentials.json is missing on the server."}
-
             return google_auth_required_response(user_id)
         service = build('gmail', 'v1', credentials=creds)
         # Fetch the 5 most recent emails
@@ -1612,19 +1650,11 @@ async def auto_sync_user(user_id: int, db: Session):
     return {"gmail": gmail_count, "classroom": classroom_count, "calendar": calendar_count, "gtasks": gtasks_count}
 
 def get_auto_sync_user_ids(db: Session) -> List[int]:
-    if not os.path.isdir(GOOGLE_TOKEN_DIR):
-        return []
-
-    user_ids = []
-    for filename in os.listdir(GOOGLE_TOKEN_DIR):
-        match = re.fullmatch(r'user_(\d+)\.json', filename)
-        if not match:
-            continue
-
-        user_id = int(match.group(1))
-        if db.query(User).filter(User.user_id == user_id).first():
-            user_ids.append(user_id)
-    return user_ids
+    # Find all users who have a stored Google token in the database.
+    return [
+        u.user_id for u in
+        db.query(User).filter(User.google_token_json.isnot(None)).all()
+    ]
 
 def run_auto_sync_once_blocking():
     db = SessionLocal()

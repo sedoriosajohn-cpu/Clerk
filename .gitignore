@@ -2,6 +2,9 @@
 data/
 *.db
 *.sqlite3
+clerk.db-shm
+clerk.db-wal
+clerk.db
 
 # Keeps local libraries and cache out of the repo
 __pycache__/

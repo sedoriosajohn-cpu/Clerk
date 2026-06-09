@@ -336,6 +336,9 @@ async def setup_status():
         "smtp":    has_smtp,
         "ai_model": os.environ.get("OPENAI_MODEL", "gpt-4o-mini") if has_openai else None,
     }
+class GoogleSetPasswordRequest(BaseModel):
+    user_id: int
+    password: str
 
 # --- FRONTEND ROUTES ---
 @app.get("/")
@@ -725,12 +728,17 @@ def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = Non
     saved_state = {}
     try:
         saved_state = load_google_oauth_state(state)
+        if saved_state.get("state") and state and saved_state["state"] != state:
+            return RedirectResponse(url=f"{frontend_url}?google_error=oauth_state_mismatch")
+
+        # Login flow: authenticate/register via Google identity
+        if saved_state.get("login_flow"):
+            return _complete_google_login(code, state, saved_state, frontend_url)
+
         if not saved_state.get("code_verifier"):
             return RedirectResponse(url=f"{frontend_url}?google_error=missing_code_verifier")
         if not saved_state.get("user_id"):
             return RedirectResponse(url=f"{frontend_url}?google_error=missing_google_user")
-        if saved_state.get("state") and state and saved_state["state"] != state:
-            return RedirectResponse(url=f"{frontend_url}?google_error=oauth_state_mismatch")
 
         flow = build_google_flow(state=state, code_verifier=saved_state["code_verifier"])
         os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
@@ -748,6 +756,79 @@ def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = Non
         return RedirectResponse(url=f"{frontend_url}?google_error={quote(message, safe='')}")
 
     return RedirectResponse(url=f"{frontend_url}?google_connected=1&user_id={saved_state['user_id']}")
+
+def _complete_google_login(code: str, state: Optional[str], saved_state: dict, frontend_url: str):
+    """Handle the OAuth callback for a login/registration flow."""
+    try:
+        login_scopes = saved_state.get("login_scopes") or [
+            'openid',
+            'https://www.googleapis.com/auth/userinfo.email',
+            'https://www.googleapis.com/auth/userinfo.profile'
+        ]
+        flow = Flow.from_client_config(
+            get_google_credentials_config(),
+            scopes=login_scopes,
+            redirect_uri=get_google_redirect_uri()
+        )
+        os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        clear_google_oauth_state(state)
+    except Exception as exc:
+        message = str(exc) or exc.__class__.__name__
+        return RedirectResponse(url=f"{frontend_url}?google_error={quote(message, safe='')}")
+
+    # Fetch user info from Google
+    try:
+        import requests as _requests
+        userinfo_resp = _requests.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {creds.token}"},
+            timeout=10
+        )
+        userinfo = userinfo_resp.json()
+    except Exception as exc:
+        return RedirectResponse(url=f"{frontend_url}?google_error={quote('Could not fetch Google profile', safe='')}")
+
+    google_sub = userinfo.get("sub")
+    google_email = userinfo.get("email") or ""
+    google_name = userinfo.get("name") or ""
+    if not google_sub:
+        return RedirectResponse(url=f"{frontend_url}?google_error={quote('Google did not return a user identifier', safe='')}")
+
+    db = SessionLocal()
+    try:
+        # Look for existing user by google_sub
+        user = db.query(User).filter(User.google_sub == google_sub).first()
+
+        if user:
+            # Existing Google user — log them in
+            return RedirectResponse(url=f"{frontend_url}?google_login=1&user_id={user.user_id}&username={quote(user.username, safe='')}")
+
+        # New user — auto-generate a username from email
+        base_username = re.sub(r'[^a-z0-9_]', '', google_email.split("@")[0].lower()) or "user"
+        username = base_username
+        counter = 1
+        while db.query(User).filter(User.username == username).first():
+            username = f"{base_username}{counter}"
+            counter += 1
+
+        new_user = User(
+            username=username,
+            password_hash=None,
+            email=google_email,
+            preferred_name=google_name or username,
+            google_sub=google_sub
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        return RedirectResponse(url=f"{frontend_url}?google_new_user=1&user_id={new_user.user_id}&username={quote(new_user.username, safe='')}")
+    except Exception as exc:
+        db.rollback()
+        return RedirectResponse(url=f"{frontend_url}?google_error={quote(str(exc), safe='')}")
+    finally:
+        db.close()
 
 def get_google_creds(user_id: int):
     # Read token JSON from the database
@@ -799,6 +880,40 @@ async def get_google_auth_url(user_id: int, db: Session = Depends(get_db)):
     """Returns the Google OAuth URL for the frontend to redirect to."""
     ensure_user_exists(user_id, db)
     return {"auth_url": create_google_auth_url(user_id)}
+
+@app.get("/auth/google/login")
+async def get_google_login_url():
+    """Starts a Google OAuth flow for login/registration (openid+email+profile only)."""
+    login_scopes = ['openid', 'https://www.googleapis.com/auth/userinfo.email', 'https://www.googleapis.com/auth/userinfo.profile']
+    flow = Flow.from_client_config(
+        get_google_credentials_config(),
+        scopes=login_scopes,
+        redirect_uri=get_google_redirect_uri()
+    )
+    auth_url, state = flow.authorization_url(access_type='offline', prompt='select_account')
+    save_google_oauth_state(state, flow.code_verifier or "", 0)
+    # Mark this state as a login flow
+    state_path = get_oauth_state_path(state)
+    with open(state_path, "r", encoding="utf-8-sig") as f:
+        state_data = json.load(f)
+    state_data["login_flow"] = True
+    state_data["login_scopes"] = login_scopes
+    with open(state_path, "w", encoding="utf-8") as f:
+        json.dump(state_data, f)
+    return {"auth_url": auth_url}
+
+@app.post("/auth/google/set-password")
+async def google_set_password(data: GoogleSetPasswordRequest, db: Session = Depends(get_db)):
+    """Sets a password for a Google-authenticated user who hasn't set one yet."""
+    user = db.query(User).filter(User.user_id == data.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not user.google_sub:
+        raise HTTPException(status_code=400, detail="This endpoint is only for Google-authenticated accounts.")
+    validate_strong_password(data.password, user.username)
+    user.password_hash = data.password
+    db.commit()
+    return {"status": "success", "user_id": user.user_id, "username": user.username, "settings": user_settings_payload(user)}
 
 @app.get("/auth/google/callback")
 async def google_callback(code: Optional[str] = None, state: str = None, error: Optional[str] = None):

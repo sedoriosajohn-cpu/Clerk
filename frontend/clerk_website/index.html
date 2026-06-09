@@ -3278,12 +3278,14 @@ async function loginWithGoogle() {
         } else {
             btn.textContent = "Continue with Google";
             btn.disabled = false;
-            alert("Could not start Google sign-in. Please try again.");
+            let msg = "Could not start Google sign-in. Please try again.";
+            try { const errData = await response.json(); if (errData.detail) msg = errData.detail; } catch (_) {}
+            showToast(msg, 'error');
         }
     } catch (err) {
         btn.textContent = "Continue with Google";
         btn.disabled = false;
-        alert("Could not start Google sign-in: " + getFriendlyApiError(err));
+        showToast("Could not start Google sign-in: " + getFriendlyApiError(err), 'error');
     }
 }
 

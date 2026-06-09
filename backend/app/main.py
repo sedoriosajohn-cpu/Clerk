@@ -894,24 +894,29 @@ async def get_google_auth_url(user_id: int, db: Session = Depends(get_db)):
 @app.get("/auth/google/login")
 async def get_google_login_url():
     """Starts a Google OAuth flow for login/registration (openid+email+profile only)."""
-    login_scopes = [
-        'openid',
-        'https://www.googleapis.com/auth/userinfo.email',
-        'https://www.googleapis.com/auth/userinfo.profile',
-    ]
-    flow = Flow.from_client_config(
-        get_google_credentials_config(),
-        scopes=login_scopes,
-        redirect_uri=get_google_redirect_uri()
-    )
-    auth_url, state = flow.authorization_url(access_type='offline', prompt='select_account')
-    save_google_oauth_state(state, flow.code_verifier or "", 0)
-    # Tag this state entry so the callback knows it's a login flow (not a connect flow).
-    key = _state_key(state)
-    if key in _oauth_states:
-        _oauth_states[key]["login_flow"] = True
-        _oauth_states[key]["login_scopes"] = login_scopes
-    return {"auth_url": auth_url}
+    try:
+        login_scopes = [
+            'openid',
+            'https://www.googleapis.com/auth/userinfo.email',
+            'https://www.googleapis.com/auth/userinfo.profile',
+        ]
+        flow = Flow.from_client_config(
+            get_google_credentials_config(),
+            scopes=login_scopes,
+            redirect_uri=get_google_redirect_uri()
+        )
+        auth_url, state = flow.authorization_url(access_type='offline', prompt='select_account')
+        save_google_oauth_state(state, flow.code_verifier or "", 0)
+        # Tag this state entry so the callback knows it's a login flow (not a connect flow).
+        key = _state_key(state)
+        if key in _oauth_states:
+            _oauth_states[key]["login_flow"] = True
+            _oauth_states[key]["login_scopes"] = login_scopes
+        return {"auth_url": auth_url}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not start Google sign-in: {exc}")
 
 @app.post("/auth/google/set-password")
 async def google_set_password(data: GoogleSetPasswordRequest, db: Session = Depends(get_db)):
@@ -1659,6 +1664,33 @@ def sync_classroom_blocking(user_id: int, tz_offset: int = 0):
     finally:
         db.close()
 
+def cleanup_duplicate_calendar_events(db: Session, user_id: int) -> int:
+    """Soft-delete exact-duplicate Google Calendar events (same title+date). Returns count removed."""
+    events = db.query(Task).filter(
+        Task.owner_id == user_id,
+        Task.item_type == "event",
+        Task.assignee == "Google Calendar",
+        Task.status != "deleted"
+    ).order_by(Task.task_id).all()
+
+    seen: dict = {}
+    removed = 0
+    for event in events:
+        title_key = normalize_title_for_match(event.title)
+        date_key = due_day_key(event.due_date)
+        if not title_key:
+            continue
+        key = (title_key, date_key)
+        if key in seen:
+            event.status = "deleted"
+            removed += 1
+        else:
+            seen[key] = event.task_id
+
+    if removed > 0:
+        db.commit()
+    return removed
+
 @app.get("/sync-all")
 async def sync_all(user_id: int, tz_offset: int = 0):
     return await asyncio.to_thread(sync_all_blocking, user_id, tz_offset)
@@ -1671,6 +1703,8 @@ def sync_all_blocking(user_id: int, tz_offset: int = 0):
         if not creds:
             # If no credentials, return the auth URL for the frontend to redirect
             return google_auth_required_response(user_id)
+
+        cleanup_duplicate_calendar_events(db, user_id)
 
         classroom = build('classroom', 'v1', credentials=creds)
         calendar = build('calendar', 'v3', credentials=creds)
@@ -1717,6 +1751,8 @@ async def auto_sync_user(user_id: int, db: Session):
     creds = get_google_creds(user_id)
     if not creds:
         return {"gmail": 0, "classroom": 0, "calendar": 0}
+
+    cleanup_duplicate_calendar_events(db, user_id)
 
     gmail_count = 0
     try:
@@ -1899,6 +1935,12 @@ async def save_structured_task_entries(entries, user_id, db):
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- TASK MANAGEMENT ROUTES ---
+@app.post("/tasks/deduplicate")
+async def deduplicate_tasks(user_id: int, db: Session = Depends(get_db)):
+    """Remove duplicate Google Calendar events with the same title and date."""
+    removed = cleanup_duplicate_calendar_events(db, user_id)
+    return {"status": "success", "removed": removed, "message": f"Removed {removed} duplicate calendar event(s)."}
+
 @app.get("/tasks")
 async def get_tasks(user_id: int, db: Session = Depends(get_db)):
     tasks = db.query(Task).filter(Task.owner_id == user_id).all()

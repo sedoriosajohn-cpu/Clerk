@@ -305,16 +305,68 @@ class ResetPasswordRequest(BaseModel):
     token: str
     password: str
 
-# --- FRONTEND ROUTE ---
+# --- FRONTEND ROUTES ---
 @app.get("/")
 async def read_index(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     if code or error:
         return complete_google_oauth(code=code, state=state, error=error)
     return FileResponse(os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website", "index.html"))
 
+@app.get("/config.js")
+async def read_config():
+    """Serve a blank config when running locally — the frontend auto-detects the backend from window.location.origin."""
+    from fastapi.responses import Response
+    return Response(
+        content='window.CLERK_API_BASE = window.CLERK_API_BASE || "";',
+        media_type="application/javascript",
+    )
+
 @app.get("/logo.png")
 async def read_logo():
     return FileResponse(os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website", "logo.png"))
+
+@app.get("/privacy.html")
+async def read_privacy():
+    return FileResponse(os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website", "privacy.html"))
+
+@app.get("/terms.html")
+async def read_terms():
+    return FileResponse(os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website", "terms.html"))
+
+# --- AUDIO TRANSCRIPTION ---
+@app.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """Accept an audio file and return a transcript via OpenAI Whisper."""
+    try:
+        from .extractor import client as openai_client
+    except ImportError:
+        from extractor import client as openai_client
+
+    if not openai_client:
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Add OPENAI_API_KEY to your .env file."
+        )
+
+    audio_bytes = await file.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio file received.")
+
+    import io
+    audio_buf = io.BytesIO(audio_bytes)
+    # Whisper needs a filename to detect the format
+    filename = file.filename or "recording.webm"
+    audio_buf.name = filename
+
+    try:
+        transcript = openai_client.audio.transcriptions.create(
+            model="whisper-1",
+            file=(filename, audio_buf, file.content_type or "audio/webm"),
+        )
+        return {"text": transcript.text}
+    except Exception as e:
+        print(f"[transcribe] Whisper error: {e}")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
 
 # --- AUTH ROUTES ---
 @app.post("/login")

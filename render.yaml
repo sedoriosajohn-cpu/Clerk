@@ -1,8 +1,9 @@
 services:
+  # ── Backend API ─────────────────────────────────────────────────────────────
   - type: web
     name: clerk
     runtime: python
-    plan: free
+    plan: starter          # $7/mo — never sleeps. Use "free" if you want free tier (30-60s cold start).
     buildCommand: pip install -r backend/requirements.txt
     startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
     envVars:
@@ -16,3 +17,29 @@ services:
         sync: false
       - key: GOOGLE_CREDENTIALS_JSON
         sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+
+  # ── Frontend Static Site ─────────────────────────────────────────────────────
+  - type: web
+    name: clerk-frontend
+    runtime: static
+    staticPublishPath: frontend/clerk_website
+    buildCommand: >-
+      echo "window.CLERK_API_BASE = 'https://clerk-k1c4.onrender.com';" > frontend/clerk_website/config.js
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

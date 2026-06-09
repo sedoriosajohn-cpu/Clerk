@@ -153,7 +153,7 @@ def verify_with_regex(raw_text: str, extracted_date: str) -> bool:
         dt = datetime.fromisoformat(extracted_date.replace('Z', ''))
         if dt.strftime('%A').lower() in raw_text.lower():
             return True
-    except:
+    except (ValueError, AttributeError):
         pass
     return False
 
@@ -1243,11 +1243,10 @@ def format_for_frontend(task: Dict[str, Any]) -> Dict[str, Any]:
     due_dt = None
     if task.get("due_date"):
         try:
-            # Strip 'Z' or offsets to treat as "Wall Time" (local naive datetime)
-            # This ensures the backend-generated time string matches the extracted wall time
+            # Strip 'Z' or offsets to treat as "wall time" (local naive datetime).
             clean_date = re.sub(r'Z$|[+-]\d{2}:\d{2}$', '', task["due_date"])
             due_dt = datetime.fromisoformat(clean_date)
-        except:
+        except (ValueError, AttributeError):
             pass
             
     task["due"] = due_dt.strftime("%m/%d/%Y") if due_dt else "No due date"

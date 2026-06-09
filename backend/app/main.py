@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -14,7 +15,7 @@ from datetime import datetime, timedelta
 import asyncio
 import base64
 from email.message import EmailMessage
-import os.path
+import os
 import json
 import hashlib
 import secrets
@@ -39,21 +40,37 @@ SCOPES = [
 # Calendar event types that are not meaningful tasks/reminders
 _SKIP_CALENDAR_EVENT_TYPES = {"focusTime", "outOfOffice", "workingLocation"}
 
-app = FastAPI()
 SYNC_THROTTLE_SECONDS = int(os.environ.get("SYNC_THROTTLE_SECONDS", "30"))
 AUTO_SYNC_ENABLED = os.environ.get("AUTO_SYNC_ENABLED", "1") == "1"
 AUTO_SYNC_INTERVAL_SECONDS = int(os.environ.get("AUTO_SYNC_INTERVAL_SECONDS", "900"))
-sync_request_log = {}
+sync_request_log: dict = {}
 auto_sync_task = None
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CREDS_PATH = os.path.join(BASE_DIR, "..", "..", "credentials.json")
+FRONTEND_DIR = os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website")
 DEFAULT_GOOGLE_REDIRECT_URI = "http://localhost:8000/auth/google/callback"
 DEFAULT_FRONTEND_URL = "http://127.0.0.1:8000"
 
 # In-memory store for transient OAuth states (survives the round-trip; no disk needed).
 _oauth_states: dict = {}
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website")), name="static")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Startup: initialise schema and start the background sync loop. Shutdown: cancel it."""
+    global auto_sync_task
+    ensure_database_schema()
+    if AUTO_SYNC_ENABLED and auto_sync_task is None:
+        auto_sync_task = asyncio.create_task(auto_sync_loop())
+    yield
+    if auto_sync_task:
+        auto_sync_task.cancel()
+        auto_sync_task = None
+
+
+app = FastAPI(lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 app.add_middleware(
     CORSMiddleware,
@@ -326,16 +343,17 @@ async def setup_status():
         from extractor import client as _openai_client
 
     has_openai   = _openai_client is not None
-    has_google   = os.path.exists(os.path.join(BASE_DIR, "..", "..", "credentials.json")) \
-                   or bool(os.environ.get("GOOGLE_CREDENTIALS_JSON"))
+    has_google   = os.path.exists(CREDS_PATH) or bool(os.environ.get("GOOGLE_CREDENTIALS_JSON"))
     has_smtp     = bool(os.environ.get("SMTP_HOST"))
 
     return {
         "openai":  has_openai,
         "google":  has_google,
         "smtp":    has_smtp,
-        "ai_model": os.environ.get("OPENAI_MODEL", "gpt-4o-mini") if has_openai else None,
+        "ai_model": os.environ.get("OPENAI_MODEL", "gpt-5.4") if has_openai else None,
     }
+
+
 class GoogleSetPasswordRequest(BaseModel):
     user_id: int
     password: str
@@ -345,7 +363,7 @@ class GoogleSetPasswordRequest(BaseModel):
 async def read_index(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     if code or error:
         return complete_google_oauth(code=code, state=state, error=error)
-    return FileResponse(os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website", "index.html"))
+    return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
 
 @app.get("/config.js")
 async def read_config():
@@ -358,15 +376,15 @@ async def read_config():
 
 @app.get("/logo.png")
 async def read_logo():
-    return FileResponse(os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website", "logo.png"))
+    return FileResponse(os.path.join(FRONTEND_DIR, "logo.png"))
 
 @app.get("/privacy.html")
 async def read_privacy():
-    return FileResponse(os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website", "privacy.html"))
+    return FileResponse(os.path.join(FRONTEND_DIR, "privacy.html"))
 
 @app.get("/terms.html")
 async def read_terms():
-    return FileResponse(os.path.join(BASE_DIR, "..", "..", "frontend", "clerk_website", "terms.html"))
+    return FileResponse(os.path.join(FRONTEND_DIR, "terms.html"))
 
 # --- AUDIO TRANSCRIPTION ---
 @app.post("/transcribe")
@@ -505,7 +523,7 @@ async def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_d
 async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
     return await process_and_save_tasks(data.content, data.user_id, data.source_type, db, data.local_time)
 
-# --- NEW: TASK INGESTION (DOCUMENTS) ---
+# --- TASK INGESTION (DOCUMENTS) ---
 @app.post("/ingest-doc")
 async def ingest_doc(
     user_id: int = Form(...),
@@ -867,14 +885,6 @@ def get_google_creds(user_id: int):
             return None
     return creds
 
-def get_gmail_service(user_id: int):
-    creds = get_google_creds(user_id)
-    if not creds:
-        # If get_google_creds returns None, it means authentication is needed.
-        # We raise HTTPException here for any direct backend calls that expect a service.
-        raise HTTPException(status_code=401, detail="Google needs to be reconnected. Please connect via Settings.")
-    return build('gmail', 'v1', credentials=creds)
-
 @app.get("/auth/google")
 async def get_google_auth_url(user_id: int, db: Session = Depends(get_db)):
     """Returns the Google OAuth URL for the frontend to redirect to."""
@@ -884,7 +894,11 @@ async def get_google_auth_url(user_id: int, db: Session = Depends(get_db)):
 @app.get("/auth/google/login")
 async def get_google_login_url():
     """Starts a Google OAuth flow for login/registration (openid+email+profile only)."""
-    login_scopes = ['openid', 'https://www.googleapis.com/auth/userinfo.email', 'https://www.googleapis.com/auth/userinfo.profile']
+    login_scopes = [
+        'openid',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/userinfo.profile',
+    ]
     flow = Flow.from_client_config(
         get_google_credentials_config(),
         scopes=login_scopes,
@@ -892,14 +906,11 @@ async def get_google_login_url():
     )
     auth_url, state = flow.authorization_url(access_type='offline', prompt='select_account')
     save_google_oauth_state(state, flow.code_verifier or "", 0)
-    # Mark this state as a login flow
-    state_path = get_oauth_state_path(state)
-    with open(state_path, "r", encoding="utf-8-sig") as f:
-        state_data = json.load(f)
-    state_data["login_flow"] = True
-    state_data["login_scopes"] = login_scopes
-    with open(state_path, "w", encoding="utf-8") as f:
-        json.dump(state_data, f)
+    # Tag this state entry so the callback knows it's a login flow (not a connect flow).
+    key = _state_key(state)
+    if key in _oauth_states:
+        _oauth_states[key]["login_flow"] = True
+        _oauth_states[key]["login_scopes"] = login_scopes
     return {"auth_url": auth_url}
 
 @app.post("/auth/google/set-password")
@@ -1790,20 +1801,6 @@ async def auto_sync_loop():
         except Exception as exc:
             print(f"Auto sync loop error: {exc}")
         await asyncio.sleep(AUTO_SYNC_INTERVAL_SECONDS)
-
-@app.on_event("startup")
-async def start_auto_sync():
-    global auto_sync_task
-    ensure_database_schema()
-    if AUTO_SYNC_ENABLED and auto_sync_task is None:
-        auto_sync_task = asyncio.create_task(auto_sync_loop())
-
-@app.on_event("shutdown")
-async def stop_auto_sync():
-    global auto_sync_task
-    if auto_sync_task:
-        auto_sync_task.cancel()
-        auto_sync_task = None
 
 # --- REUSABLE PROCESSING LOGIC ---
 async def process_and_save_tasks(text_content, user_id, source_info, db, current_time=None):

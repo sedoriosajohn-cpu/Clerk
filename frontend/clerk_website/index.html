@@ -3184,6 +3184,29 @@ const notifiedTasks = new Set(); // To prevent duplicate alerts
 let currentTask = null; // This will hold the result from your FastAPI /ingest
 let currentView = 'agenda';
 let latestTasks = [];
+
+// ── URL hash routing ────────────────────────────────────────────────────────
+const VIEW_HASHES = {
+    'agenda':   'today',
+    'my tasks': 'tasks',
+    'calendar': 'calendar',
+    'insights': 'review',
+    'history':  'history',
+    'settings': 'settings',
+};
+const HASH_VIEWS = Object.fromEntries(Object.entries(VIEW_HASHES).map(([k, v]) => [v, k]));
+
+// ── Session persistence (survives Ctrl+R / tab close) ─────────────────────
+const _SESSION_KEY = 'clerk_session';
+function saveSession(userId, username) {
+    try { localStorage.setItem(_SESSION_KEY, JSON.stringify({ user_id: userId, username })); } catch (_) {}
+}
+function loadSession() {
+    try { const r = localStorage.getItem(_SESSION_KEY); return r ? JSON.parse(r) : null; } catch (_) { return null; }
+}
+function clearSession() {
+    try { localStorage.removeItem(_SESSION_KEY); } catch (_) {}
+}
 let selectedTaskIds = new Set();
 let lastRenderedTaskIds = [];
 let taskQueueTypeFilter = 'all'; // 'all' | 'task' | 'reminder'
@@ -3224,6 +3247,20 @@ if (oauthParams.has('google_error')) {
         activeResetToken = resetTokenFromUrl;
         openPasswordResetPopup(resetTokenFromUrl);
         window.history.replaceState({}, document.title, window.location.pathname);
+    } else {
+        // Auto-restore saved session — makes Ctrl+R and tab-restore work.
+        const saved = loadSession();
+        if (saved && saved.user_id) {
+            window.CURRENT_USER_ID = saved.user_id;
+            document.getElementById('login-overlay').style.display = 'none';
+            fetchUserSettings().then(() => {
+                const hashView = HASH_VIEWS[window.location.hash.replace(/^#/, '')] || 'agenda';
+                loadView(hashView, false);
+                if (window.USER_SETTINGS && window.USER_SETTINGS.google_connected) {
+                    syncAllGoogleSources({ silent: true });
+                }
+            });
+        }
     }
 }
 
@@ -3252,6 +3289,7 @@ async function loginWithGoogle() {
 
 async function handleGoogleLoginRedirect(userId, username) {
     window.CURRENT_USER_ID = userId;
+    saveSession(userId, username);
     document.getElementById('login-overlay').style.display = 'none';
     await fetchUserSettings();
     loadView('agenda');
@@ -3292,6 +3330,7 @@ async function submitGoogleSetupPassword() {
         if (response.ok) {
             const data = await response.json();
             window.CURRENT_USER_ID = data.user_id;
+            saveSession(data.user_id, data.username);
             document.getElementById('google-setup-overlay').style.display = 'none';
             applyUserSettings(data.settings || { preferred_name: data.username });
             loadView('agenda');
@@ -3352,10 +3391,11 @@ window.login = async function() {
 
             // Store the ID and Name
             window.CURRENT_USER_ID = data.user_id;
+            saveSession(data.user_id, data.username);
             pendingTwoFactorLogin = false;
             loginBtn.textContent = "Sign In";
             applyUserSettings(data.settings || { preferred_name: data.username });
-            
+
             // Hide login and show agenda
             document.getElementById('login-overlay').style.display = 'none';
             loadView('agenda');
@@ -3495,6 +3535,7 @@ async function submitTwoFactorLoginCode() {
 
         const data = await response.json();
         window.CURRENT_USER_ID = data.user_id;
+        saveSession(data.user_id, data.username);
         closeTwoFactorLoginModal();
         applyUserSettings(data.settings || { preferred_name: data.username });
         document.getElementById('login-overlay').style.display = 'none';
@@ -4976,10 +5017,19 @@ async function completeTask(taskId) {
 
 
 //this function is the main driver for changing views between agenda, my tasks, and calendar. It fetches the appropriate data and calls the rendering functions.
-async function loadView(view) {
+async function loadView(view, addHistory = true) {
     // 0. Update the global state so other functions know what page we are on
-    currentView = view; 
+    currentView = view;
     document.body.dataset.currentView = view;
+
+    // Update the URL hash so back/forward/Ctrl+R all work.
+    // addHistory=false when called from popstate (already navigating) or on initial load.
+    if (addHistory && view !== 'reminders') {
+        const hash = '#' + (VIEW_HASHES[view] || view);
+        if (window.location.hash !== hash) {
+            history.pushState({ view }, '', hash);
+        }
+    }
 
     // 1. Update Navbar UI
     document.querySelectorAll('.nav a').forEach(link => {
@@ -6027,13 +6077,14 @@ function openSettings() {
 
 // Full Logout Logic
 function logout() {
-    CURRENT_USER_ID = null;
+    window.CURRENT_USER_ID = null;
+    clearSession();
+    history.replaceState(null, '', window.location.pathname);
     document.getElementById('display-username').textContent = "User";
     document.getElementById('username-input').value = "";
     document.getElementById('password-input').value = "";
     document.getElementById('login-overlay').style.display = 'flex';
     document.getElementById('user-dropdown').style.display = 'none';
-    console.log("Logged out successfully.");
 }
 
 //upload documents 
@@ -6244,6 +6295,47 @@ function setLiveDates() {
 window.addEventListener('DOMContentLoaded', () => {
     setLiveDates();
     buildCalendar(latestTasks);
+
+    // ── Browser back / forward buttons (also covers mouse back/forward) ──────
+    window.addEventListener('popstate', (e) => {
+        if (!window.CURRENT_USER_ID) return;
+        const view = e.state?.view
+            || HASH_VIEWS[window.location.hash.replace(/^#/, '')]
+            || 'agenda';
+        loadView(view, false);
+    });
+
+    // ── Keyboard shortcuts ───────────────────────────────────────────────────
+    document.addEventListener('keydown', (e) => {
+        if (!window.CURRENT_USER_ID) return; // don't fire on login screen
+
+        const ctrl = e.ctrlKey || e.metaKey;
+        const tag  = document.activeElement?.tagName ?? '';
+        const inInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+                     || document.activeElement?.isContentEditable;
+
+        // Ctrl/Cmd + number → switch tab
+        if (ctrl && !e.shiftKey && !e.altKey) {
+            const tabMap = { '1': 'agenda', '2': 'my tasks', '3': 'calendar', '4': 'insights', '5': 'history' };
+            if (tabMap[e.key]) { e.preventDefault(); loadView(tabMap[e.key]); return; }
+        }
+
+        if (inInput) return; // leave all other keys alone when typing
+
+        // Escape → close any open modal
+        if (e.key === 'Escape') {
+            if (typeof closeSectionModal === 'function') closeSectionModal();
+            return;
+        }
+
+        // / → focus the task composer input
+        if (e.key === '/') {
+            e.preventDefault();
+            const input = document.querySelector('.composer textarea, .composer input[type="text"]');
+            if (input) { input.focus(); input.select(); }
+            return;
+        }
+    });
 });
 
 // Checks for a date change every minute

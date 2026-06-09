@@ -3,7 +3,7 @@ services:
   - type: web
     name: clerk
     runtime: python
-    plan: starter          # $7/mo — never sleeps; change to "free" if you want the free tier
+    plan: starter          # $7/mo — never sleeps. Use "free" if you want free tier (30-60s cold start).
     buildCommand: pip install -r backend/requirements.txt
     startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
     envVars:
@@ -33,7 +33,7 @@ services:
     name: clerk-frontend
     runtime: static
     staticPublishPath: frontend/clerk_website
-    buildCommand: |
+    buildCommand: >-
       echo "window.CLERK_API_BASE = 'https://clerk-k1c4.onrender.com';" > frontend/clerk_website/config.js
     headers:
       - path: /*

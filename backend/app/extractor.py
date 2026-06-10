@@ -1017,7 +1017,7 @@ def locate_schedule_row_from_image(image, day_lines: List[int], row_bounds: List
     If no row matches, return {{"row_index": null}}.
     """
     response = client.chat.completions.create(
-        model=os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini"),
+        model=os.getenv("OPENAI_VISION_MODEL", "gpt-5.4"),
         messages=[{
             "role": "user",
             "content": [
@@ -1092,7 +1092,7 @@ def extract_schedule_from_detected_row(image, row_info: Dict[str, Any], day_line
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encode_schedule_image(cell)}", "detail": "high"}})
 
     response = client.chat.completions.create(
-        model=os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini"),
+        model=os.getenv("OPENAI_VISION_MODEL", "gpt-5.4"),
         messages=[{"role": "user", "content": content}],
         temperature=0,
         max_completion_tokens=SCHEDULE_MAX_OUTPUT_TOKENS
@@ -1293,7 +1293,7 @@ def extract_work_schedule_from_image(
     for retry in (False, True):
         prompt = build_schedule_image_prompt(names, now_iso, retry=retry)
         response = client.chat.completions.create(
-            model=os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini"),
+            model=os.getenv("OPENAI_VISION_MODEL", "gpt-5.4"),
             messages=[{
                 "role": "user",
                 "content": [

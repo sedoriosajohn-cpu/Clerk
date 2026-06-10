@@ -2257,7 +2257,27 @@ async def save_structured_tasks(structured_tasks, text_content, user_id, source_
         # Return a success with 0 tasks instead of a 500 error
         return {"status": "success", "task_ids": [], "message": "No actionable tasks found in input."}
 
-    entries = [(task_data, text_content, source_info) for task_data in structured_tasks]
+    # Deduplication strategy per source type:
+    #   text    — every submission is intentional; use a random tag so the same text
+    #             can be re-submitted and all extracted tasks are always saved.
+    #   file:*  — same file content → same tasks, so dedup by content hash; but save
+    #             ALL tasks from a new file by giving each its own index suffix.
+    #   other   — Gmail/Calendar/Tasks sources each already have a unique source id,
+    #             so pass through unchanged.
+    if source_info == "text":
+        tag = secrets.token_hex(6)
+        entries = [
+            (task_data, text_content, f"text:{tag}:{i}")
+            for i, task_data in enumerate(structured_tasks)
+        ]
+    elif source_info.startswith("file:"):
+        content_hash = hashlib.sha256(text_content.encode()).hexdigest()[:12]
+        entries = [
+            (task_data, text_content, f"{source_info}:{content_hash}:{i}")
+            for i, task_data in enumerate(structured_tasks)
+        ]
+    else:
+        entries = [(task_data, text_content, source_info) for task_data in structured_tasks]
     return await save_structured_task_entries(entries, user_id, db)
 
 async def save_structured_task_entries(entries, user_id, db):

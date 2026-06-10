@@ -11,6 +11,7 @@ google-auth-oauthlib==1.4.0
 PyMuPDF==1.27.2.3
 Pillow==12.2.0
 requests==2.33.1
+bcrypt==4.3.0
 
 # PostgreSQL support — required on Render/cloud; safe to install locally too.
 psycopg2-binary==2.9.11

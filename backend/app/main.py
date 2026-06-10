@@ -20,10 +20,12 @@ from email.message import EmailMessage
 import os
 import json
 import hashlib
+import logging
 import secrets
 import smtplib
 import time
 import re
+import bcrypt as _bcrypt
 from urllib.parse import quote
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.auth.exceptions import RefreshError
@@ -76,16 +78,39 @@ async def lifespan(_app: FastAPI):
         auto_sync_task = None
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+)
+_log = logging.getLogger("clerk")
+
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
+# Parse CORS_ALLOWED_ORIGINS from env ("https://myapp.com,https://www.myapp.com").
+# Falls back to wildcard so local dev works without any configuration.
+_cors_origins_raw = os.environ.get("CORS_ALLOWED_ORIGINS", "")
+_allowed_origins = (
+    [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    if _cors_origins_raw
+    else ["*"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    _log.error("Unhandled exception on %s %s", request.method, request.url.path, exc_info=exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An unexpected server error occurred. Please try again."},
+    )
 
 # --- MIDDLEWARE ---
 @app.middleware("http")
@@ -135,30 +160,39 @@ def is_valid_email(value: Optional[str]) -> bool:
     return bool(value and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", value.strip()))
 
 def _hash_password(password: str, salt: Optional[str] = None) -> str:
-    """Hash a password with a random 16-byte salt using SHA-256.
+    """Hash a password with bcrypt (work factor 12).
 
-    Format stored in the DB: '<salt_hex>:<digest_hex>'. Salting prevents
-    two identical passwords from producing the same hash and makes
-    rainbow-table attacks impractical without bcrypt as a dependency.
+    The returned string is the full bcrypt hash and is stored directly in
+    the DB — bcrypt embeds its own salt so no separate salt column is needed.
+    The `salt` parameter is accepted but ignored to keep callers compatible
+    with the old SHA-256 path.
     """
-    if salt is None:
-        salt = secrets.token_hex(16)
-    digest = hashlib.sha256(f"{salt}:{password}".encode("utf-8")).hexdigest()
-    return f"{salt}:{digest}"
+    return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 def _verify_password(password: str, stored: Optional[str]) -> bool:
-    """Verify a password against a salted hash or a legacy plaintext value.
+    """Verify a password against a bcrypt hash, a legacy SHA-256 salted hash, or plaintext.
 
-    The colon in the salted format ('salt:digest') distinguishes new hashes
-    from old plaintext passwords, allowing a seamless upgrade path: the first
-    login re-hashes the plaintext automatically without forcing a password reset.
+    Migration path (newest → oldest):
+      1. bcrypt strings start with '$2b$' or '$2a$' — verified with bcrypt.checkpw.
+      2. SHA-256 salted hashes have the form '<32-hex-chars>:<64-hex-chars>' — verified by
+         re-hashing the password with the stored salt and comparing digests.
+      3. Everything else is treated as a legacy plaintext value.
+    On successful login the endpoint re-hashes to bcrypt so old formats are
+    upgraded automatically without forcing a password reset.
     """
     if not stored or not password:
         return False
+    if stored.startswith(("$2b$", "$2a$", "$2y$")):
+        try:
+            return _bcrypt.checkpw(password.encode("utf-8"), stored.encode("utf-8"))
+        except Exception:
+            return False
     if ":" in stored:
+        # Legacy SHA-256 salted hash — re-derive and compare.
         salt, _ = stored.split(":", 1)
-        return secrets.compare_digest(_hash_password(password, salt), stored)
-    # Legacy plaintext fallback — the login endpoint re-hashes on success.
+        digest = hashlib.sha256(f"{salt}:{password}".encode("utf-8")).hexdigest()
+        return secrets.compare_digest(f"{salt}:{digest}", stored)
+    # Legacy plaintext fallback.
     return secrets.compare_digest(password, stored)
 
 def hash_two_factor_code(code: str) -> str:
@@ -876,6 +910,10 @@ def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = Non
         if saved_state.get("login_flow"):
             return _complete_google_login(code, state, saved_state, frontend_url)
 
+        # Link flow: attach a Google account to an existing Clerk user
+        if saved_state.get("link_flow"):
+            return _complete_google_link(code, state, saved_state, frontend_url)
+
         if not saved_state.get("code_verifier"):
             return RedirectResponse(url=f"{frontend_url}?google_error=missing_code_verifier")
         if not saved_state.get("user_id"):
@@ -950,16 +988,23 @@ def _complete_google_login(code: str, state: Optional[str], saved_state: dict, f
     if not google_sub:
         return RedirectResponse(url=f"{frontend_url}?google_error={quote('Google did not return a user identifier', safe='')}")
 
+    # Build a token JSON in the format Credentials.from_authorized_user_info expects,
+    # so we can save it immediately and the user is connected for sync after login.
+    token_json_to_save = _build_token_json(token_data, client_config)
+
     db = SessionLocal()
     try:
         # Look for existing user by google_sub
         user = db.query(User).filter(User.google_sub == google_sub).first()
 
         if user:
-            # Existing Google user — log them in
+            # Existing Google user — update token (scopes may have expanded) and log in.
+            if token_json_to_save and token_data.get("refresh_token"):
+                user.google_token_json = token_json_to_save
+                db.commit()
             return RedirectResponse(url=f"{frontend_url}?google_login=1&user_id={user.user_id}&username={quote(user.username, safe='')}")
 
-        # New user — auto-generate a username from email
+        # New user — auto-generate a username from the Google email.
         base_username = re.sub(r'[^a-z0-9_]', '', google_email.split("@")[0].lower()) or "user"
         username = base_username
         counter = 1
@@ -972,17 +1017,117 @@ def _complete_google_login(code: str, state: Optional[str], saved_state: dict, f
             password_hash=None,
             email=google_email,
             preferred_name=google_name or username,
-            google_sub=google_sub
+            google_sub=google_sub,
+            google_token_json=token_json_to_save,
         )
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
+        # google_new_user=1 tells the frontend this is a first-time registration.
         return RedirectResponse(url=f"{frontend_url}?google_new_user=1&user_id={new_user.user_id}&username={quote(new_user.username, safe='')}")
     except Exception as exc:
         db.rollback()
         return RedirectResponse(url=f"{frontend_url}?google_error={quote(str(exc), safe='')}")
     finally:
         db.close()
+
+
+def _build_token_json(token_data: dict, client_config: dict) -> Optional[str]:
+    """Convert a raw Google token-exchange response into the JSON string that
+    Credentials.from_authorized_user_info() can load.  Returns None if
+    the essential fields are missing."""
+    access_token = token_data.get("access_token")
+    if not access_token:
+        return None
+    raw_scopes = token_data.get("scope", "")
+    scopes = raw_scopes.split() if isinstance(raw_scopes, str) else list(raw_scopes)
+    from datetime import timezone as _tz
+    expiry = (
+        datetime.now(_tz.utc) + timedelta(seconds=int(token_data.get("expires_in", 3600)))
+    ).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return json.dumps({
+        "token": access_token,
+        "refresh_token": token_data.get("refresh_token"),
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "client_id": client_config.get("client_id", ""),
+        "client_secret": client_config.get("client_secret", ""),
+        "scopes": scopes,
+        "expiry": expiry,
+    })
+
+
+def _complete_google_link(code: str, state: Optional[str], saved_state: dict, frontend_url: str):
+    """Handle the OAuth callback for linking a Google account to an existing Clerk user.
+
+    If the Google account is already linked to a *different* Clerk user, the link
+    is refused to prevent account takeover. Otherwise the current user's google_sub
+    and google_token_json are updated so they can sign in with Google and sync.
+    """
+    import requests as _requests
+    client_config = get_google_client_config()
+    link_user_id = saved_state.get("link_user_id") or saved_state.get("user_id")
+
+    try:
+        post_data = {
+            "code": code,
+            "client_id": client_config["client_id"],
+            "client_secret": client_config["client_secret"],
+            "redirect_uri": get_google_redirect_uri(),
+            "grant_type": "authorization_code",
+        }
+        code_verifier = saved_state.get("code_verifier")
+        if code_verifier:
+            post_data["code_verifier"] = code_verifier
+        token_resp = _requests.post("https://oauth2.googleapis.com/token", data=post_data, timeout=10)
+        token_data = token_resp.json()
+        if "error" in token_data:
+            error_msg = f"{token_data['error']}: {token_data.get('error_description', '')}"
+            return RedirectResponse(url=f"{frontend_url}?google_error={quote(error_msg, safe='')}")
+        access_token = token_data.get("access_token")
+        if not access_token:
+            return RedirectResponse(url=f"{frontend_url}?google_error=no_access_token")
+        clear_google_oauth_state(state)
+    except Exception as exc:
+        return RedirectResponse(url=f"{frontend_url}?google_error={quote(str(exc), safe='')}")
+
+    try:
+        userinfo = _requests.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        ).json()
+    except Exception:
+        return RedirectResponse(url=f"{frontend_url}?google_error=could_not_fetch_profile")
+
+    google_sub = userinfo.get("sub")
+    if not google_sub:
+        return RedirectResponse(url=f"{frontend_url}?google_error=no_google_id")
+
+    db = SessionLocal()
+    try:
+        # Block link if this Google account is already owned by a different user.
+        existing = db.query(User).filter(User.google_sub == google_sub).first()
+        if existing and existing.user_id != link_user_id:
+            return RedirectResponse(url=f"{frontend_url}?google_error=google_account_already_linked")
+
+        user = db.query(User).filter(User.user_id == link_user_id).first()
+        if not user:
+            return RedirectResponse(url=f"{frontend_url}?google_error=user_not_found")
+
+        user.google_sub = google_sub
+        if not user.email:
+            user.email = userinfo.get("email") or ""
+        token_json = _build_token_json(token_data, client_config)
+        if token_json:
+            user.google_token_json = token_json
+        db.commit()
+        return RedirectResponse(url=f"{frontend_url}?google_link=1&user_id={link_user_id}")
+    except Exception as exc:
+        db.rollback()
+        return RedirectResponse(url=f"{frontend_url}?google_error={quote(str(exc), safe='')}")
+    finally:
+        db.close()
+
 
 def get_google_creds(user_id: int):
     """Load and, if needed, auto-refresh a user's Google OAuth credentials.
@@ -1030,39 +1175,72 @@ async def get_google_auth_url(user_id: int, db: Session = Depends(get_db)):
     ensure_user_exists(user_id, db)
     return {"auth_url": create_google_auth_url(user_id)}
 
+_GOOGLE_IDENTITY_SCOPES = [
+    'openid',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/userinfo.profile',
+]
+# All scopes requested during sign-in so users only go through OAuth once
+# and are immediately connected for Gmail/Calendar sync after registration.
+_GOOGLE_LOGIN_SCOPES = _GOOGLE_IDENTITY_SCOPES + SCOPES
+
+
 @app.get("/auth/google/login")
 async def get_google_login_url():
-    """Starts a Google OAuth flow for login/registration (openid+email+profile only)."""
+    """Starts a Google OAuth flow for login/registration.
+
+    Requests all sync scopes (Gmail, Calendar, Classroom) alongside identity
+    so that new and returning users are fully connected in a single OAuth pass.
+    """
     try:
-        login_scopes = [
-            'openid',
-            'https://www.googleapis.com/auth/userinfo.email',
-            'https://www.googleapis.com/auth/userinfo.profile',
-        ]
-        import secrets as _secrets
-        # Prefix the state with "login_" so the callback can identify this as a login
-        # flow even if the in-memory _oauth_states is cleared by a server restart.
-        login_state = f"login_{_secrets.token_urlsafe(24)}"
+        login_state = f"login_{secrets.token_urlsafe(24)}"
         flow = Flow.from_client_config(
             get_google_credentials_config(),
-            scopes=login_scopes,
+            scopes=_GOOGLE_LOGIN_SCOPES,
             redirect_uri=get_google_redirect_uri()
         )
         auth_url, _ = flow.authorization_url(
             access_type='offline', prompt='select_account', state=login_state
         )
         save_google_oauth_state(login_state, flow.code_verifier, 0)
-        state = login_state
-        # Tag this state entry so the callback knows it's a login flow (not a connect flow).
-        key = _state_key(state)
+        key = _state_key(login_state)
         if key in _oauth_states:
             _oauth_states[key]["login_flow"] = True
-            _oauth_states[key]["login_scopes"] = login_scopes
         return {"auth_url": auth_url}
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Could not start Google sign-in: {exc}")
+
+
+@app.get("/auth/google/link")
+async def get_google_link_url(user_id: int, db: Session = Depends(get_db)):
+    """Generate an OAuth URL to link a Google account to an existing Clerk account.
+
+    Used by password-based users who want Google sign-in and/or sync.
+    The callback will update google_sub and save the full token for this user.
+    """
+    ensure_user_exists(user_id, db)
+    try:
+        link_state = f"link_{secrets.token_urlsafe(24)}"
+        flow = Flow.from_client_config(
+            get_google_credentials_config(),
+            scopes=_GOOGLE_LOGIN_SCOPES,
+            redirect_uri=get_google_redirect_uri()
+        )
+        auth_url, _ = flow.authorization_url(
+            access_type='offline', prompt='consent', state=link_state
+        )
+        save_google_oauth_state(link_state, flow.code_verifier, user_id)
+        key = _state_key(link_state)
+        if key in _oauth_states:
+            _oauth_states[key]["link_flow"] = True
+            _oauth_states[key]["link_user_id"] = user_id
+        return {"auth_url": auth_url}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not start Google link: {exc}")
 
 @app.post("/auth/google/set-password")
 async def google_set_password(data: GoogleSetPasswordRequest, db: Session = Depends(get_db)):
@@ -1189,6 +1367,7 @@ def task_to_dict(task: Task) -> dict:
         "is_all_day": bool(task.is_all_day),
         "confidence": task.confidence,
         "status": task.status,
+        "user_feedback": task.user_feedback,
         "created_at": task.created_at.isoformat() if task.created_at else None,
     }
 
@@ -2391,3 +2570,81 @@ async def permanent_delete_task(task_id: int, db: Session = Depends(get_db)):
     db.delete(task)
     db.commit()
     return {"message": "Task permanently deleted"}
+
+
+# --- FEEDBACK LEARNING ---
+
+class FeedbackRequest(BaseModel):
+    user_id: int
+    vote: int  # +1 = correct extraction, -1 = incorrect
+
+
+@app.post("/tasks/{task_id}/feedback")
+async def submit_task_feedback(task_id: int, data: FeedbackRequest, db: Session = Depends(get_db)):
+    """Record whether the user thinks a task was extracted correctly.
+
+    A +1 vote means the extraction was accurate; -1 means it was wrong.
+    The vote is stored on the task row and factored into the confidence score
+    so Clerk can learn that this user's texts tend to produce reliable or
+    unreliable extractions.
+    """
+    task = db.query(Task).filter(Task.task_id == task_id, Task.owner_id == data.user_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if data.vote not in (-1, 0, 1):
+        raise HTTPException(status_code=400, detail="vote must be -1, 0, or +1")
+
+    task.user_feedback = data.vote
+
+    # Adjust confidence to reflect user's judgment, clamped to [0, 100].
+    if task.confidence is not None:
+        base = float(task.confidence)
+        if data.vote == 1:
+            task.confidence = min(100.0, base + 10.0)
+        elif data.vote == -1:
+            task.confidence = max(0.0, base - 20.0)
+        else:
+            # Neutral reset — leave score unchanged but clear prior vote.
+            pass
+    db.commit()
+    return {"status": "ok", "task_id": task_id, "confidence": task.confidence}
+
+
+@app.get("/tasks/{task_id}/feedback")
+async def get_task_feedback(task_id: int, user_id: int, db: Session = Depends(get_db)):
+    """Return the current feedback vote for a task."""
+    task = db.query(Task).filter(Task.task_id == task_id, Task.owner_id == user_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"task_id": task_id, "vote": task.user_feedback}
+
+
+# --- ACCOUNT DELETION ---
+
+@app.delete("/users/{user_id}")
+async def delete_account(user_id: int, db: Session = Depends(get_db)):
+    """Permanently delete a user account and all associated data.
+
+    Removes every Task, RawInput, and User row for this user.
+    This action is irreversible — the frontend must show a second confirmation
+    before calling this endpoint.
+    """
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Delete tasks first (FK dependency on raw_inputs via raw_id).
+    task_ids = [t.task_id for t in db.query(Task.task_id).filter(Task.owner_id == user_id).all()]
+    if task_ids:
+        db.query(Task).filter(Task.task_id.in_(task_ids)).delete(synchronize_session=False)
+
+    # Delete raw inputs created by this user (identified by the source_id prefix).
+    db.query(RawInput).filter(
+        RawInput.source_id.like(f"{user_id}:%")
+    ).delete(synchronize_session=False)
+
+    db.delete(user)
+    db.commit()
+    _log.info("Account deleted: user_id=%s", user_id)
+    return {"status": "deleted", "user_id": user_id}

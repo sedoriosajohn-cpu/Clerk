@@ -1444,20 +1444,45 @@ def adjust_confidence(
     user_input: str,
     task: Dict[str, Any],
     current_time: Optional[str] = None,
-    date_verified: bool = True
+    date_verified: bool = True,
+    source_type: Optional[str] = None,
+    user_feedback: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Recalculate a task's confidence score using multiple evidence signals.
 
-    The AI's own confidence value is blended with regex-based checks on action
-    language, deadline words, title quality, and date proximity. This hybrid
-    approach prevents the AI from being overconfident on vague or ambiguous input.
-    The formula starts at 42 and adds/subtracts small amounts per signal so the
-    final score stays within a realistic 0–100 range.
+    Vectors considered (highest to lowest weight):
+      • Source authority — Google Calendar / Tasks / Classroom are machine-
+        structured, so their extractions are near-certain (large fixed boost).
+      • AI model score — blended at 32 % so it stays meaningful but not dominant.
+      • User feedback — past +1/−1 votes shift the score by ±10 so Clerk adapts
+        to the user's correction patterns over time.
+      • Action clarity — strong verbs and explicit deadline language.
+      • Schema completeness — title quality, description presence, assigner.
+      • Source grounding — title terms found verbatim in the source text.
+      • Date quality — precise future dates score higher; past/hallucinated dates penalise.
+      • Ambiguity — hedging words lower confidence because the item may not be required.
     """
+    # --- Source authority vector ---
+    # Structured Google sources carry the task directly; no inference needed.
+    _AUTHORITATIVE_PREFIXES = ("calendar:", "gtask:", "classroom:")
+    if source_type and any(source_type.startswith(p) for p in _AUTHORITATIVE_PREFIXES):
+        task["confidence"] = clamp_score(95 + (1 if task.get("due_date") else 0))
+        if user_feedback == 1:
+            task["confidence"] = min(100, task["confidence"] + 3)
+        elif user_feedback == -1:
+            task["confidence"] = max(0, task["confidence"] - 10)
+        return task
+
     model_score = max(0, min(100, int(task.get("confidence", 70))))
     # Start at a baseline of 42 + a dampened fraction of the AI's own score.
     # Using 0.32 keeps the AI's contribution meaningful but not dominant.
     score = 42 + (model_score * 0.32)
+
+    # --- User feedback vector ---
+    if user_feedback == 1:
+        score += 10
+    elif user_feedback == -1:
+        score -= 20
     evidence = evidence_window(user_input, task)
     evidence_lower = evidence.lower()
     title = str(task.get("title") or "").strip()

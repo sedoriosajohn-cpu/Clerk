@@ -4692,6 +4692,12 @@ function getDashboardData(tasks) {
         .filter(task => task.status === 'completed' || task.status === 'deleted')
         .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
+    const todayStart = startOfLocalDay(new Date());
+    const overdueTasks = sortByScheduleThenTitle(activeTasks.filter(task => {
+        const d = parseWallTime(task.due_date);
+        return d && d < todayStart && !isTaskDueToday(task);
+    }));
+
     const conflictMap = buildConflictMap(activeTasks);
     const confidenceScores = activeTasks.map(task => Number(task.confidence)).filter(score => !isNaN(score));
     const averageConfidence = confidenceScores.length
@@ -4705,6 +4711,7 @@ function getDashboardData(tasks) {
     return {
         activeTasks,
         todayTasks,
+        overdueTasks,
         tasksOnly,
         remindersOnly,
         upcomingTasks,
@@ -4726,6 +4733,7 @@ function renderDashboardPage(tasks, containerId = 'agendaList') {
     const {
         activeTasks,
         todayTasks,
+        overdueTasks,
         tasksOnly,
         remindersOnly,
         historyTasks,
@@ -4745,8 +4753,15 @@ function renderDashboardPage(tasks, containerId = 'agendaList') {
                 <section class="dashboard-section">
                     <div class="dashboard-section-header">
                         <h3 class="dashboard-section-title"><button class="dashboard-section-trigger" type="button" onclick="openSectionModal('agenda')">Today</button></h3>
-                        <span class="dashboard-section-count">${todayTasks.length} due today</span>
+                        <span class="dashboard-section-count">${todayTasks.length} due today${overdueTasks.length ? ` · <span style="color:#be123c;font-weight:600;">${overdueTasks.length} overdue</span>` : ''}</span>
                     </div>
+                    ${overdueTasks.length ? `
+                        <div style="margin-bottom:8px;">
+                            <div style="font-size:11px;font-weight:700;color:#be123c;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px;">Overdue</div>
+                            ${renderDashboardList(overdueTasks, '', { conflictMap, showConflictTag: true, limit: 5 })}
+                            ${overdueTasks.length > 5 ? `<button class="dashboard-link-button" type="button" onclick="loadView('my tasks')" style="color:#be123c;">+${overdueTasks.length - 5} more overdue</button>` : ''}
+                        </div>
+                    ` : ''}
                     ${renderDashboardList(todayTasks, 'Nothing scheduled for today.', { showDescription: true, conflictMap, showConflictTag: true, limit: 8 })}
                     ${todayTasks.length > 8 ? `<button class="dashboard-link-button" type="button" onclick="openSectionModal('agenda')">View all ${todayTasks.length} due today</button>` : ''}
                 </section>
@@ -5777,63 +5792,23 @@ function renderBigCalendar(month, year, allTasks = []) {
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     
-    // --- Lane Alignment Logic ---
-    const lanesByDate = {}; // Maps "YYYY-MM-DD" -> array of task objects
-    let maxCalendarLane = -1;
-    
-    // Sort: Multi-day tasks first, then by earliest start
-    const sortedTasks = [...allTasks].sort((a, b) => {
-        const startA = parseWallTime(a.due_date);
-        const endA = a.end_date ? parseWallTime(a.end_date) : startA;
-        const startB = parseWallTime(b.due_date);
-        const endB = b.end_date ? parseWallTime(b.end_date) : startB;
-        return (endB - startB) - (endA - startA) || startA - startB;
-    });
-
-
-    sortedTasks.forEach(task => {
-        const start = parseWallTime(task.due_date);
-        const end = task.end_date ? parseWallTime(task.end_date) : start;
-        
-        // Find dates in range
-        if (!start) return;
-
-        let d = startOfLocalDay(start);
-        const stop = startOfLocalDay(end || start);
-        const datesInRange = [];
-        while(d <= stop) { datesInRange.push(formatDateKey(d)); d.setDate(d.getDate()+1); }
-
-        // Find lowest available lane across all dates in the span
-        let lane = 0;
-        while (true) {
-            let conflict = datesInRange.some(date => lanesByDate[date] && lanesByDate[date][lane]);
-            if (!conflict) break;
-            lane++;
-        }
-
-        // Assign task to that lane for those dates
-        datesInRange.forEach(date => {
-            if (!lanesByDate[date]) lanesByDate[date] = [];
-            lanesByDate[date][lane] = task;
-        });
-        maxCalendarLane = Math.max(maxCalendarLane, lane);
-    });
+    // Reuse buildTaskLanes for consistent lane assignment across all calendar views.
+    const { lanesByDate, maxLane: maxCalendarLane } = buildTaskLanes(allTasks);
+    const lastDayOfMonth = new Date(year, month, daysInMonth);
 
     // Padding for empty days at start of month
     for (let i = 0; i < firstDay; i++) grid.appendChild(document.createElement('div'));
 
-    // 3. Draw Days
+    // Draw month days
     for (let day = 1; day <= daysInMonth; day++) {
         const daySquare = document.createElement('div');
         daySquare.className = 'cal-day';
-        
         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const dropDate = new Date(year, month, day);
-        daySquare.dataset.date = dateStr; 
+        daySquare.dataset.date = dateStr;
         daySquare.addEventListener('click', () => openCalendarDay(dateStr));
         daySquare.innerHTML = `<span class="day-num">${day}</span>`;
 
-        // 4. Drag & Drop Listeners
         daySquare.addEventListener('dragover', (e) => {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
@@ -5842,10 +5817,6 @@ function renderBigCalendar(month, year, allTasks = []) {
         daySquare.addEventListener('dragleave', e => setDropActive(e, false));
         daySquare.addEventListener('drop', e => handleCalendarDayDrop(e, dropDate));
 
-        // 5. Filter and Render Tasks
-        // The allTasks array passed to renderBigCalendar is already filtered for active tasks/reminders
-        // So, we just need to filter by date here.
-        // Render Tasks from lanes
         const dayLanes = lanesByDate[dateStr] || [];
         for (let index = 0; index <= maxCalendarLane; index++) {
             const task = dayLanes[index];
@@ -5857,39 +5828,12 @@ function renderBigCalendar(month, year, allTasks = []) {
             }
 
             const taskEl = document.createElement('div');
-            
-            // Priority Color Logic
-            const priority = String(task.priority || 'normal').toLowerCase();
-            const itemType = String(task.item_type || 'task').toLowerCase();
-            let colorClass = 'blue'; 
-            if (itemType === 'reminder') colorClass = 'reminder';
-            else if (priority === 'high') colorClass = 'pink';
-            else if (priority === 'medium') colorClass = 'amber';
-            else if (priority === 'low') colorClass = 'teal';
-            
-            // Spanning Logic
-            const taskStart = parseWallTime(task.due_date);
-            const taskEnd = task.end_date ? parseWallTime(task.end_date) : taskStart;
-            const taskStartStr = formatDateKey(taskStart);
-            const taskEndStr = formatDateKey(taskEnd);
-            const dayOfWeek = new Date(year, month, day).getDay();
-            
-            let spanClass = "";
-            let showTitle = true;
-            if (taskStartStr !== taskEndStr) {
-                const startsSegment = dateStr === taskStartStr || dayOfWeek === 0 || day === 1;
-                const endsSegment = dateStr === taskEndStr || dayOfWeek === 6 || day === daysInMonth;
-                if (startsSegment && endsSegment) spanClass = "week-start week-end";
-                else if (startsSegment) spanClass = "span-start week-start";
-                else if (endsSegment) spanClass = "span-end week-end";
-                else spanClass = "span-mid";
-                showTitle = startsSegment;
-            }
-            taskEl.className = `calendar-event ${colorClass} ${spanClass}`;
+            // Use shared helpers for color and span — avoids drift from the week/day views.
+            const { spanClass, showTitle } = getCalendarSpanMeta(task, dropDate, lastDayOfMonth);
+            taskEl.className = `calendar-event ${getTaskColorClass(task)} ${spanClass}`;
             taskEl.textContent = showTitle ? task.title : "";
             taskEl.title = task.title;
             makeCalendarItemDraggable(taskEl, task);
-            
             daySquare.appendChild(taskEl);
         }
 
@@ -5943,9 +5887,24 @@ function renderHourlySchedule(container, targetDate, allTasks, showCurrentLine =
         return { ...event, _start: start, _end: end };
     }).sort((a, b) => a._start - b._start);
 
-    timedEvents.forEach((event, index) => {
-        const startMinutes = (event._start - new Date(year, month, day, 0, 0, 0)) / 60000;
-        const endMinutes = (event._end - new Date(year, month, day, 0, 0, 0)) / 60000;
+    // Greedy interval-column assignment: each event claims the lowest column
+    // where no earlier event is still "active" (its end time > this event's start).
+    // This prevents the 4th event from wrapping back and overlapping the 1st.
+    const colEndTimes = [];
+    timedEvents.forEach(event => {
+        let col = 0;
+        while (col < colEndTimes.length && colEndTimes[col] > event._start) col++;
+        event._col = col;
+        colEndTimes[col] = event._end;
+    });
+    const maxCol = timedEvents.reduce((m, e) => Math.max(m, e._col), 0);
+    const EVENT_LEFT = 92;
+    const EVENT_WIDTH = Math.min(200, Math.max(120, Math.floor((container.clientWidth - EVENT_LEFT - 16) / (maxCol + 1)) - 4));
+
+    const dayOrigin = new Date(year, month, day, 0, 0, 0);
+    timedEvents.forEach(event => {
+        const startMinutes = (event._start - dayOrigin) / 60000;
+        const endMinutes = (event._end - dayOrigin) / 60000;
         const eventEl = document.createElement('div');
         eventEl.className = `hourly-event ${getTaskColorClass(event)}`;
         eventEl.dataset.taskId = event.task_id;
@@ -5953,8 +5912,8 @@ function renderHourlySchedule(container, targetDate, allTasks, showCurrentLine =
         const visibleBottom = Math.min(1440, endMinutes * (hourHeight / 60));
         eventEl.style.top = `${visibleTop}px`;
         eventEl.style.height = `${Math.max(30, visibleBottom - visibleTop)}px`;
-        eventEl.style.left = `${92 + (index % 3) * 176}px`;
-        eventEl.style.width = '168px';
+        eventEl.style.left = `${EVENT_LEFT + event._col * (EVENT_WIDTH + 4)}px`;
+        eventEl.style.width = `${EVENT_WIDTH}px`;
         eventEl.innerHTML = `
             <span style="font-weight:800; font-size:10px;">${event._start.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})}</span>
             <span style="font-weight:700;">${event.title}</span>

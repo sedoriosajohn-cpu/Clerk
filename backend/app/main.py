@@ -134,6 +134,33 @@ def is_valid_email(value: Optional[str]) -> bool:
     """Return True only if value looks like a real email address (basic regex check)."""
     return bool(value and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", value.strip()))
 
+def _hash_password(password: str, salt: Optional[str] = None) -> str:
+    """Hash a password with a random 16-byte salt using SHA-256.
+
+    Format stored in the DB: '<salt_hex>:<digest_hex>'. Salting prevents
+    two identical passwords from producing the same hash and makes
+    rainbow-table attacks impractical without bcrypt as a dependency.
+    """
+    if salt is None:
+        salt = secrets.token_hex(16)
+    digest = hashlib.sha256(f"{salt}:{password}".encode("utf-8")).hexdigest()
+    return f"{salt}:{digest}"
+
+def _verify_password(password: str, stored: Optional[str]) -> bool:
+    """Verify a password against a salted hash or a legacy plaintext value.
+
+    The colon in the salted format ('salt:digest') distinguishes new hashes
+    from old plaintext passwords, allowing a seamless upgrade path: the first
+    login re-hashes the plaintext automatically without forcing a password reset.
+    """
+    if not stored or not password:
+        return False
+    if ":" in stored:
+        salt, _ = stored.split(":", 1)
+        return secrets.compare_digest(_hash_password(password, salt), stored)
+    # Legacy plaintext fallback — the login endpoint re-hashes on success.
+    return secrets.compare_digest(password, stored)
+
 def hash_two_factor_code(code: str) -> str:
     """Store a hashed version of the 6-digit code so the plaintext never lives in the DB."""
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
@@ -465,8 +492,13 @@ async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
     """Log a user in, triggering a 2FA challenge first if they have it enabled.
     Returns either a 2FA prompt or the full user object with settings on success."""
     user = db.query(User).filter(User.username == data.username).first()
-    if not user or user.password_hash != data.password:
+    if not user or not _verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Silently upgrade plaintext passwords to salted hashes on first login after deployment.
+    if user.password_hash and ":" not in user.password_hash:
+        user.password_hash = _hash_password(data.password)
+        db.commit()
 
     if user.two_factor_enabled:
         if data.two_factor_code:
@@ -495,7 +527,7 @@ async def register_user(data: LoginRequest, db: Session = Depends(get_db)):
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already taken")
     validate_strong_password(data.password, data.username)
-    new_user = User(username=data.username, password_hash=data.password)
+    new_user = User(username=data.username, password_hash=_hash_password(data.password))
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
@@ -555,7 +587,7 @@ async def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_d
         raise HTTPException(status_code=400, detail="Invalid or expired reset link.")
 
     validate_strong_password(data.password, user.username)
-    user.password_hash = data.password
+    user.password_hash = _hash_password(data.password)
     user.reset_password_token_hash = None
     user.reset_password_expires_at = None
     user.two_factor_code_hash = None
@@ -755,6 +787,12 @@ def save_google_oauth_state(state: str, code_verifier: Optional[str], user_id: i
         "user_id": user_id,
         "created_at": datetime.utcnow().isoformat(),
     }
+    # Prune states older than 1 hour so the dict doesn't grow unbounded on failed OAuth flows.
+    if len(_oauth_states) > 50:
+        cutoff = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+        stale = [k for k, v in list(_oauth_states.items()) if v.get("created_at", "") < cutoff]
+        for k in stale:
+            _oauth_states.pop(k, None)
 
 def load_google_oauth_state(state: Optional[str]):
     """Look up a previously saved OAuth state entry by the hashed state string."""
@@ -1035,7 +1073,7 @@ async def google_set_password(data: GoogleSetPasswordRequest, db: Session = Depe
     if not user.google_sub:
         raise HTTPException(status_code=400, detail="This endpoint is only for Google-authenticated accounts.")
     validate_strong_password(data.password, user.username)
-    user.password_hash = data.password
+    user.password_hash = _hash_password(data.password)
     db.commit()
     return {"status": "success", "user_id": user.user_id, "username": user.username, "settings": user_settings_payload(user)}
 
@@ -1781,7 +1819,7 @@ def sync_gmail_blocking(user_id: int):
             return google_auth_required_response(user_id)
         service = build('gmail', 'v1', credentials=creds)
         # Fetch the 5 most recent emails
-        results = service.users().messages().list(userId='me', maxResults=5).execute()
+        results = service.users().messages().list(userId='me', maxResults=15).execute()
         messages = results.get('messages', [])
 
         processed_count = 0
@@ -1940,7 +1978,7 @@ async def auto_sync_user(user_id: int, db: Session):
     gmail_count = 0
     try:
         service = build('gmail', 'v1', credentials=creds)
-        results = service.users().messages().list(userId='me', maxResults=5).execute()
+        results = service.users().messages().list(userId='me', maxResults=15).execute()
         for msg in results.get('messages', []):
             source_info = f"gmail: {msg['id']}"
             if source_already_scanned(db, user_id, source_info):

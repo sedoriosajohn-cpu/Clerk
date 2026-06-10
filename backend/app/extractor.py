@@ -40,20 +40,21 @@ CHUNK_OVERLAP_CHARS = 500
 
 # Words that strongly suggest a sentence contains an actionable task.
 ACTION_WORDS = {
-    "add", "answer", "bring", "buy", "call", "check", "complete", "create",
-    "do", "draft", "email", "finish", "fix", "implement", "make", "meet",
-    "prepare", "read", "remind", "review", "schedule", "send", "study",
-    "submit", "turn in", "update", "write"
+    "add", "answer", "attend", "bring", "buy", "call", "check", "compile",
+    "complete", "create", "do", "draft", "email", "finish", "fix", "implement",
+    "make", "meet", "organize", "prepare", "present", "read", "record", "remind",
+    "review", "schedule", "send", "study", "submit", "turn in", "update",
+    "upload", "write"
 }
 
 # Matches any line that looks task-related (action verbs, assignment words,
 # or date references) so the compactor can keep it and skip everything else.
 TASK_HINT_RE = re.compile(
     r'\b('
-    r'add|answer|bring|buy|call|check|complete|create|do|draft|email|finish|fix|'
-    r'implement|make|meet|prepare|read|remind|review|schedule|send|study|submit|'
-    r'turn\s+in|update|write|assignment|homework|project|quiz|test|exam|essay|'
-    r'presentation|deadline|due|today|tomorrow|next\s+\w+|monday|tuesday|'
+    r'add|answer|attend|bring|buy|call|check|compile|complete|create|do|draft|email|finish|fix|'
+    r'implement|make|meet|organize|prepare|present|read|record|remind|review|schedule|send|study|submit|'
+    r'turn\s+in|update|upload|write|assignment|homework|project|quiz|test|exam|essay|'
+    r'presentation|deadline|due|urgent|asap|today|tomorrow|next\s+\w+|monday|tuesday|'
     r'wednesday|thursday|friday|saturday|sunday|jan(?:uary)?|feb(?:ruary)?|'
     r'mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|'
     r'oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|\d{1,2}[/-]\d{1,2}'
@@ -72,16 +73,21 @@ NOISE_LINE_RE = re.compile(
 # reliable signals of an actionable task than the broader ACTION_WORDS set.
 STRONG_ACTION_RE = re.compile(
     r'\b(submit|finish|complete|turn\s+in|write|create|prepare|review|send|'
-    r'schedule|call|email|buy|bring|read|study|fix|implement|make)\b',
+    r'schedule|call|email|buy|bring|read|study|fix|implement|make|upload|'
+    r'attend|present|record|organize|compile)\b',
     re.IGNORECASE
 )
 
 # Used in confidence scoring to detect explicit deadline language.
-DEADLINE_RE = re.compile(r'\b(due|deadline|by|before|no later than)\b', re.IGNORECASE)
+DEADLINE_RE = re.compile(
+    r'\b(due|deadline|by|before|no later than|urgent|asap|immediately|critical)\b',
+    re.IGNORECASE
+)
 # Hedging words lower confidence because they suggest the item may not be required.
 AMBIGUITY_RE = re.compile(
     r'\b(maybe|might|possibly|probably|optional|if you can|when you can|sometime|'
-    r'eventually|consider|think about|maybe later)\b',
+    r'eventually|consider|think about|maybe later|tentative|whenever|flexible|'
+    r'when possible|if possible|as needed|try to)\b',
     re.IGNORECASE
 )
 # Matches clock times like "3pm", "10:30 AM", or "14:00" to detect precise scheduling.
@@ -164,27 +170,34 @@ def build_prompt(user_input: str, current_time: str) -> str:
 
 def verify_with_regex(raw_text: str, extracted_date: str) -> bool:
     """
-    Fact-checks the AI by looking for the extracted date string 
-    inside the raw document text using basic regex patterns.
+    Fact-checks the AI by looking for the extracted date string
+    inside the raw document text. Checks ISO format, numeric M/D,
+    and month-name + day formats to reduce false negatives.
     """
     if not extracted_date:
-        return True # Nothing to verify
-    
-    # Extract just the YYYY-MM-DD part
+        return True
+
     date_match = re.search(r'(\d{4}-\d{2}-\d{2})', extracted_date)
     if not date_match:
         return True
-    
+
     target = date_match.group(1)
-    # Check for common variations: 2026-05-12, 05/12, May 12
-    # This is a 'soft' check to ensure the date actually exists in the source
     if target in raw_text or target.replace('-', '/') in raw_text:
         return True
-    
-    # Also check if the day of the week (e.g., "Saturday") is in the text
+
     try:
         dt = datetime.fromisoformat(extracted_date.replace('Z', ''))
-        if dt.strftime('%A').lower() in raw_text.lower():
+        lowered = raw_text.lower()
+        day_str = str(dt.day)
+        # Check "May 12", "May 12th", "may 12" etc.
+        for month_variant in (dt.strftime('%b').lower(), dt.strftime('%B').lower()):
+            if re.search(rf'\b{month_variant}\s+{day_str}(?:st|nd|rd|th)?\b', lowered):
+                return True
+        # Check numeric "5/12" or "5-12" (M/D without year)
+        if re.search(rf'\b{dt.month}[/-]{day_str}(?:[/-]\d{{2,4}})?\b', raw_text):
+            return True
+        # Check weekday name ("Saturday", "Sat")
+        if dt.strftime('%A').lower() in lowered or dt.strftime('%a').lower() in lowered:
             return True
     except (ValueError, AttributeError):
         pass
@@ -444,10 +457,22 @@ def clean_task_title(text: str) -> str:
     """Strip date/time tails and filler phrases from a raw sentence to produce a clean title.
 
     For example, "remind me to call Mom by Friday at 3pm" becomes "Call Mom".
-    The date portion is cut first, then leading filler phrases are trimmed.
+    "by/due" are cut unconditionally; "on/at" only when followed by a date/time token
+    so "meet at headquarters" is preserved while "at 3pm" is removed.
     """
-    title = re.sub(r'\b(?:by|due|on|at)\s+.*$', '', text, flags=re.IGNORECASE).strip()
-    title = re.sub(r'^(please\s+|remind me to\s+|remind me\s+|i need to\s+|need to\s+)', '', title, flags=re.IGNORECASE)
+    # "by Friday", "due Jan 5" — always a date tail
+    title = re.sub(r'\b(?:by|due)\s+\S+.*$', '', text, flags=re.IGNORECASE).strip()
+    # "at 3pm", "on Monday", "on Jan 5" — only cut when the next word is a time/date token
+    title = re.sub(
+        r'\b(?:on|at)\s+(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)|'
+        r'(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|'
+        r'today|tomorrow|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)).*$',
+        '', title, flags=re.IGNORECASE
+    ).strip()
+    title = re.sub(
+        r'^(please\s+|remind me to\s+|remind me\s+|i need to\s+|need to\s+|can you\s+)',
+        '', title, flags=re.IGNORECASE
+    )
     return title[:1].upper() + title[1:] if title else "New Task"
 
 # --- LOCAL (REGEX-BASED) EXTRACTION ---

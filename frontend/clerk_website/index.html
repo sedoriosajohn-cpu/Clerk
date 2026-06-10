@@ -2932,34 +2932,48 @@ button {
 <script src="config.js"></script>
 <script>
 
+// --- API CONFIGURATION & UTILITIES ---
 
+// Grab references to key DOM elements we'll use throughout the script.
 const taskInput = document.getElementById('taskInput');
 const processBtn = document.getElementById('processBtn');
 const voiceBtn = document.getElementById('voiceBtn');
 const statusMsg = document.getElementById('statusMsg');
 const agendaList = document.getElementById('agendaList');
 const newTasksList = document.getElementById('newTasksList');
+
+// These port numbers are typical for local dev servers (Vite, Create React App, Live Server).
+// If the page is opened from one of these, we know we're in a static/dev environment.
 const STATIC_FRONTEND_PORTS = new Set(["3000", "5173", "5500", "5501"]);
 const isStaticFrontend = window.location.protocol === "file:" || STATIC_FRONTEND_PORTS.has(window.location.port);
 const API_BASE_STORAGE_KEY = "CLERK_API_BASE";
 const REQUEST_TIMEOUT_MS = 20000;
 const AUTH_TIMEOUT_MS = 45000;
+
+// requestBucket tracks the last time each request type was fired, enabling throttle/rate-limiting.
 const requestBucket = new Map();
+
+// Fallback list of local addresses to try if the primary API base fails.
 const LOCAL_API_BASES = [
     "http://127.0.0.1:8000",
     "http://localhost:8000",
     "http://127.0.0.1:8001",
     "http://localhost:8001"
 ];
+
+// Determine the API base URL at startup: prefer an explicit override, then localStorage, then a default.
+// This order lets developers override without changing code (e.g., via URL query param or config.js).
 const queryApiBase = getQueryApiBase();
 const explicitApiBase = normalizeApiBase(window.CLERK_API_BASE || queryApiBase || getStoredApiBase());
 let API_BASE = explicitApiBase || (isStaticFrontend ? "http://127.0.0.1:8000" : window.location.origin);
 if (explicitApiBase) persistApiBase(explicitApiBase);
 
+// Generates a loading skeleton UI — shown while data is being fetched to avoid blank screens.
 function renderSkeleton(count = 4) {
     return `<div class="skeleton-list">${Array.from({ length: count }, () => '<div class="skeleton-card"></div>').join('')}</div>`;
 }
 
+// Converts raw network/server errors into plain English messages that students or end users can understand.
 function getFriendlyApiError(error) {
     if (error && error.name === 'AbortError') return "The server is taking too long. If Clerk is hosted on Render, wait for it to wake up, then try again.";
     if (error && isNetworkFetchError(error)) {
@@ -2975,11 +2989,13 @@ function getFriendlyApiError(error) {
     return "Connection failed. Make sure the FastAPI backend is running on port 8000.";
 }
 
+// Reads ?api_base= (or variations) from the URL so devs can point the frontend at a custom backend without editing code.
 function getQueryApiBase() {
     const params = new URLSearchParams(window.location.search);
     return params.get("api_base") || params.get("apiBase") || params.get("clerk_api_base") || "";
 }
 
+// Safely converts any value to a proper origin URL (e.g. "http://localhost:8000") — returns "" on invalid input.
 function normalizeApiBase(value) {
     if (!value) return "";
     try {
@@ -2989,6 +3005,7 @@ function normalizeApiBase(value) {
     }
 }
 
+// Retrieves the previously saved API base URL from localStorage so the setting persists across page reloads.
 function getStoredApiBase() {
     try {
         return localStorage.getItem(API_BASE_STORAGE_KEY) || "";
@@ -2997,6 +3014,7 @@ function getStoredApiBase() {
     }
 }
 
+// Saves the working API base URL to localStorage so future page loads don't need to rediscover it.
 function persistApiBase(value) {
     try {
         localStorage.setItem(API_BASE_STORAGE_KEY, value);
@@ -3005,15 +3023,19 @@ function persistApiBase(value) {
     }
 }
 
+// Returns true for loopback addresses — used to decide whether to try local fallback URLs.
 function isLocalApiHost(hostname) {
     return ["127.0.0.1", "localhost", "::1"].includes(hostname);
 }
 
+// Detects network-level failures (no server reached) vs. HTTP errors (server responded with an error code).
 function isNetworkFetchError(error) {
     const message = String(error?.message || "");
     return error instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(message);
 }
 
+// Builds an ordered list of URLs to attempt for a request, including local fallbacks when running in dev mode.
+// This lets the frontend find the backend automatically even if the port shifts between 8000 and 8001.
 function getApiAttemptUrls(url) {
     const primaryUrl = new URL(String(url), window.location.href);
     const baseUrl = new URL(API_BASE, window.location.href);
@@ -3030,6 +3052,7 @@ function getApiAttemptUrls(url) {
         });
 }
 
+// Translates Google OAuth error codes into readable messages — "invalid_grant" means the token expired.
 function getFriendlyGoogleError(message) {
     const text = String(message || "");
     const lowered = text.toLowerCase();
@@ -3039,21 +3062,25 @@ function getFriendlyGoogleError(message) {
     return text || "Google connection failed. Please try connecting again.";
 }
 
+// Converts a 24-hour integer (e.g. 9) to an HTML time input value (e.g. "09:00").
 function hourToTimeInput(hour) {
     const normalized = Math.max(0, Math.min(23, Number(hour ?? 0)));
     return `${String(normalized).padStart(2, '0')}:00`;
 }
 
+// Converts an HTML time input value (e.g. "17:00") back to a 24-hour integer, using fallback if parsing fails.
 function timeInputToHour(value, fallback) {
     const hour = Number(String(value || '').split(':')[0]);
     return Number.isInteger(hour) ? hour : fallback;
 }
 
+// Refreshes the work-hours label in the Settings UI to reflect the currently saved window.
 function updateWorkHoursStatus() {
     const status = document.getElementById('work-hours-status');
     if (status) status.textContent = getWorkWindowLabel(window.USER_SETTINGS);
 }
 
+// Merges incoming settings into the global USER_SETTINGS object and updates every settings UI element to match.
 function applyUserSettings(settings = {}) {
     window.USER_SETTINGS = { ...window.USER_SETTINGS, ...settings };
     updateDisplayName(window.USER_SETTINGS.preferred_name, false);
@@ -3078,15 +3105,20 @@ function applyUserSettings(settings = {}) {
     if (window.USER_SETTINGS.dark_mode) toggleDarkTheme(false);
 }
 
+// Central fetch wrapper used for all API calls throughout the app.
+// It adds throttling (prevents spamming), automatic timeout via AbortController,
+// and tries multiple fallback URLs so local dev works even if ports differ.
 async function apiFetch(url, options = {}) {
     const method = (options.method || 'GET').toUpperCase();
     const throttleKey = options.throttleKey || `${method}:${url}`;
     const minInterval = options.minInterval || 0;
     const timeout = options.timeout || REQUEST_TIMEOUT_MS;
+    // Strip our custom options before passing the rest to native fetch.
     const { throttleKey: _throttleKey, minInterval: _minInterval, timeout: _timeout, ...fetchOptions } = options;
     const now = Date.now();
     const lastRun = requestBucket.get(throttleKey) || 0;
 
+    // Throttle check — reject if the same request type was called too recently.
     if (minInterval && now - lastRun < minInterval) {
         throw new Error("Please wait a moment before trying that again.");
     }
@@ -3094,11 +3126,14 @@ async function apiFetch(url, options = {}) {
     requestBucket.set(throttleKey, now);
     let lastNetworkError = null;
 
+    // Try each candidate URL in order; on a network error, move to the next fallback.
     for (const attemptUrl of getApiAttemptUrls(url)) {
+        // AbortController lets us cancel the fetch after `timeout` milliseconds.
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeout);
         try {
             const response = await fetch(attemptUrl, { ...fetchOptions, signal: controller.signal });
+            // A successful response reveals the working base URL — remember it for future calls.
             API_BASE = new URL(attemptUrl).origin;
             persistApiBase(API_BASE);
             return response;
@@ -3166,8 +3201,12 @@ function escapeHTML(value) {
     }[char]));
 }
 
-//global user variable 
+// --- GLOBAL STATE ---
+
+// Global user ID — set to null until the user logs in. All API calls check this before firing.
 window.CURRENT_USER_ID = null;
+
+// Default user settings object — gets overwritten with real values from the backend after login.
 window.USER_SETTINGS = {
     preferred_name: "User",
     schedule_match_name: "",
@@ -3181,12 +3220,14 @@ window.USER_SETTINGS = {
     google_login: false
 };
 
-const notifiedTasks = new Set(); // To prevent duplicate alerts
-let currentTask = null; // This will hold the result from your FastAPI /ingest
-let currentView = 'agenda';
-let latestTasks = [];
+const notifiedTasks = new Set(); // Tracks which task IDs have already triggered a notification, to prevent duplicates.
+let currentTask = null; // Holds the most recently ingested task result from /ingest.
+let currentView = 'agenda'; // Tracks which tab/view is currently active.
+let latestTasks = []; // Cache of all tasks for the current user, updated on every loadView call.
 
-// ── URL hash routing ────────────────────────────────────────────────────────
+// --- URL HASH ROUTING ---
+
+// Maps internal view names to URL hash fragments so the browser back button and sharing links work.
 const VIEW_HASHES = {
     'agenda':   'today',
     'my tasks': 'tasks',
@@ -3195,27 +3236,38 @@ const VIEW_HASHES = {
     'history':  'history',
     'settings': 'settings',
 };
+// Reverse map: turns a URL hash (e.g. "today") back into a view name (e.g. "agenda").
 const HASH_VIEWS = Object.fromEntries(Object.entries(VIEW_HASHES).map(([k, v]) => [v, k]));
 
-// ── Session persistence (survives Ctrl+R / tab close) ─────────────────────
+// --- SESSION PERSISTENCE ---
+
+// localStorage key used to save the logged-in user's session so it survives page refreshes.
 const _SESSION_KEY = 'clerk_session';
+
+// Saves user ID and username to localStorage so the session is restored on the next page load.
 function saveSession(userId, username) {
     try { localStorage.setItem(_SESSION_KEY, JSON.stringify({ user_id: userId, username })); } catch (_) {}
 }
+
+// Loads the saved session from localStorage — returns null if nothing is stored or parsing fails.
 function loadSession() {
     try { const r = localStorage.getItem(_SESSION_KEY); return r ? JSON.parse(r) : null; } catch (_) { return null; }
 }
+
+// Removes the session from localStorage, effectively logging the user out on the next page load.
 function clearSession() {
     try { localStorage.removeItem(_SESSION_KEY); } catch (_) {}
 }
-let selectedTaskIds = new Set();
-let lastRenderedTaskIds = [];
-let taskQueueTypeFilter = 'all'; // 'all' | 'task' | 'reminder'
-let pendingTwoFactorLogin = false;
-let googleConnectPopup = null;
-let authMode = 'login';
-let activeResetToken = null;
+let selectedTaskIds = new Set(); // Tracks which task checkboxes are currently checked for bulk actions.
+let lastRenderedTaskIds = []; // Remembers the IDs of the last rendered task list for "select all" logic.
+let taskQueueTypeFilter = 'all'; // Current filter applied to the task queue: 'all' | 'task' | 'reminder'
+let pendingTwoFactorLogin = false; // True while the 2FA code entry modal is open.
+let googleConnectPopup = null; // Reference to the Google OAuth popup window, if one is open.
+let authMode = 'login'; // Current state of the auth panel: 'login' | 'register' | 'forgot' | 'reset'
+let activeResetToken = null; // Holds the password-reset token extracted from the URL after clicking a reset link.
 
+// Reads a password reset token from either the query string (?reset_token=) or the URL hash (#reset_token=).
+// Supporting both locations ensures reset links work whether sent as full URLs or fragment-only links.
 function getResetTokenFromLocation() {
     const searchParams = new URLSearchParams(window.location.search);
     if (searchParams.has('reset_token')) {
@@ -3229,6 +3281,10 @@ function getResetTokenFromLocation() {
     return hashParams.get('reset_token');
 }
 
+// --- STARTUP: OAUTH REDIRECT & SESSION RESTORE ---
+// When Google OAuth redirects back to this page, it appends query params like ?google_connected=1&user_id=5.
+// This block runs immediately on page load to detect those params and route accordingly.
+// After handling, we strip the params from the URL with replaceState so they don't persist on refresh.
 const oauthParams = new URLSearchParams(window.location.search);
 if (oauthParams.has('google_error')) {
     alert(getFriendlyGoogleError(oauthParams.get('google_error')));
@@ -3245,6 +3301,7 @@ if (oauthParams.has('google_error')) {
 } else {
     const resetTokenFromUrl = getResetTokenFromLocation();
     if (resetTokenFromUrl) {
+        // A password reset link was clicked — show the reset form immediately.
         activeResetToken = resetTokenFromUrl;
         openPasswordResetPopup(resetTokenFromUrl);
         window.history.replaceState({}, document.title, window.location.pathname);
@@ -3265,8 +3322,12 @@ if (oauthParams.has('google_error')) {
     }
 }
 
-let googleSetupUserId = null;
+// --- GOOGLE OAUTH ---
 
+let googleSetupUserId = null; // Holds the user ID when a new Google-linked account needs a password set.
+
+// Initiates Google Sign-In from the login screen by requesting an auth URL from the backend,
+// then redirecting the browser to Google's OAuth consent page.
 async function loginWithGoogle() {
     const btn = document.getElementById('google-login-btn');
     btn.textContent = "Redirecting to Google...";
@@ -3275,6 +3336,7 @@ async function loginWithGoogle() {
         const response = await apiFetch(`${API_BASE}/auth/google/login`, { timeout: AUTH_TIMEOUT_MS });
         if (response.ok) {
             const data = await response.json();
+            // The backend returns a Google auth URL — redirect the entire page to it.
             window.location.href = data.auth_url;
         } else {
             btn.textContent = "Continue with Google";
@@ -3290,6 +3352,7 @@ async function loginWithGoogle() {
     }
 }
 
+// Called after Google redirects back with ?google_login=1 — logs the user in and restores their session.
 async function handleGoogleLoginRedirect(userId, username) {
     window.CURRENT_USER_ID = userId;
     saveSession(userId, username);
@@ -3301,6 +3364,7 @@ async function handleGoogleLoginRedirect(userId, username) {
     }
 }
 
+// Called after Google redirects back with ?google_new_user=1 — same as login but for first-time Google sign-ups.
 async function handleGoogleNewUserRedirect(userId, username) {
     window.CURRENT_USER_ID = userId;
     saveSession(userId, username);
@@ -3312,12 +3376,14 @@ async function handleGoogleNewUserRedirect(userId, username) {
     }
 }
 
+// Live-updates the password strength meter in the Google account setup overlay as the user types.
 function updateGoogleSetupStrength() {
     const username = document.getElementById('google-setup-username').textContent || '';
     const password = document.getElementById('google-setup-password-input').value;
     paintPasswordStrength(password, username, 'google-setup-strength-fill', 'google-setup-strength-label', 'google-setup-rules');
 }
 
+// Sends the chosen password to the backend for new Google-linked accounts that need a local password set.
 async function submitGoogleSetupPassword() {
     const password = document.getElementById('google-setup-password-input').value;
     const errorEl = document.getElementById('google-setup-error');
@@ -3348,17 +3414,20 @@ async function submitGoogleSetupPassword() {
     }
 }
 
-//for the calendar, it keeps track where the user is currently looking at
+// --- LOGIN & AUTH ---
+
+// Calendar state variables — track which date/month/year/view the user is currently looking at.
 let currentCalMonth = new Date().getMonth();
 let currentCalYear = new Date().getFullYear();
 let currentCalDay = new Date().getDate();
 let currentCalendarView = 'month';
 
+// Navigates back to the main agenda/dashboard view.
 function goHome() {
     loadView('agenda');
 }
 
-  //login function 
+// Sends login credentials to the backend; handles 2FA challenge, session saving, and post-login navigation.
 window.login = async function() {
     const usernameInput = document.getElementById('username-input').value;
     const passwordInput = document.getElementById('password-input').value;
@@ -3421,6 +3490,7 @@ window.login = async function() {
     }
 };
 
+// Opens the 2FA modal after a login attempt returns requires_2fa: true, prompting the user for their email code.
 function openTwoFactorLoginModal(message, devCode = null) {
     pendingTwoFactorLogin = true;
     const modal = document.getElementById('twoFactorLoginModal');
@@ -3435,18 +3505,21 @@ function openTwoFactorLoginModal(message, devCode = null) {
     setTimeout(() => input.focus(), 50);
 }
 
+// Closes the 2FA modal and clears the code input field.
 function closeTwoFactorLoginModal() {
     pendingTwoFactorLogin = false;
     document.getElementById('twoFactorLoginModal').classList.remove('open');
     document.getElementById('two-factor-login-code').value = "";
 }
 
+// Closes the 2FA modal when the user clicks the dark backdrop behind it.
 function handleTwoFactorBackdrop(event) {
     if (event.target && event.target.id === 'twoFactorLoginModal') {
         closeTwoFactorLoginModal();
     }
 }
 
+// Evaluates a password against all security rules and returns a results object with pass/fail per rule.
 function getPasswordRuleResults(password, username = '') {
     const loweredUsername = String(username || '').toLowerCase().trim();
     const loweredPassword = String(password || '').toLowerCase();
@@ -3461,6 +3534,7 @@ function getPasswordRuleResults(password, username = '') {
     };
 }
 
+// Calculates an overall password strength label and color from the individual rule results.
 function getPasswordStrength(password, username = '') {
     const rules = getPasswordRuleResults(password, username);
     const passed = Object.values(rules).filter(Boolean).length;
@@ -3479,6 +3553,8 @@ function getPasswordStrength(password, username = '') {
     return { rules, passed, total: Object.keys(rules).length, label, color };
 }
 
+// Reads the current password field and updates the strength bar and rule checklist in real time.
+// Only runs during register/reset modes — skipped on login so the panel stays hidden.
 function updatePasswordStrength() {
     const panel = document.getElementById('password-strength-panel');
     if (!panel || authMode === 'login' || authMode === 'forgot') return;
@@ -3497,14 +3573,17 @@ function updatePasswordStrength() {
     });
 }
 
+// Returns true only if every password rule passes — used to gate form submission.
 function isStrongPassword(password, username = '') {
     return Object.values(getPasswordRuleResults(password, username)).every(Boolean);
 }
 
+// Alias that delegates to updatePasswordStrength — called specifically from the reset password flow.
 function updateResetPasswordStrength() {
     updatePasswordStrength();
 }
 
+// Submits the 2FA code along with the original credentials to complete the two-step login.
 async function submitTwoFactorLoginCode() {
     const usernameInput = document.getElementById('username-input').value;
     const passwordInput = document.getElementById('password-input').value;
@@ -3553,6 +3632,8 @@ async function submitTwoFactorLoginCode() {
     }
 }
 
+// Fetches the latest user settings from the backend and applies them to the UI.
+// Called after login and after any settings change to keep the UI in sync.
 async function fetchUserSettings() {
     try {
         const response = await apiFetch(`${API_BASE}/users/${window.CURRENT_USER_ID}/settings`);
@@ -3564,6 +3645,8 @@ async function fetchUserSettings() {
     }
 }
 
+// Checks which optional integrations (OpenAI, Google, SMTP) are missing and shows a setup banner.
+// This helps new developers quickly see what still needs to be configured in .env.
 async function checkSetupStatus() {
     if (localStorage.getItem('clerk_banner_dismissed') === '1') return;
     try {
@@ -3603,6 +3686,9 @@ async function checkSetupStatus() {
     }
 }
 
+// --- SETTINGS ---
+
+// Collects all settings form values and PATCHes them to the backend, then refreshes local state.
 async function saveUserSettings() {
     if (!window.CURRENT_USER_ID) return;
     const securityEmail = document.getElementById('security-email-input').value.trim();
@@ -3636,6 +3722,7 @@ async function saveUserSettings() {
     }
 }
 
+// Refreshes the 2FA status pill and toggles the send/verify/disable buttons to match current state.
 function updateSecurityStatus() {
     const status = document.getElementById('two-factor-status');
     if (!status) return;
@@ -3654,6 +3741,8 @@ function updateSecurityStatus() {
     if (codeRow) codeRow.style.display = 'none';
 }
 
+// Updates the Google sync status pill and descriptive text to reflect the current connection state.
+// There are three possible states: fully synced, sign-in only (no calendar sync), or not connected.
 function updateGoogleSyncStatus() {
     const status = document.getElementById('google-sync-status');
     const connectBtn = document.getElementById('connectGoogleBtn');
@@ -3679,6 +3768,8 @@ function updateGoogleSyncStatus() {
     }
 }
 
+// Sends a verification code to the user's security email to begin the 2FA setup flow.
+// Throttled to once every 30 seconds to prevent email spam.
 async function sendTwoFactorTestCode({ quiet = false } = {}) {
     if (!window.CURRENT_USER_ID) return alert("Please log in first.");
     const email = document.getElementById('security-email-input').value.trim();
@@ -3717,6 +3808,7 @@ async function sendTwoFactorTestCode({ quiet = false } = {}) {
     }
 }
 
+// Submits the verification code to the backend to confirm the email address and enable 2FA on the account.
 async function verifyTwoFactorSetupCode() {
     if (!window.CURRENT_USER_ID) return alert("Please log in first.");
     const email = document.getElementById('security-email-input').value.trim();
@@ -3750,6 +3842,7 @@ async function verifyTwoFactorSetupCode() {
     }
 }
 
+// Turns off 2FA for the account after a confirmation prompt, then refreshes settings to update the UI.
 async function disableTwoFactor() {
     if (!window.CURRENT_USER_ID) return showToast("Please log in first.", 'error');
     if (!confirm("Disable two-factor authentication for this account?")) return;
@@ -3769,9 +3862,10 @@ async function disableTwoFactor() {
     }
 }
 
-//user login 
-let isLoginMode = true;
+let isLoginMode = true; // Tracks whether the auth panel is in login vs. register mode.
 
+// Shows or hides the correct form fields and buttons for each auth mode (login/register/forgot/reset).
+// Centralising this logic here avoids duplicating show/hide calls in every transition function.
 function setAuthFieldVisibility(mode) {
     authMode = mode;
     const username = document.getElementById('username-input');
@@ -3832,6 +3926,7 @@ function setAuthFieldVisibility(mode) {
     }
 }
 
+// Toggles between login and register modes, or returns to login from forgot/reset modes.
 function toggleAuthMode() {
     if (authMode === 'forgot' || authMode === 'reset') {
         isLoginMode = true;
@@ -3845,10 +3940,12 @@ function toggleAuthMode() {
     setAuthFieldVisibility(isLoginMode ? 'login' : 'register');
 }
 
+// Switches the auth panel to the "Forgot Password" form where the user enters their username or email.
 function showForgotPasswordMode() {
     setAuthFieldVisibility('forgot');
 }
 
+// Switches the auth panel to the inline reset-password form, storing the token for later submission.
 function showResetPasswordMode(token) {
     activeResetToken = token;
     document.getElementById('login-overlay').style.display = 'flex';
@@ -3856,6 +3953,8 @@ function showResetPasswordMode(token) {
     setAuthFieldVisibility('reset');
 }
 
+// Generic helper that updates a password strength bar and rule list given specific element IDs.
+// Reused by both the registration form and the Google account setup overlay.
 function paintPasswordStrength(password, username, fillId, labelId, rulesId) {
     const strength = getPasswordStrength(password, username);
     const percent = Math.round((strength.passed / strength.total) * 100);
@@ -3873,6 +3972,8 @@ function paintPasswordStrength(password, username, fillId, labelId, rulesId) {
     });
 }
 
+// Shows the dedicated full-page password reset overlay (used when clicking a reset link from email).
+// Hides the normal login overlay so the two don't overlap.
 function openPasswordResetPopup(token) {
     activeResetToken = token;
     const loginOverlay = document.getElementById('login-overlay');
@@ -3889,6 +3990,7 @@ function openPasswordResetPopup(token) {
     setTimeout(() => input.focus(), 50);
 }
 
+// Closes the dedicated reset overlay and returns to the normal login screen.
 function closePasswordResetPopup() {
     activeResetToken = null;
     document.getElementById('password-reset-overlay').style.display = 'none';
@@ -3896,6 +3998,7 @@ function closePasswordResetPopup() {
     setAuthFieldVisibility('login');
 }
 
+// Live-updates the password strength meter in the dedicated reset overlay as the user types.
 function updateDedicatedResetStrength() {
     const password = document.getElementById('new-reset-password-input').value;
     paintPasswordStrength(
@@ -3907,6 +4010,7 @@ function updateDedicatedResetStrength() {
     );
 }
 
+// Validates password strength then sends username/password to the backend to create a new account.
 async function register() {
     const userVal = document.getElementById('username-input').value;
     const passVal = document.getElementById('password-input').value;
@@ -3943,6 +4047,8 @@ async function register() {
     }
 }
 
+// Sends a password reset email to the address linked to the entered username or email.
+// Throttled to 30 seconds to prevent email spam; intentionally vague success message for security.
 async function requestPasswordReset() {
     const lookup = document.getElementById('forgot-lookup-input').value.trim();
     const errorMsg = document.getElementById('login-error');
@@ -3970,6 +4076,8 @@ async function requestPasswordReset() {
     }
 }
 
+// Validates the new password and submits it along with the reset token to the backend (inline login panel flow).
+// The token was previously extracted from the URL when the page loaded.
 async function submitPasswordReset() {
     const newPassword = document.getElementById('reset-password-input').value;
     const errorMsg = document.getElementById('login-error');
@@ -4005,6 +4113,8 @@ async function submitPasswordReset() {
     }
 }
 
+// Same as submitPasswordReset but used by the full-screen dedicated reset overlay (email link flow).
+// On success, hides the overlay and returns the user to the login screen.
 async function submitDedicatedPasswordReset() {
     const newPassword = document.getElementById('new-reset-password-input').value;
     const errorMsg = document.getElementById('dedicated-reset-error');
@@ -4042,6 +4152,10 @@ async function submitDedicatedPasswordReset() {
     }
 }
 
+// --- TASK RENDERING ---
+
+// Applies the selected filter (all/task/reminder) to the task queue and re-renders the list,
+// sorting by priority (high first) then due date within each group.
 function setTaskQueueFilter(type) {
     taskQueueTypeFilter = type;
     if (!latestTasks) return;
@@ -4057,6 +4171,8 @@ function setTaskQueueFilter(type) {
     renderTaskList(filtered, 'agendaList', false);
 }
 
+// Renders a list of tasks into a container element, including filter bar, bulk-action toolbar, and individual task cards.
+// Pass isHistoryView=true to show restore/delete-permanent buttons instead of complete/dismiss buttons.
 function renderTaskList(tasks, containerId, isHistoryView = false) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -4194,6 +4310,9 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
     updateBulkToolbar();
 }
 
+// --- INSIGHTS & CONFLICT DETECTION ---
+
+// Maps a numeric confidence score (0-100) to a named level used for CSS classes and display.
 function getConfidenceLevel(score) {
     const value = Number(score);
     if (value >= 80) return 'high';
@@ -4201,6 +4320,7 @@ function getConfidenceLevel(score) {
     return 'low';
 }
 
+// Formats a start/end date pair into a readable schedule string like "Mar 5, 2026 · 9:00 AM-10:00 AM".
 function formatScheduleRange(start, end, isAllDay = false) {
     if (!start) return 'No scheduled time';
     const dateText = start.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
@@ -4210,6 +4330,8 @@ function formatScheduleRange(start, end, isAllDay = false) {
     return `${dateText} · ${startText}${endText ? `-${endText}` : ''}`;
 }
 
+// Returns { start, end } Date objects for a timed task, defaulting end to start+1h if not set.
+// Returns null for all-day tasks or tasks with no due date (they can't overlap on a timeline).
 function getTimedTaskRange(task) {
     if (!task || !task.due_date || task.is_all_day) return null;
     const start = parseWallTime(task.due_date);
@@ -4217,11 +4339,14 @@ function getTimedTaskRange(task) {
 
     let end = task.end_date ? parseWallTime(task.end_date) : null;
     if (!end || isNaN(end.getTime()) || end <= start) {
+        // Default duration of 1 hour when no end time is specified.
         end = new Date(start.getTime() + 60 * 60000);
     }
     return { start, end };
 }
 
+// Builds a Map from task_id to the list of other tasks it overlaps with, used to highlight conflicts.
+// Uses an O(n²) pair comparison — acceptable for typical task list sizes.
 function buildConflictMap(tasks) {
     const activeTimedTasks = tasks
         .filter(task => task.status !== 'completed' && task.status !== 'deleted')
@@ -4251,6 +4376,8 @@ function buildConflictMap(tasks) {
     return conflicts;
 }
 
+// Returns a sorted, deduplicated list of overlapping task pairs, limited to `limit` results.
+// Pairs are sorted by overlap length (longest first) so the most severe conflicts appear at the top.
 function getConflictPairs(tasks, limit = 4) {
     const activeTimedTasks = tasks
         .filter(task => task.status !== 'completed' && task.status !== 'deleted')
@@ -4293,11 +4420,13 @@ function getConflictPairs(tasks, limit = 4) {
         .slice(0, limit);
 }
 
+// Formats a Date object as a short time string like "9:00 AM" for use in conflict cards.
 function formatTimeOnly(date) {
     if (!date) return '';
     return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+// Builds the HTML for a single conflict card describing two overlapping tasks and their overlap window.
 function formatConflictCard(pair) {
     const dateText = pair.overlapStart.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
     const overlapText = `${formatTimeOnly(pair.overlapStart)}-${formatTimeOnly(pair.overlapEnd)}`;
@@ -4319,11 +4448,13 @@ function formatConflictCard(pair) {
     `;
 }
 
+// Renders either a list of conflict cards or an empty-state message into a container.
 function renderConflictDetails(pairs, emptyText = 'No schedule conflicts detected.') {
     if (!pairs.length) return `<div class="dashboard-empty">${escapeHTML(emptyText)}</div>`;
     return `<div class="dashboard-conflict-stack">${pairs.map(formatConflictCard).join('')}</div>`;
 }
 
+// Filters the full conflict pairs list down to only the conflicts involving a specific task.
 function getConflictPairsForTask(taskId, tasks, limit = 4) {
     const normalizedId = Number(taskId);
     return getConflictPairs(tasks, 100)
@@ -4331,6 +4462,8 @@ function getConflictPairsForTask(taskId, tasks, limit = 4) {
         .slice(0, limit);
 }
 
+// Renders the full Insights ("Review & Confidence") page, showing each task's confidence score,
+// conflict status, and summary statistics in a structured list.
 function renderInsightsPage(tasks, containerId = 'agendaList') {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -4424,6 +4557,7 @@ function renderInsightsPage(tasks, containerId = 'agendaList') {
     `;
 }
 
+// Filters out completed, deleted, and calendar-event tasks — returning only actionable tasks and reminders.
 function getActiveTasks(tasks) {
     return tasks.filter(task =>
         task.status !== 'completed' &&
@@ -4432,6 +4566,7 @@ function getActiveTasks(tasks) {
     );
 }
 
+// Sorts tasks chronologically by due date, falling back to alphabetical title order for undated tasks.
 function sortByScheduleThenTitle(tasks) {
     return [...tasks].sort((a, b) => {
         const aDate = parseWallTime(a.due_date);
@@ -4443,6 +4578,8 @@ function sortByScheduleThenTitle(tasks) {
     });
 }
 
+// Returns true if a task's time window overlaps with today at all — including multi-day tasks.
+// Checks both start and end so a task starting yesterday but ending today still appears in "Today".
 function isTaskDueToday(task) {
     const start = parseWallTime(task.due_date);
     if (!start) return false;
@@ -4453,6 +4590,7 @@ function isTaskDueToday(task) {
     return start <= todayEnd && end >= todayStart;
 }
 
+// Converts a 24-hour integer to a 12-hour AM/PM label like "9:00 AM" for display in the settings UI.
 function formatHourLabel(hour) {
     const normalized = Number(hour);
     if (isNaN(normalized)) return "Not set";
@@ -4462,12 +4600,15 @@ function formatHourLabel(hour) {
     return `${twelveHour}:00 ${suffix}`;
 }
 
+// Returns a formatted string like "9:00 AM - 5:00 PM" representing the user's configured work window.
 function getWorkWindowLabel(settings = window.USER_SETTINGS) {
     const start = Number(settings.preferred_work_start_hour ?? 9);
     const end = Number(settings.preferred_work_end_hour ?? 17);
     return `${formatHourLabel(start)} - ${formatHourLabel(end)}`;
 }
 
+// Analyses timed tasks to find the hour of day with the most scheduled items (the "peak hour").
+// This observed pattern is shown alongside the configured work window in the dashboard.
 function getAdaptiveWorkSummary(tasks) {
     const hourCounts = new Map();
     getActiveTasks(tasks).forEach(task => {
@@ -4495,6 +4636,9 @@ function getAdaptiveWorkSummary(tasks) {
     };
 }
 
+// --- DASHBOARD RENDERING ---
+
+// Renders a single collapsible task row for the dashboard, showing title, schedule, confidence, and conflict tags.
 function renderDashboardTaskRow(task, options = {}) {
     const isHistory = Boolean(options.isHistory);
     const conflicts = options.conflictMap ? (options.conflictMap.get(Number(task.task_id)) || []) : [];
@@ -4524,16 +4668,20 @@ function renderDashboardTaskRow(task, options = {}) {
     `;
 }
 
+// Toggles the expanded/collapsed state of a dashboard task row when clicked.
 function toggleDashboardRowExpand(el) {
     el.classList.toggle('is-expanded');
 }
 
+// Renders a list of dashboard task rows, or an empty-state message if there are none.
 function renderDashboardList(tasks, emptyText, options = {}) {
     if (!tasks.length) return `<div class="dashboard-empty">${escapeHTML(emptyText)}</div>`;
     const limit = options.limit || tasks.length;
     return `<div class="dashboard-list">${tasks.slice(0, limit).map(task => renderDashboardTaskRow(task, options)).join('')}</div>`;
 }
 
+// Aggregates all the data needed to render the dashboard: today's tasks, upcoming, conflicts, confidence stats, etc.
+// Centralising this in one function makes it easy to pass consistent data to both the dashboard and the section modals.
 function getDashboardData(tasks) {
     const activeTasks = getActiveTasks(tasks);
     const todayTasks = sortByScheduleThenTitle(activeTasks.filter(task => isTaskDueToday(task)));
@@ -4570,6 +4718,7 @@ function getDashboardData(tasks) {
     };
 }
 
+// Renders the full two-column agenda dashboard with Today, Upcoming, Task Pulse, Conflicts, and Reminders sections.
 function renderDashboardPage(tasks, containerId = 'agendaList') {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -4681,6 +4830,8 @@ function renderDashboardPage(tasks, containerId = 'agendaList') {
     `;
 }
 
+// Renders a detailed, expanded task card for use inside section modals — includes description,
+// conflict details, confidence, and context-appropriate action buttons (complete/dismiss or restore/delete).
 function renderExpandedTaskRow(task, conflictMap = new Map(), allTasks = latestTasks) {
     const colorClass = getTaskColorClass(task);
     const start = parseWallTime(task.due_date);
@@ -4722,11 +4873,13 @@ function renderExpandedTaskRow(task, conflictMap = new Map(), allTasks = latestT
     `;
 }
 
+// Renders a list of expanded task rows for a section modal, or an empty-state message.
 function renderExpandedList(tasks, emptyText, conflictMap = new Map()) {
     if (!tasks.length) return `<div class="dashboard-empty">${escapeHTML(emptyText)}</div>`;
     return `<div class="expanded-list">${tasks.map(task => renderExpandedTaskRow(task, conflictMap, latestTasks)).join('')}</div>`;
 }
 
+// Returns the title, subtitle, and body HTML for a given section modal (agenda, conflicts, tasks, reminders, history).
 function getSectionModalContent(section) {
     const data = getDashboardData(latestTasks);
 
@@ -4815,6 +4968,7 @@ function getSectionModalContent(section) {
     };
 }
 
+// Populates and opens the section detail modal with the content for the given section name.
 function openSectionModal(section) {
     const modal = document.getElementById('sectionModal');
     const title = document.getElementById('sectionModalTitle');
@@ -4829,15 +4983,18 @@ function openSectionModal(section) {
     modal.classList.add('open');
 }
 
+// Removes the 'open' class to hide the section modal.
 function closeSectionModal() {
     const modal = document.getElementById('sectionModal');
     if (modal) modal.classList.remove('open');
 }
 
+// Closes the section modal when the user clicks the dark backdrop behind it.
 function handleSectionModalBackdrop(event) {
     if (event.target && event.target.id === 'sectionModal') closeSectionModal();
 }
 
+// Updates a task's status (complete/dismiss/restore) from within a section modal, then closes the modal and refreshes the view.
 async function handleModalTaskAction(taskId, status) {
     try {
         const response = await apiFetch(`${API_BASE}/tasks/${taskId}`, {
@@ -4855,6 +5012,7 @@ async function handleModalTaskAction(taskId, status) {
     }
 }
 
+// Permanently deletes a task from inside the section modal after a confirmation prompt.
 async function handleModalPermanentDelete(taskId) {
     if (!confirm("Permanently delete this task?")) return;
 
@@ -4872,6 +5030,9 @@ async function handleModalPermanentDelete(taskId) {
     }
 }
 
+// --- BULK TASK ACTIONS ---
+
+// Adds or removes a single task ID from the bulk-selection Set when its checkbox is toggled.
 function toggleTaskSelection(taskId, isSelected) {
     const id = Number(taskId);
     if (isSelected) selectedTaskIds.add(id);
@@ -4879,6 +5040,7 @@ function toggleTaskSelection(taskId, isSelected) {
     updateBulkToolbar();
 }
 
+// Selects or deselects all visible tasks at once, updating both the Set and all checkboxes.
 function toggleSelectAllTasks(isSelected) {
     selectedTaskIds = isSelected ? new Set(lastRenderedTaskIds) : new Set();
     document.querySelectorAll('.task-select-checkbox').forEach(checkbox => {
@@ -4887,6 +5049,8 @@ function toggleSelectAllTasks(isSelected) {
     updateBulkToolbar();
 }
 
+// Refreshes the bulk action toolbar: updates the count label, enables/disables the delete button,
+// and sets the "select all" checkbox to checked, unchecked, or indeterminate as appropriate.
 function updateBulkToolbar() {
     const count = selectedTaskIds.size;
     const countEl = document.getElementById('bulkSelectionCount');
@@ -4901,6 +5065,8 @@ function updateBulkToolbar() {
     }
 }
 
+// Sends a bulk delete or soft-delete request for all currently selected task IDs.
+// Pass permanent=true to hard-delete (from history view), or false for a soft delete (moves to history).
 async function bulkDeleteSelected(permanent = false) {
     const taskIds = [...selectedTaskIds];
     if (!taskIds.length) return showToast("Select at least one item first.", 'info');
@@ -4957,6 +5123,7 @@ async function dismissTask(taskId) {
     }
 }
 
+// Restores a completed or deleted task back to 'pending' status so it reappears in the active task list.
 async function restoreTask(taskId) {
     try {
         const response = await apiFetch(`${API_BASE}/tasks/${taskId}`, {
@@ -4974,6 +5141,7 @@ async function restoreTask(taskId) {
     }
 }
 
+// Permanently removes a task from the database with no recovery — shows a confirmation prompt first.
 async function permanentlyDeleteTask(taskId) {
     if (!confirm("Are you sure you want to permanently delete this task? This cannot be undone.")) return;
 
@@ -5028,7 +5196,10 @@ async function completeTask(taskId) {
 }
 
 
-//this function is the main driver for changing views between agenda, my tasks, and calendar. It fetches the appropriate data and calls the rendering functions.
+// --- VIEW ROUTING ---
+
+// Main router that switches between all app views (agenda, my tasks, calendar, insights, history, settings).
+// Fetches fresh task data from the backend on every call and delegates rendering to the appropriate function.
 async function loadView(view, addHistory = true) {
     // 0. Update the global state so other functions know what page we are on
     currentView = view;
@@ -5147,6 +5318,9 @@ async function loadView(view, addHistory = true) {
     }
 }
 
+// --- CALENDAR ---
+
+// Returns the HTML for the calendar navigation bar (prev/next buttons and view selector dropdown).
 function getCalendarToolbar(label) {
     return `
         <div class="cal-nav">
@@ -5165,6 +5339,7 @@ function getCalendarToolbar(label) {
     `;
 }
 
+// Maps task priority and type to a CSS color class (pink=high, amber=medium, teal=low, reminder=purple, event=event).
 function getTaskColorClass(task) {
     const priority = String(task.priority || 'normal').toLowerCase();
     const itemType = String(task.item_type || 'task').toLowerCase();
@@ -5176,6 +5351,7 @@ function getTaskColorClass(task) {
     return 'blue';
 }
 
+// Returns true if any part of a task's time range falls on the given date — handles multi-day tasks.
 function taskOccursOnDate(task, date) {
     if (!task.due_date) return false;
     const start = parseWallTime(task.due_date);
@@ -5186,6 +5362,8 @@ function taskOccursOnDate(task, date) {
     return start <= dayEnd && end >= dayStart;
 }
 
+// Returns true if a task should be shown in the all-day row rather than the hourly timeline for a given date.
+// A task is treated as all-day if its span completely covers the day (started before and ends after midnight).
 function isAllDayCalendarTask(task, date) {
     if (task.is_all_day) return true;
     if (!task.end_date || !task.due_date) return false;
@@ -5196,6 +5374,8 @@ function isAllDayCalendarTask(task, date) {
     return start < dayStart && end >= dayEnd;
 }
 
+// Assigns each task to a horizontal "lane" so multi-day tasks on overlapping dates don't visually collide.
+// Tasks are sorted longest-first so they claim the top lanes, with shorter tasks filling below.
 function buildTaskLanes(tasks) {
     const lanesByDate = {};
     let maxLane = -1;
@@ -5238,6 +5418,9 @@ function buildTaskLanes(tasks) {
     return { lanesByDate, maxLane };
 }
 
+// Determines CSS span classes and whether to show the title for a multi-day task segment on a given date.
+// A task gets "span-start" on the first visible day of a week/month row and "span-end" on the last,
+// so the event pill visually connects across cells.
 function getCalendarSpanMeta(task, date, rangeEndDate) {
     const taskStart = parseWallTime(task.due_date);
     const taskEnd = task.end_date ? parseWallTime(task.end_date) : taskStart;
@@ -5262,17 +5445,22 @@ function getCalendarSpanMeta(task, date, rangeEndDate) {
     return { spanClass, showTitle };
 }
 
+// Looks up a task object by ID from the current calendar task cache or the global latest tasks list.
 function findTaskById(taskId) {
     const normalizedId = Number(taskId);
     return (window.currentCalendarTasks || latestTasks || []).find(task => Number(task.task_id) === normalizedId);
 }
 
+// Returns the duration of a task in minutes, defaulting to 60 min and enforcing a 15-minute minimum.
 function getTaskDurationMinutes(task) {
     const range = getTimedTaskRange(task);
     if (!range) return 60;
     return Math.max(15, Math.round((range.end - range.start) / 60000));
 }
 
+// --- CALENDAR DRAG & DROP ---
+
+// Starts a drag operation by setting the task ID in the dataTransfer payload and adding a visual class.
 function beginCalendarDrag(event, taskId) {
     if (!event.dataTransfer) return;
     event.stopPropagation();
@@ -5282,17 +5470,20 @@ function beginCalendarDrag(event, taskId) {
     event.currentTarget.classList.add('dragging');
 }
 
+// Cleans up after a drag ends — removes the dragging class and any drop-hint indicators.
 function endCalendarDrag(event) {
     event.currentTarget.classList.remove('dragging');
     document.querySelectorAll('.calendar-drop-active').forEach(el => el.classList.remove('calendar-drop-active'));
     document.querySelectorAll('.calendar-drop-hint').forEach(el => el.remove());
 }
 
+// Extracts the task ID from a drag event's dataTransfer payload, trying the custom MIME type first.
 function getDraggedTaskId(event) {
     if (!event.dataTransfer) return '';
     return event.dataTransfer.getData('application/x-clerk-task-id') || event.dataTransfer.getData('text/plain');
 }
 
+// Attaches drag-and-drop event listeners to a calendar event element so it can be rescheduled by dragging.
 function makeCalendarItemDraggable(element, task) {
     if (!element || !task) return;
     element.draggable = true;
@@ -5301,10 +5492,13 @@ function makeCalendarItemDraggable(element, task) {
     element.addEventListener('dragend', endCalendarDrag);
 }
 
+// Toggles the visual drop-target highlight on a calendar cell during a drag-over event.
 function setDropActive(event, isActive) {
     event.currentTarget.classList.toggle('calendar-drop-active', isActive);
 }
 
+// Returns a new Date on the target date, preserving the task's original time-of-day if it has one.
+// Defaults to noon for all-day tasks so the time isn't lost when dragging to a new date.
 function copyTaskTimeToDate(task, targetDate) {
     const start = parseWallTime(task?.due_date);
     const nextDate = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 12, 0, 0);
@@ -5314,6 +5508,8 @@ function copyTaskTimeToDate(task, targetDate) {
     return nextDate;
 }
 
+// Moves a task to a new date by drag-and-drop, preserving all-day span length and timed task duration.
+// For all-day tasks, the multi-day span is recalculated so e.g. a 3-day event stays 3 days long.
 async function moveTaskToDate(taskId, targetDate) {
     const task = findTaskById(taskId);
     if (!task || !targetDate) return;
@@ -5335,6 +5531,7 @@ async function moveTaskToDate(taskId, targetDate) {
     await updateTaskSchedule(taskId, nextStart, nextEnd, false);
 }
 
+// Handles a drop event on a calendar day cell (month/week views), moving the dragged task to that date.
 async function handleCalendarDayDrop(event, targetDate) {
     event.preventDefault();
     event.stopPropagation();
@@ -5345,9 +5542,12 @@ async function handleCalendarDayDrop(event, targetDate) {
     loadView('calendar');
 }
 
+// Converts a mouse Y position within the hourly timeline container to a snapped Date (15-minute grid).
+// This is how drag-and-drop on the day/week timeline knows what time the user is targeting.
 function getTimeFromTimelineDrop(event, targetDate, container) {
     const rect = container.getBoundingClientRect();
     const rawMinutes = ((event.clientY - rect.top) / rect.height) * 1440;
+    // Snap to the nearest 15-minute slot, clamped to 23:45 maximum.
     const snappedMinutes = Math.max(0, Math.min(23 * 60 + 45, Math.round(rawMinutes / 15) * 15));
     return new Date(
         targetDate.getFullYear(),
@@ -5359,6 +5559,7 @@ function getTimeFromTimelineDrop(event, targetDate, container) {
     );
 }
 
+// Shows a horizontal "drop here" hint line on the timeline as the user drags over it.
 function updateTimelineDropHint(event, container, targetDate) {
     let hint = container.querySelector('.calendar-drop-hint');
     if (!hint) {
@@ -5371,6 +5572,7 @@ function updateTimelineDropHint(event, container, targetDate) {
     hint.style.top = `${minutes}px`;
 }
 
+// Handles a drop on the hourly timeline, calculating the precise snapped time and updating the task schedule.
 async function handleTimelineDrop(event, targetDate, container) {
     event.preventDefault();
     event.stopPropagation();
@@ -5387,6 +5589,7 @@ async function handleTimelineDrop(event, targetDate, container) {
     loadView('calendar');
 }
 
+// Drills into the day view for a specific date when a calendar cell is clicked.
 function openCalendarDay(dateStr) {
     const [year, month, day] = dateStr.split('-').map(Number);
     currentCalYear = year;
@@ -5396,6 +5599,7 @@ function openCalendarDay(dateStr) {
     loadView('calendar');
 }
 
+// Renders the single-day hourly calendar view with an all-day event row at the top and a timed timeline below.
 function renderDayCalendar(targetDate, allTasks = []) {
     const container = document.getElementById('agendaList');
     const label = targetDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
@@ -5429,6 +5633,7 @@ function renderDayCalendar(targetDate, allTasks = []) {
     renderHourlySchedule(document.getElementById('calendarDayBody'), targetDate, allTasks, true);
 }
 
+// Renders the 7-column week view with tasks arranged in lanes to avoid overlapping pill elements.
 function renderWeekCalendar(month, year, allTasks = []) {
     const container = document.getElementById('agendaList');
     const anchor = new Date(year, month, currentCalDay);
@@ -5490,6 +5695,7 @@ function renderWeekCalendar(month, year, allTasks = []) {
     });
 }
 
+// Renders a compact 12-month year overview with coloured dot indicators for days that have tasks.
 function renderYearCalendar(year, allTasks = []) {
     const container = document.getElementById('agendaList');
     const monthNames = ["January", "February", "March", "April", "May", "June",
@@ -5529,6 +5735,8 @@ function renderYearCalendar(year, allTasks = []) {
     `;
 }
 
+// Top-level calendar dispatcher — routes to day, week, year, or month view based on currentCalendarView.
+// Caches the task list in window.currentCalendarTasks so drag-and-drop lookups can find tasks by ID.
 function renderBigCalendar(month, year, allTasks = []) {
     window.currentCalendarTasks = allTasks;
     const activeDate = new Date(year, month, currentCalDay);
@@ -5689,6 +5897,9 @@ function renderBigCalendar(month, year, allTasks = []) {
     }
     }
 
+// Renders a pixel-accurate 24-hour timeline (1440px tall, 1px = 1 min) into a container element.
+// Each timed task is positioned absolutely based on its start time and sized by its duration.
+// A red "current time" line is drawn if today's date is being viewed.
 function renderHourlySchedule(container, targetDate, allTasks, showCurrentLine = true) {
     if (!container) return;
     container.innerHTML = '';
@@ -5761,6 +5972,9 @@ function renderHourlySchedule(container, targetDate, allTasks, showCurrentLine =
     }
 }
 
+// --- UI & DISPLAY ---
+
+// Updates the user's display name everywhere it appears: the settings field, top bar, avatar initial, and date header.
 function updateDisplayName(name, shouldSave = true) {
     const nameToDisplay = name.trim() || "User";
     document.getElementById('preferred-name-input').value = nameToDisplay;
@@ -5779,6 +5993,8 @@ function updateDisplayName(name, shouldSave = true) {
     if (shouldSave) saveUserSettings();
 }
 
+// Applies or removes dark mode by overwriting CSS custom properties on the root element.
+// Overriding variables directly (rather than just toggling a class) ensures immediate visual update.
 function toggleDarkTheme(shouldSave = true) {
     const isDark = document.getElementById('darkThemeToggle').checked;
     const root = document.documentElement;
@@ -5807,7 +6023,8 @@ function toggleDarkTheme(shouldSave = true) {
     if (shouldSave) saveUserSettings();
 }
 
-// Navigation Helper for calendar
+// Navigates the calendar backward or forward by one period (day, week, month, or year depending on current view).
+// The offset is +1 for "next" and -1 for "prev" — the same function handles all view types.
 window.changeMonth = function(offset) {
     if (currentCalendarView === 'day' || currentCalendarView === 'week') {
         const activeDate = new Date(currentCalYear, currentCalMonth, currentCalDay);
@@ -5837,11 +6054,14 @@ window.changeMonth = function(offset) {
     loadView('calendar'); 
 };
 
+// Switches the calendar to the selected view type (day/week/month/year) and reloads the calendar.
 window.changeCalendarView = function(view) {
     currentCalendarView = view;
     loadView('calendar');
 };
 
+// Global keyboard shortcut handler for modal dismissal and calendar view switching.
+// Enter submits 2FA, Escape closes modals, and D/W/M/Y switch calendar views (when not typing in a field).
 window.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && document.getElementById('twoFactorLoginModal')?.classList.contains('open')) {
         e.preventDefault();
@@ -5858,6 +6078,7 @@ window.addEventListener('keydown', (e) => {
     }
 
     const target = e.target;
+    // Don't intercept keypresses when the user is typing in an input, textarea, or select.
     const isTyping = target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
     if (isTyping || e.ctrlKey || e.metaKey || e.altKey) return;
 
@@ -5870,7 +6091,9 @@ window.addEventListener('keydown', (e) => {
     loadView('calendar');
 });
 
-// Gmail Sync Function
+// --- GOOGLE SYNC ---
+
+// Triggers a Gmail sync for the current user, redirecting to Google OAuth if the token has expired.
 async function syncGmail() {
     const btn = document.getElementById('syncGmailBtn') || document.getElementById('syncAllBtn');
     const userId = window.CURRENT_USER_ID;
@@ -5908,6 +6131,7 @@ async function syncGmail() {
     }
 }
 
+// Triggers a Google Classroom sync, passing the local timezone offset so due dates land on the right day.
 async function syncClassroom() {
     const btn = document.getElementById('syncClassroomBtn') || document.getElementById('syncAllBtn');
     const userId = window.CURRENT_USER_ID;
@@ -5944,6 +6168,8 @@ async function syncClassroom() {
     }
 }
 
+// Syncs all connected Google sources (Gmail, Classroom, Calendar) in one request.
+// Pass silent=true on auto-sync at login so the user isn't interrupted by a toast notification.
 async function syncAllGoogleSources({ silent = false, viewAfterSync = currentView } = {}) {
     const userId = window.CURRENT_USER_ID;
     if (!userId) return;
@@ -5979,6 +6205,8 @@ async function syncAllGoogleSources({ silent = false, viewAfterSync = currentVie
     }
 }
 
+// Completes the Google connection flow: fetches updated settings, triggers a full sync, and shows a confirmation.
+// Called both from the direct redirect path and from the popup cross-tab signal (storage event below).
 async function finishGoogleConnected(userIdFromRedirect, { showAlert = true } = {}) {
     if (userIdFromRedirect) {
         window.CURRENT_USER_ID = userIdFromRedirect;
@@ -6001,8 +6229,12 @@ async function finishGoogleConnected(userIdFromRedirect, { showAlert = true } = 
     }
 }
 
+// Handles the ?google_connected redirect after OAuth completes.
+// If running in a popup (opened by connectGoogleAccount), signals the parent tab via localStorage and closes.
+// Otherwise, completes the connection directly in the current tab.
 function handleGoogleConnectedRedirect(userIdFromRedirect) {
     if (window.opener && !window.opener.closed) {
+        // Write to localStorage so the parent tab's 'storage' event listener picks it up and finishes connecting.
         localStorage.setItem('clerk_google_connected', JSON.stringify({
             user_id: userIdFromRedirect,
             connected_at: Date.now()
@@ -6014,6 +6246,8 @@ function handleGoogleConnectedRedirect(userIdFromRedirect) {
     finishGoogleConnected(userIdFromRedirect);
 }
 
+// Listens for the localStorage signal written by the Google OAuth popup when it completes.
+// This cross-tab communication allows the main window to react when the popup finishes OAuth.
 window.addEventListener('storage', (event) => {
     if (event.key !== 'clerk_google_connected' || !event.newValue) return;
     try {
@@ -6024,9 +6258,8 @@ window.addEventListener('storage', (event) => {
     }
 });
 
-// Connect Google Account Logic - This function initiates the Google OAuth flow.
-// This function is now primarily for the "Connect" button in settings,
-// which directly requests the auth URL from the backend's /auth/google endpoint.
+// Initiates Google account connection from the Settings page by opening the OAuth flow in a popup.
+// Falls back to a full-page redirect if the browser blocks the popup (e.g. popup blockers).
 async function connectGoogleAccount() {
     const btn = document.getElementById('connectGoogleBtn');
     const statusText = document.getElementById('google-status');
@@ -6068,26 +6301,28 @@ async function connectGoogleAccount() {
     }
 }
 
-// Toggle the user menu dropdown
+// --- USER MENU & ACCOUNT ---
+
+// Toggles the user dropdown menu open or closed.
 function toggleUserMenu() {
     const menu = document.getElementById('user-dropdown');
     menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
 }
 
-// Close dropdown if user clicks away
+// Closes the user dropdown when the user clicks anywhere outside the menu container.
 window.addEventListener('click', function(e) {
     if (!document.querySelector('.user-menu-container').contains(e.target)) {
         document.getElementById('user-dropdown').style.display = 'none';
     }
 });
 
-// Settings Placeholder
+// Navigates to the Settings view and closes the user dropdown.
 function openSettings() {
     loadView('settings');
     document.getElementById('user-dropdown').style.display = 'none';
 }
 
-// Full Logout Logic
+// Clears all session data, resets the UI to the login screen, and strips the URL hash.
 function logout() {
     window.CURRENT_USER_ID = null;
     clearSession();
@@ -6099,7 +6334,9 @@ function logout() {
     document.getElementById('user-dropdown').style.display = 'none';
 }
 
-//upload documents 
+// --- DOCUMENT UPLOAD & TASK INGESTION ---
+
+// Uploads a file to the /ingest-doc endpoint for AI extraction; the backend parses it into tasks.
 async function uploadDocument(file) {
     const formData = new FormData();
     formData.append("file", file);
@@ -6112,7 +6349,7 @@ async function uploadDocument(file) {
     });
 }
 
-//gets documents 
+// Shows the selected filename below the file input so the user knows what file is queued for upload.
 document.getElementById('fileInput').addEventListener('change', function(e) {
     const fileInfo = document.getElementById('fileInfo');
     if (this.files && this.files[0]) {
@@ -6121,12 +6358,14 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
     }
 });
 
+// Capitalizes a priority string (e.g. "high" → "High") for consistent display throughout the UI.
 function capitalizePriority(priority) {
   if (!priority) return 'Normal';
   const p = String(priority).toLowerCase().trim();
   return p.charAt(0).toUpperCase() + p.slice(1);
 }
 
+// PATCHes a single due_date field on a task — used when the user edits the date picker inline.
 async function updateTaskDate(id, newDate) {
     try {
         const response = await apiFetch(`${API_BASE}/tasks/${id}`, {
@@ -6140,6 +6379,8 @@ async function updateTaskDate(id, newDate) {
     }
 }
 
+// PATCHes both the start and end date/time of a task, formatting as date-only or datetime depending on is_all_day.
+// Used by drag-and-drop reschedule so both fields update atomically in one API call.
 async function updateTaskSchedule(id, startDate, endDate = null, isAllDay = false) {
     const payload = {
         due_date: isAllDay ? formatDateKey(startDate) : formatLocalDateTimeValue(startDate),
@@ -6166,6 +6407,8 @@ async function updateTaskSchedule(id, startDate, endDate = null, isAllDay = fals
     }
 }
 
+// Called when the user changes the date/time picker on a task card; saves the new date without a full view reload.
+// The raw local datetime string is sent as-is to avoid the browser converting it to UTC before transmission.
 async function handleDateChange(taskId, newFullDate) {
     if (!newFullDate) return;
 
@@ -6180,6 +6423,7 @@ async function handleDateChange(taskId, newFullDate) {
     }
 }
 
+// Toggles the is_all_day flag on a task and reloads the view so the date picker type (date vs datetime-local) updates.
 async function handleAllDayToggle(taskId, isChecked) {
     try {
         const response = await apiFetch(`${API_BASE}/tasks/${taskId}`, {
@@ -6198,6 +6442,7 @@ async function handleAllDayToggle(taskId, isChecked) {
     }
 }
 
+// Called after a successful task ingest — logs the result, refreshes the agenda, and clears the input box.
 function renderOutput(task) {
     // 1. Log the data so you can see exactly what the backend sent in the F12 console
     console.log("Data received from backend:", task);
@@ -6207,6 +6452,7 @@ function renderOutput(task) {
     taskInput.value = '';
 }
 
+// Returns true if a task's start and end dates fall on different calendar days — used for span styling in the mini calendar.
 function taskSpansMultipleDays(task) {
     const start = parseWallTime(task?.due_date);
     const end = task?.end_date ? parseWallTime(task.end_date) : null;
@@ -6214,6 +6460,7 @@ function taskSpansMultipleDays(task) {
     return formatDateKey(start) !== formatDateKey(end);
 }
 
+// Builds the small sidebar mini-calendar for the current month, adding coloured dot indicators for task days.
 function buildCalendar(tasks = latestTasks) {
     const grid = document.getElementById('calendarGrid');
     if (!grid) return; // Prevent crash if grid is missing
@@ -6272,6 +6519,8 @@ function buildCalendar(tasks = latestTasks) {
     }
 }
 
+// Updates all date display elements (main header and sidebar month label) to reflect the current date.
+// Also highlights today's date in the mini calendar grid.
 function setLiveDates() {
     const today = new Date();
 
@@ -6303,21 +6552,21 @@ function setLiveDates() {
     });
 }
 
-// Run the function as soon as the page loads
+// Runs once the DOM is ready: initialises date displays, the mini calendar, and attaches global listeners.
 window.addEventListener('DOMContentLoaded', () => {
     setLiveDates();
     buildCalendar(latestTasks);
 
-    // ── Browser back / forward buttons (also covers mouse back/forward) ──────
+    // Handles browser back/forward navigation by reading the view from history state or the URL hash.
     window.addEventListener('popstate', (e) => {
         if (!window.CURRENT_USER_ID) return;
         const view = e.state?.view
             || HASH_VIEWS[window.location.hash.replace(/^#/, '')]
             || 'agenda';
-        loadView(view, false);
+        loadView(view, false); // false = don't push another history entry (we're already navigating)
     });
 
-    // ── Keyboard shortcuts ───────────────────────────────────────────────────
+    // Global keyboard shortcuts: Ctrl+1-5 to switch tabs, Escape to close modals, / to focus the composer.
     document.addEventListener('keydown', (e) => {
         if (!window.CURRENT_USER_ID) return; // don't fire on login screen
 
@@ -6353,12 +6602,16 @@ window.addEventListener('DOMContentLoaded', () => {
 // Checks for a date change every minute
 setInterval(setLiveDates, 60000);
 
-// --- VOICE RECORDING (MediaRecorder → Whisper) ---
+// --- VOICE RECORDING ---
+
+// State variables for the MediaRecorder-based voice note feature.
 let _mediaRecorder = null;
 let _audioChunks   = [];
 let _isRecording   = false;
 let _micStream     = null;
 
+// Requests microphone access, selects the best supported audio format, and starts recording in 250ms chunks.
+// Chunking (rather than one big blob at the end) ensures audio is captured even if the tab crashes.
 async function _startVoiceRecording() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         showToast('Your browser does not support microphone access. Try Chrome or Firefox.', 'error');
@@ -6390,11 +6643,13 @@ async function _startVoiceRecording() {
     }
 }
 
+// Stops the MediaRecorder and releases the microphone track so the browser's recording indicator disappears.
 function _stopVoiceRecording() {
     if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
         _mediaRecorder.stop();
     }
     if (_micStream) {
+        // Stopping each track individually frees the mic hardware and kills the red recording dot in Chrome.
         _micStream.getTracks().forEach(t => t.stop());
         _micStream = null;
     }
@@ -6404,6 +6659,8 @@ function _stopVoiceRecording() {
     voiceBtn.classList.remove('recording');
 }
 
+// Called automatically when the MediaRecorder finishes — assembles the audio chunks into a Blob
+// and sends it to the /transcribe endpoint (backed by OpenAI Whisper) to get the text.
 async function _onRecordingStop() {
     if (!_audioChunks.length) {
         showToast('No audio recorded. Make sure your microphone is working.', 'error');
@@ -6439,6 +6696,7 @@ async function _onRecordingStop() {
     }
 }
 
+// Resets the voice button to its idle state after recording or transcription completes.
 function _resetVoiceBtn() {
     voiceBtn.textContent = 'Voice Note';
     voiceBtn.disabled = false;
@@ -6446,6 +6704,7 @@ function _resetVoiceBtn() {
     _isRecording = false;
 }
 
+// Toggles between starting and stopping the voice recording when the voice button is clicked.
 voiceBtn.addEventListener('click', () => {
     if (_isRecording) {
         _stopVoiceRecording();
@@ -6455,6 +6714,9 @@ voiceBtn.addEventListener('click', () => {
 });
 
 // --- NOTIFICATION SYSTEM ---
+
+// Polls the task list and shows a toast notification for any task due within the next 30 minutes
+// that hasn't already been notified. The notifiedTasks Set prevents duplicate alerts on the same task.
 async function checkUpcomingTasks() {
     if (!window.CURRENT_USER_ID || !window.USER_SETTINGS.notifications_enabled) return;
 
@@ -6489,6 +6751,8 @@ async function checkUpcomingTasks() {
     }
 }
 
+// Displays a brief, auto-dismissing toast notification at the corner of the screen.
+// type can be 'success', 'error', or 'info' — each maps to a different CSS class and colour.
 function showToast(message, type = 'success', duration = 4000) {
     const container = document.getElementById('toast-container');
     if (!container) return;
@@ -6503,6 +6767,7 @@ function showToast(message, type = 'success', duration = 4000) {
     }, duration);
 }
 
+// Shows a richer, longer-lived notification toast (8 seconds) specifically for upcoming task reminders.
 function showNotificationToast(task) {
     const container = document.getElementById('toast-container');
     const toast = document.createElement('div');
@@ -6528,20 +6793,24 @@ function showNotificationToast(task) {
 setInterval(checkUpcomingTasks, 60000);
 
 
-//runs AI extraction 
+// --- TASK EXTRACTION ---
+
+// Main "Extract" button handler — sends either a text note or an uploaded file to the backend for AI task extraction.
+// Passes the current local time so the AI can correctly interpret relative phrases like "tomorrow" or "next Monday".
 processBtn.addEventListener('click', async () => {
     const text = taskInput.value.trim();
     const fileInput = document.getElementById('fileInput');
     const userId = window.CURRENT_USER_ID;
 
     if (!userId) return alert("Please log in first.");
-    
+
     const selectedFile = fileInput.files && fileInput.files[0];
     const isImageUpload = Boolean(selectedFile && selectedFile.type && selectedFile.type.startsWith('image/'));
     processBtn.innerText = isImageUpload ? "Reading Schedule..." : "Extracting...";
     processBtn.disabled = true;
 
-    // Capture local time for AI context
+    // Build a local ISO timestamp to send as context — the AI uses this as the reference point for "today".
+    // We subtract the timezone offset so the string represents local time, not UTC.
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60000;
     const localISOTime = new Date(now.getTime() - offset).toISOString().slice(0, 19);
@@ -6611,12 +6880,14 @@ processBtn.addEventListener('click', async () => {
     }
 });
 
+// Resets the Extract button back to its idle state after a successful or failed extraction attempt.
 function resetBtn() {
     processBtn.innerText = "Extract";
     processBtn.disabled = false;
 }
 
-
+// Populates the task input with a pre-written sample text when a sample button is clicked,
+// so new users can try the extraction feature without typing anything.
 document.querySelectorAll('.sample').forEach(btn => {
   btn.addEventListener('click', () => { taskInput.value = btn.dataset.text; });
 });

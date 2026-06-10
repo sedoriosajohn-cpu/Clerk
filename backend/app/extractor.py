@@ -1,3 +1,4 @@
+# --- IMPORTS AND CLIENT SETUP ---
 import os
 import json
 import re
@@ -10,6 +11,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Build the OpenAI client once at startup using environment variables.
+# The client is set to None if no API key is found, so callers can check
+# `if not client` to decide whether to fall back to local (regex) extraction.
 api_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI(
     api_key=api_key,
@@ -17,14 +21,24 @@ client = OpenAI(
     max_retries=int(os.getenv("OPENAI_MAX_RETRIES", "1"))
 ) if api_key else None
 
+# --- CONFIGURATION CONSTANTS ---
+# These values control how much text is sent to the AI and how images are processed.
+# Reading them from environment variables lets you tune performance without changing code.
 MAX_AI_INPUT_CHARS = int(os.getenv("EXTRACTOR_MAX_AI_INPUT_CHARS", "18000"))
 MAX_AI_CHUNKS = int(os.getenv("EXTRACTOR_MAX_AI_CHUNKS", "3"))
 MAX_AI_WORKERS = int(os.getenv("EXTRACTOR_MAX_AI_WORKERS", "3"))
 SCHEDULE_IMAGE_MAX_SIDE = int(os.getenv("SCHEDULE_IMAGE_MAX_SIDE", "2048"))
 SCHEDULE_IMAGE_QUALITY = int(os.getenv("SCHEDULE_IMAGE_QUALITY", "86"))
 SCHEDULE_MAX_OUTPUT_TOKENS = int(os.getenv("OPENAI_SCHEDULE_MAX_OUTPUT_TOKENS", "1800"))
+# Overlap ensures that a task spanning a chunk boundary is not lost when text is split.
 CHUNK_OVERLAP_CHARS = 500
 
+# --- REGEX PATTERNS AND WORD LISTS ---
+# These compiled patterns are defined once at module level so they are not
+# recompiled on every function call — a significant speed improvement when
+# processing many lines of text.
+
+# Words that strongly suggest a sentence contains an actionable task.
 ACTION_WORDS = {
     "add", "answer", "bring", "buy", "call", "check", "complete", "create",
     "do", "draft", "email", "finish", "fix", "implement", "make", "meet",
@@ -32,6 +46,8 @@ ACTION_WORDS = {
     "submit", "turn in", "update", "write"
 }
 
+# Matches any line that looks task-related (action verbs, assignment words,
+# or date references) so the compactor can keep it and skip everything else.
 TASK_HINT_RE = re.compile(
     r'\b('
     r'add|answer|bring|buy|call|check|complete|create|do|draft|email|finish|fix|'
@@ -45,23 +61,30 @@ TASK_HINT_RE = re.compile(
     re.IGNORECASE
 )
 
+# Matches lines that are purely structural (page numbers, headings, etc.)
+# so they can be dropped before sending text to the AI.
 NOISE_LINE_RE = re.compile(
     r'^\s*(?:page\s+\d+|\d+|copyright|table of contents|references)\s*$',
     re.IGNORECASE
 )
 
+# A tighter set of action verbs used in confidence scoring — these are more
+# reliable signals of an actionable task than the broader ACTION_WORDS set.
 STRONG_ACTION_RE = re.compile(
     r'\b(submit|finish|complete|turn\s+in|write|create|prepare|review|send|'
     r'schedule|call|email|buy|bring|read|study|fix|implement|make)\b',
     re.IGNORECASE
 )
 
+# Used in confidence scoring to detect explicit deadline language.
 DEADLINE_RE = re.compile(r'\b(due|deadline|by|before|no later than)\b', re.IGNORECASE)
+# Hedging words lower confidence because they suggest the item may not be required.
 AMBIGUITY_RE = re.compile(
     r'\b(maybe|might|possibly|probably|optional|if you can|when you can|sometime|'
     r'eventually|consider|think about|maybe later)\b',
     re.IGNORECASE
 )
+# Matches clock times like "3pm", "10:30 AM", or "14:00" to detect precise scheduling.
 EXPLICIT_TIME_RE = re.compile(
     r'\b(?:at\s*)?\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b',
     re.IGNORECASE
@@ -74,6 +97,9 @@ DATE_REFERENCE_RE = re.compile(
     re.IGNORECASE
 )
 
+# --- DATE AND TIME LOOKUP TABLES ---
+# Mapping month name strings (including abbreviations) to their numeric value
+# so that date strings like "Jan 15" or "January 15" can be parsed consistently.
 MONTHS = {
     "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
     "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7,
@@ -82,12 +108,19 @@ MONTHS = {
     "december": 12
 }
 
+# Python's datetime.weekday() uses Mon=0 … Sun=6, matching this table.
 WEEKDAYS = {
     "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
     "friday": 4, "saturday": 5, "sunday": 6
 }
 
+# --- AI PROMPT BUILDING ---
 def build_prompt(user_input: str, current_time: str) -> str:
+    """Build the system prompt sent to the AI for general task extraction.
+
+    Injecting the current timestamp tells the AI how to resolve relative
+    dates like 'tomorrow' or 'next Friday' into concrete ISO 8601 values.
+    """
     return f"""
     You are the core extraction engine for 'Clerk', an AI task manager.
     Current Local Timestamp: {current_time}
@@ -157,12 +190,20 @@ def verify_with_regex(raw_text: str, extracted_date: str) -> bool:
         pass
     return False
 
+# --- JSON PARSING HELPERS ---
 def extract_json(text: str) -> list:
+    """Parse the AI's response text into a Python list of task dicts.
+
+    The AI sometimes wraps its output in markdown code fences (```json ... ```)
+    even when told not to, so those are stripped before parsing. As a fallback,
+    a regex scans for the first valid JSON array or object in the text.
+    """
     trimmed = text.replace('```json', '').replace('```', '').strip()
     try:
         data = json.loads(trimmed)
         return data if isinstance(data, list) else [data]
     except json.JSONDecodeError:
+        # Try to find a JSON array anywhere in the string (e.g. after extra prose).
         match = re.search(r'\[[\s\S]*\]', trimmed)
         if match:
             return json.loads(match.group(0))
@@ -171,10 +212,17 @@ def extract_json(text: str) -> list:
             return [json.loads(obj_match.group(0))]
         raise ValueError("Failed to parse AI response as JSON")
 
+# --- SCORING AND DATETIME UTILITIES ---
 def clamp_score(score: float) -> int:
+    """Ensure a confidence score stays in the valid 0–100 integer range."""
     return int(max(0, min(100, round(score))))
 
 def parse_task_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Convert an ISO 8601 date string into a naive datetime object.
+
+    Timezone suffixes (Z or +HH:MM) are stripped so all dates are treated as
+    wall-clock 'local' time, avoiding accidental timezone conversion bugs.
+    """
     if not value:
         return None
     try:
@@ -184,11 +232,23 @@ def parse_task_datetime(value: Optional[str]) -> Optional[datetime]:
         return None
 
 def title_terms(title: Optional[str]) -> List[str]:
+    """Extract meaningful words from a task title for source-text matching.
+
+    Common stop words are removed because they appear everywhere and would
+    produce false-positive matches when checking whether a task is grounded
+    in the original document.
+    """
     terms = re.findall(r'[a-z0-9]{3,}', str(title or "").lower())
     stop_words = {"the", "and", "for", "with", "task", "new", "due", "assignment"}
     return [term for term in terms if term not in stop_words]
 
+# --- EVIDENCE EXTRACTION ---
 def evidence_window(source_text: str, task: Dict[str, Any], radius: int = 500) -> str:
+    """Return a short slice of the source text surrounding where the task was found.
+
+    Limiting the window to ±500 characters around the matching term keeps the
+    context relevant for scoring without re-scanning the entire document.
+    """
     if not source_text:
         return ""
 
@@ -212,12 +272,19 @@ def evidence_window(source_text: str, task: Dict[str, Any], radius: int = 500) -
     return source_text[: min(len(source_text), radius * 2)]
 
 def due_day_key_from_iso(due_date: Optional[str]) -> str:
+    """Pull just the YYYY-MM-DD date portion out of a full ISO timestamp string."""
     if not due_date:
         return ""
     match = re.search(r'\d{4}-\d{2}-\d{2}', str(due_date))
     return match.group(0) if match else ""
 
+# --- TEXT COMPACTION AND CHUNKING ---
 def compact_text_for_extraction(text: str, max_chars: int = MAX_AI_INPUT_CHARS) -> str:
+    """Shrink a large document down to its task-relevant lines before sending to the AI.
+
+    Scanning line-by-line and keeping only lines that match TASK_HINT_RE avoids
+    wasting AI tokens on boilerplate, saving cost and reducing hallucination risk.
+    """
     if len(text) <= max_chars:
         return text
 
@@ -232,6 +299,8 @@ def compact_text_for_extraction(text: str, max_chars: int = MAX_AI_INPUT_CHARS) 
         if not TASK_HINT_RE.search(line):
             continue
 
+        # Include one line of context above and below the matched line so the
+        # AI has enough surrounding text to understand the task's meaning.
         start = max(0, index - 1)
         end = min(len(lines), index + 2)
         segment = " ".join(part for part in lines[start:end] if part and not NOISE_LINE_RE.match(part))
@@ -253,6 +322,11 @@ def compact_text_for_extraction(text: str, max_chars: int = MAX_AI_INPUT_CHARS) 
     return f"{text[:half]}\n\n{text[-half:]}"
 
 def split_text_for_ai(text: str) -> List[str]:
+    """Compact a document and split it into overlapping chunks for parallel AI calls.
+
+    Each chunk overlaps the previous one by CHUNK_OVERLAP_CHARS characters so that
+    a task sentence that falls on a boundary is fully captured in at least one chunk.
+    """
     compacted = compact_text_for_extraction(text)
     if len(compacted) <= MAX_AI_INPUT_CHARS:
         return [compacted]
@@ -265,14 +339,24 @@ def split_text_for_ai(text: str) -> List[str]:
         chunks.append(compacted[start:end])
         if end == len(compacted):
             break
+        # Step forward by (chunk_size - overlap) so the next chunk revisits the tail
+        # of this one, preventing tasks from being silently cut off at chunk edges.
         start = max(end - CHUNK_OVERLAP_CHARS, start + 1)
     return chunks
 
+# --- DATE AND TIME PARSING ---
 def parse_current_time(current_time: Optional[str]) -> datetime:
+    """Parse the client-provided local timestamp into a naive datetime.
+
+    The "(Local Time)" annotation the frontend appends is stripped, and the
+    timezone info is removed so all subsequent date arithmetic stays timezone-naive
+    and avoids accidental UTC offsets when resolving 'today' or 'tomorrow'.
+    """
     if not current_time:
         return datetime.now(timezone.utc).replace(tzinfo=None)
 
     cleaned = current_time.replace("(Local Time)", "").strip()
+    # Python's fromisoformat needs "+00:00" format, not the bare "Z" suffix.
     cleaned = cleaned.replace("Z", "+00:00")
     try:
         parsed = datetime.fromisoformat(cleaned)
@@ -281,6 +365,13 @@ def parse_current_time(current_time: Optional[str]) -> datetime:
         return datetime.now(timezone.utc).replace(tzinfo=None)
 
 def parse_time_fragment(text: str):
+    """Extract an hour and minute from a string like '3pm' or 'at 10:30 AM'.
+
+    Returns (hour, minute, is_all_day). If no clock time is found, defaults to
+    noon and marks the task as all-day so callers know the time was not explicit.
+    The 12 PM / 12 AM edge case (noon vs midnight) requires special handling
+    because standard 12-hour clock rules do not follow simple +12/-12 arithmetic.
+    """
     match = re.search(r'\b(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b', text, re.IGNORECASE)
     if not match:
         return 12, 0, True
@@ -288,13 +379,21 @@ def parse_time_fragment(text: str):
     hour = int(match.group(1))
     minute = int(match.group(2) or 0)
     suffix = match.group(3).lower()
+    # "12 PM" is noon (no change), but "1 PM" through "11 PM" need +12.
     if suffix == "pm" and hour != 12:
         hour += 12
+    # "12 AM" is midnight (hour=0), but "1 AM" through "11 AM" are already correct.
     if suffix == "am" and hour == 12:
         hour = 0
     return hour, minute, False
 
 def parse_due_date(text: str, now: datetime):
+    """Convert natural-language date references in text into an ISO timestamp.
+
+    Handles relative terms ('today', 'tomorrow', 'next Monday'), numeric dates
+    ('05/12'), and month-name dates ('May 12'). Returns a tuple of
+    (due_date_str, end_date_str, is_all_day).
+    """
     lowered = text.lower()
     hour, minute, is_all_day = parse_time_fragment(lowered)
     target = None
@@ -309,6 +408,8 @@ def parse_due_date(text: str, now: datetime):
         if weekday:
             desired = WEEKDAYS[weekday.group(1)]
             days_ahead = desired - now.weekday()
+            # If the day has already passed this week (or "next X" was explicit),
+            # add 7 to jump to the following week's occurrence.
             if days_ahead <= 0 or next_weekday:
                 days_ahead += 7
             target = now + timedelta(days=days_ahead)
@@ -340,11 +441,23 @@ def parse_due_date(text: str, now: datetime):
     return due.strftime("%Y-%m-%dT%H:%M:%SZ"), None, is_all_day
 
 def clean_task_title(text: str) -> str:
+    """Strip date/time tails and filler phrases from a raw sentence to produce a clean title.
+
+    For example, "remind me to call Mom by Friday at 3pm" becomes "Call Mom".
+    The date portion is cut first, then leading filler phrases are trimmed.
+    """
     title = re.sub(r'\b(?:by|due|on|at)\s+.*$', '', text, flags=re.IGNORECASE).strip()
     title = re.sub(r'^(please\s+|remind me to\s+|remind me\s+|i need to\s+|need to\s+)', '', title, flags=re.IGNORECASE)
     return title[:1].upper() + title[1:] if title else "New Task"
 
+# --- LOCAL (REGEX-BASED) EXTRACTION ---
 def local_nlp_extract_tasks(text: str, current_time: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Extract tasks using only regex — no AI API call required.
+
+    This is the offline fallback used when the OpenAI client is unavailable
+    or when the AI call fails. It is less accurate than the AI path but
+    guarantees that the app still works without an API key.
+    """
     now = parse_current_time(current_time)
     candidates = []
     for chunk in re.split(r'[\n;]+|(?<=[.!?])\s+', text):
@@ -387,7 +500,13 @@ def local_nlp_extract_tasks(text: str, current_time: Optional[str] = None) -> Li
 
     return tasks
 
+# --- AI CHUNK EXTRACTION ---
 def extract_json_from_chunk(chunk: str, now_iso: str) -> list:
+    """Send one text chunk to the AI and return the parsed list of task dicts.
+
+    Temperature=0 is used to make the output deterministic and reduce creative
+    hallucination — the AI should read the text, not invent tasks.
+    """
     prompt = build_prompt(chunk, now_iso)
     response = client.chat.completions.create(
         model=os.getenv("OPENAI_MODEL", "gpt-5.4"),
@@ -397,7 +516,14 @@ def extract_json_from_chunk(chunk: str, now_iso: str) -> list:
     )
     return extract_json(response.choices[0].message.content)
 
+# --- SCHEDULE IMAGE PREPROCESSING ---
 def optimize_schedule_image(image_bytes: bytes, mime_type: str) -> tuple[bytes, str]:
+    """Resize and compress a schedule image before sending it to the AI vision API.
+
+    Keeping images within SCHEDULE_IMAGE_MAX_SIDE pixels reduces API cost and
+    latency. EXIF transpose corrects phone photos that are rotated by metadata
+    without actually rotating the pixels.
+    """
     try:
         from PIL import Image, ImageOps
         from io import BytesIO
@@ -406,8 +532,10 @@ def optimize_schedule_image(image_bytes: bytes, mime_type: str) -> tuple[bytes, 
 
     try:
         with Image.open(BytesIO(image_bytes)) as image:
+            # Fix rotation from camera EXIF data before resizing.
             image = ImageOps.exif_transpose(image)
             image.thumbnail((SCHEDULE_IMAGE_MAX_SIDE, SCHEDULE_IMAGE_MAX_SIDE))
+            # JPEG requires RGB or greyscale; convert exotic modes (RGBA, P, etc.).
             if image.mode not in ("RGB", "L"):
                 image = image.convert("RGB")
 
@@ -417,7 +545,13 @@ def optimize_schedule_image(image_bytes: bytes, mime_type: str) -> tuple[bytes, 
     except Exception:
         return image_bytes, mime_type
 
+# --- SCHEDULE NAME MATCHING ---
 def normalize_schedule_name(value: Optional[str]) -> str:
+    """Convert a name to a lowercase, punctuation-stripped form for comparison.
+
+    The "Last, First" → "First Last" swap handles schedules that store names
+    in reverse order compared to the user's profile display name.
+    """
     text = re.sub(r'[^a-z\s,]', ' ', str(value or "").lower())
     text = re.sub(r'\s+', ' ', text).strip()
     if "," in text:
@@ -426,6 +560,12 @@ def normalize_schedule_name(value: Optional[str]) -> str:
     return text
 
 def schedule_names_match(row_name: Optional[str], target_names: List[str]) -> bool:
+    """Check whether a schedule row name belongs to the target user.
+
+    A blank row name is treated as a match (True) so that schedules without
+    a name column are not silently rejected. Token overlap of at least 2 words
+    (or all words if the name is one word) tolerates nicknames and initials.
+    """
     normalized_row = normalize_schedule_name(row_name)
     if not normalized_row:
         return True
@@ -441,15 +581,20 @@ def schedule_names_match(row_name: Optional[str], target_names: List[str]) -> bo
             continue
         if normalized_row == normalized_target:
             return True
+        # Require at least 2 shared tokens (or all tokens if the name is short)
+        # to avoid matching on common single-word coincidences like "Lee".
         if len(row_tokens & target_tokens) >= min(2, len(target_tokens)):
             return True
     return False
 
+# --- SCHEDULE SHIFT CALCULATIONS ---
 def parse_schedule_weekly_hours(value: Any) -> Optional[float]:
+    """Extract a floating-point hours value from a string like '34.5 hrs' or '40'."""
     match = re.search(r'\d+(?:\.\d+)?', str(value or ""))
     return float(match.group(0)) if match else None
 
 def parse_schedule_datetime(value: Any) -> Optional[datetime]:
+    """Convert a schedule timestamp string to a naive datetime, ignoring timezone."""
     if not value:
         return None
     try:
@@ -459,6 +604,11 @@ def parse_schedule_datetime(value: Any) -> Optional[datetime]:
         return None
 
 def schedule_shift_hours(task: Dict[str, Any]) -> float:
+    """Calculate the duration of a single shift in hours from its due_date and end_date.
+
+    If end < start (e.g., a shift crosses midnight), one day is added to end
+    before computing the difference to avoid a negative duration.
+    """
     start = parse_schedule_datetime(task.get("due_date"))
     end = parse_schedule_datetime(task.get("end_date"))
     if not start or not end:
@@ -468,9 +618,17 @@ def schedule_shift_hours(task: Dict[str, Any]) -> float:
     return max(0, (end - start).total_seconds() / 3600)
 
 def extracted_schedule_total_hours(tasks: List[Dict[str, Any]]) -> float:
+    """Sum the hours of all shifts in a list, rounded to two decimal places."""
     return round(sum(schedule_shift_hours(task) for task in tasks), 2)
 
+# --- SCHEDULE DAY LABEL PARSING ---
 def parse_schedule_day_label(label: str, current_time: Optional[str]) -> Optional[datetime]:
+    """Convert a schedule column header (e.g. 'Mon', 'Jun 8') to an absolute date.
+
+    For weekday-only labels, the function finds the corresponding day in the
+    Sun–Sat calendar week that contains `now`, rather than searching ±7 days,
+    which would be wrong when the schedule week does not match the current week.
+    """
     now = parse_current_time(current_time)
     weekday_match = re.fullmatch(r'\s*(sun|mon|tue|wed|thu|fri|sat)(?:day)?\s*', str(label or ""), re.IGNORECASE)
     if weekday_match:
@@ -502,6 +660,11 @@ def parse_schedule_day_label(label: str, current_time: Optional[str]) -> Optiona
     return candidate
 
 def parse_schedule_clock(hour_text: str, minute_text: Optional[str], suffix: str) -> tuple[int, int]:
+    """Convert 12-hour clock components into a 24-hour (hour, minute) pair.
+
+    Applying the same noon/midnight edge-case logic as parse_time_fragment
+    ensures consistent AM/PM conversion across all time-parsing code paths.
+    """
     hour = int(hour_text)
     minute = int(minute_text or 0)
     suffix = suffix.lower()
@@ -511,6 +674,7 @@ def parse_schedule_clock(hour_text: str, minute_text: Optional[str], suffix: str
         hour = 0
     return hour, minute
 
+# --- SCHEDULE GRID CELL CONVERSION ---
 def row_cell_to_task(
     day_label: str,
     cell_text: Any,
@@ -518,6 +682,11 @@ def row_cell_to_task(
     row_weekly_hours: Optional[Any],
     current_time: Optional[str]
 ) -> Optional[Dict[str, Any]]:
+    """Parse a single schedule grid cell (one day's shift text) into a task dict.
+
+    Returns None if the cell is blank or explicitly marks a day off, so callers
+    can safely skip it without extra conditional logic.
+    """
     text = re.sub(r'\s+', ' ', str(cell_text or "")).strip()
     if not text or text.lower() in {"off", "none", "null", "n/a"}:
         return None
@@ -558,8 +727,14 @@ def row_cell_to_task(
     }
 
 def row_cells_to_tasks(container: Dict[str, Any], current_time: Optional[str]) -> List[Dict[str, Any]]:
+    """Convert a row_cells dict (or list) from the AI response into a list of shift tasks.
+
+    The AI sometimes returns row_cells as a list indexed Sun–Sat, so we normalize
+    it to a dict before iterating to keep the rest of the logic consistent.
+    """
     row_cells = container.get("row_cells")
     if isinstance(row_cells, list):
+        # Map positional list → {"Sun": ..., "Mon": ..., ...}
         day_labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
         row_cells = {day_labels[index]: value for index, value in enumerate(row_cells[:7])}
     if not isinstance(row_cells, dict):
@@ -578,7 +753,14 @@ def row_cells_to_tasks(container: Dict[str, Any], current_time: Optional[str]) -
             tasks.append(task)
     return tasks
 
+# --- SCHEDULE VALIDATION ---
 def validate_schedule_extraction(tasks: List[Dict[str, Any]], target_names: List[str]) -> List[Dict[str, Any]]:
+    """Sanity-check a list of extracted schedule tasks and discard implausible results.
+
+    Multiple heuristics are applied — name matching, total-hours tolerance, and
+    a 16-hour shift cap — because AI vision can misread rows and produce confident
+    but wrong output that needs to be caught before it reaches the user.
+    """
     if not tasks:
         return []
 
@@ -627,12 +809,20 @@ def validate_schedule_extraction(tasks: List[Dict[str, Any]], target_names: List
             unique[key] = task
     return sorted(unique.values(), key=lambda task: task.get("due_date") or "")
 
+# --- SCHEDULE IMAGE ENCODING ---
 def encode_schedule_image(image, max_side: int = 2048) -> str:
+    """Sharpen, resize, and base64-encode a PIL image for the OpenAI vision API.
+
+    Contrast and sharpness are boosted before encoding because schedule grids
+    have thin lines and small text that vision models struggle to read at normal
+    image quality. Very short images (< 180px tall) are scaled up 3× first.
+    """
     from PIL import ImageEnhance
     from io import BytesIO
 
     image = ImageEnhance.Contrast(image).enhance(1.35)
     image = ImageEnhance.Sharpness(image).enhance(1.55)
+    # Upscale tiny crops (e.g. individual cells) so text is legible to the AI.
     if image.height < 180:
         image = image.resize((image.width * 3, image.height * 3))
     image.thumbnail((max_side, max_side))
@@ -640,12 +830,25 @@ def encode_schedule_image(image, max_side: int = 2048) -> str:
     image.save(output, format="JPEG", quality=max(SCHEDULE_IMAGE_QUALITY, 92), optimize=True)
     return base64.b64encode(output.getvalue()).decode("ascii")
 
+# --- GRID DETECTION ---
 def detect_schedule_grid(image) -> tuple[List[int], List[tuple[int, int]]]:
+    """Detect horizontal row lines and vertical day-column lines in a schedule image.
+
+    Returns (day_lines, row_bounds) where day_lines is an 8-element list of x
+    coordinates bounding the 7 day columns, and row_bounds is a list of (top, bottom)
+    y-pixel pairs for each employee row. Returns ([], []) if the image does not
+    look like a grid (fewer than 4 horizontal lines detected).
+
+    The algorithm works by scanning rows/columns of pixels for 'dark' density
+    above a threshold — schedule grid lines appear as many consecutive dark pixels.
+    Nearby dark pixels are clustered together and averaged to find the true line center.
+    """
     from PIL import ImageOps
 
     gray = ImageOps.grayscale(image)
     width, height = gray.size
     pixels = gray.load()
+    # Ignore the outer 5% of the image to avoid border artifacts.
     x0, x1 = int(width * 0.05), int(width * 0.95)
 
     dark_rows = []
@@ -690,6 +893,11 @@ def detect_schedule_grid(image) -> tuple[List[int], List[tuple[int, int]]]:
             col_clusters[-1].append(x)
     candidates = [sum(cluster) // len(cluster) for cluster in col_clusters]
 
+    # Select the best sequence of 8 evenly-spaced column lines from the candidates.
+    # A schedule has 7 day columns (8 boundary lines). We search for the 8-line
+    # sequence with the lowest variance in gap widths — equal gaps = a real grid.
+    # An iterative stack is used instead of recursion to avoid Python's recursion limit
+    # on images with many candidate column lines.
     best = []
     best_score = float("inf")
     for start in range(len(candidates)):
@@ -700,6 +908,8 @@ def detect_schedule_grid(image) -> tuple[List[int], List[tuple[int, int]]]:
                 gaps = [sequence[i + 1] - sequence[i] for i in range(7)]
                 avg_gap = sum(gaps) / len(gaps)
                 variance = sum((gap - avg_gap) ** 2 for gap in gaps) / len(gaps)
+                # Penalise sequences that don't span the expected image width,
+                # since a real 7-column grid should reach from ~25% to ~94% of the image.
                 score = (
                     variance
                     + abs(sequence[-1] - (width * 0.94)) * 0.8
@@ -713,7 +923,7 @@ def detect_schedule_grid(image) -> tuple[List[int], List[tuple[int, int]]]:
             for next_index in range(index + 1, len(candidates)):
                 gap = candidates[next_index] - sequence[-1]
                 if gap > 190:
-                    break
+                    break  # Gaps beyond 190px are too large to be adjacent day columns.
                 if 115 <= gap <= 190:
                     stack.append((sequence + [candidates[next_index]], next_index))
     day_lines = best if len(best) >= 8 else []
@@ -725,12 +935,21 @@ def detect_schedule_grid(image) -> tuple[List[int], List[tuple[int, int]]]:
     ]
     return day_lines, row_bounds
 
+# --- CONTACT SHEET BUILDING ---
 def build_row_contact_sheet(image, day_lines: List[int], row_bounds: List[tuple[int, int]]):
+    """Build a single composite image showing all name cells side-by-side for the AI.
+
+    Sending one image with numbered row labels is far cheaper (fewer API calls)
+    than asking the vision model to locate a name directly in the full schedule
+    image, which may have dozens of rows and be hard to read at small size.
+    """
     from PIL import Image, ImageDraw
 
     if not day_lines or not row_bounds:
         return None
 
+    # The name column sits to the left of the first day-column boundary (day_lines[0]).
+    # Estimate its width as ~1.95× the width of one day column.
     name_left = max(0, day_lines[0] - int((day_lines[1] - day_lines[0]) * 1.95))
     name_right = day_lines[0]
     cell_width = name_right - name_left
@@ -741,13 +960,21 @@ def build_row_contact_sheet(image, day_lines: List[int], row_bounds: List[tuple[
 
     for index, (top, bottom) in enumerate(row_bounds):
         crop = image.crop((name_left, max(0, top - 3), name_right, min(image.height, bottom + 3)))
+        # Scale up each name crop so the AI can read small text more reliably.
         crop = crop.resize((cell_width * 2, cell_height))
         y = index * cell_height
         draw.text((8, y + 24), f"{index}", fill="black")
         sheet.paste(crop, (label_width, y))
     return sheet
 
+# --- AI-ASSISTED ROW LOCATION ---
 def locate_schedule_row_from_image(image, day_lines: List[int], row_bounds: List[tuple[int, int]], target_names: List[str]) -> Optional[Dict[str, Any]]:
+    """Use the AI vision model to identify which row index belongs to the target user.
+
+    Sends the contact sheet (name cells only) to the AI so it reads just the
+    names — not the whole schedule — making the match faster and more accurate.
+    Returns a dict with row_index, matched_row_name, and row_weekly_hours.
+    """
     if not client:
         return None
 
@@ -793,7 +1020,14 @@ def locate_schedule_row_from_image(image, day_lines: List[int], row_bounds: List
         "row_weekly_hours": extracted[0].get("row_weekly_hours")
     }
 
+# --- PER-ROW SCHEDULE EXTRACTION ---
 def extract_schedule_from_detected_row(image, row_info: Dict[str, Any], day_lines: List[int], row_bounds: List[tuple[int, int]], current_time: Optional[str]) -> List[Dict[str, Any]]:
+    """Crop each day cell from the identified employee row and send them to the AI.
+
+    Sending individual cell crops alongside the date header strip lets the model
+    read each shift independently, reducing the chance of it copying a time from
+    a neighboring row or the wrong column.
+    """
     if not client:
         return []
 
@@ -847,7 +1081,15 @@ def extract_schedule_from_detected_row(image, row_info: Dict[str, Any], day_line
         return row_cells_to_tasks(container, current_time) or parse_schedule_image_response(response.choices[0].message.content, current_time)
     return parse_schedule_image_response(response.choices[0].message.content, current_time)
 
+# --- FULL GRID SCHEDULE PIPELINE ---
 def extract_work_schedule_from_grid_image(image_bytes: bytes, target_names: List[str], current_time: Optional[str]) -> List[Dict[str, Any]]:
+    """Orchestrate the full pixel-based grid extraction pipeline.
+
+    This is the preferred path for schedule images because it is more accurate
+    than sending the whole image at once — it surgically isolates the user's row
+    before asking the AI to read it. Returns [] if grid detection fails, signalling
+    the caller to fall back to the full-image AI prompt approach.
+    """
     try:
         from PIL import Image, ImageOps
         from io import BytesIO
@@ -868,7 +1110,14 @@ def extract_work_schedule_from_grid_image(image_bytes: bytes, target_names: List
         print(f"Grid schedule extraction failed: {exc}")
         return []
 
+# --- SCHEDULE IMAGE PROMPT BUILDING ---
 def build_schedule_image_prompt(target_names: List[str], now_iso: str, retry: bool = False) -> str:
+    """Build the prompt for the full-image schedule extraction fallback.
+
+    When retry=True, extra instructions are injected that tell the AI to be
+    stricter about row boundaries, because the first attempt was rejected by
+    validate_schedule_extraction (likely due to row-bleed or hour mismatch).
+    """
     retry_rules = """
     STRICT RETRY:
     A previous read was rejected because it likely crossed into an adjacent row or the shift hours did not match the row's weekly-hours total.
@@ -935,7 +1184,14 @@ def build_schedule_image_prompt(target_names: List[str], now_iso: str, retry: bo
     For example, if the row shows Wkly Hrs 34.5, the extracted shifts should add up to approximately 34.5 hours.
     """
 
+# --- SCHEDULE IMAGE RESPONSE PARSING ---
 def parse_schedule_image_response(response_text: str, current_time: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Parse and normalise the AI's schedule response into a flat list of shift tasks.
+
+    The AI may return the data in several shapes — a container object with a
+    'shifts' list, a container with 'row_cells', or a bare list — so each case
+    is handled explicitly before falling back to treating the response as a list.
+    """
     extracted = extract_json(response_text)
     if len(extracted) == 1 and isinstance(extracted[0], dict) and "shifts" in extracted[0]:
         container = extracted[0]
@@ -978,12 +1234,20 @@ def parse_schedule_image_response(response_text: str, current_time: Optional[str
         tasks.append(valid)
     return tasks
 
+# --- PUBLIC SCHEDULE IMAGE EXTRACTION ENTRY POINT ---
 def extract_work_schedule_from_image(
     image_bytes: bytes,
     mime_type: str,
     target_names: List[str],
     current_time: Optional[str] = None
 ) -> list:
+    """Top-level function to extract work shifts from a schedule image.
+
+    Tries the precise pixel-based grid pipeline first; if that returns nothing
+    (grid not detected or row not found), falls back to sending the whole image
+    to the AI with a descriptive prompt, retrying once with stricter instructions
+    if the first result fails validation.
+    """
     if not client:
         raise RuntimeError("Image schedule extraction requires an OpenAI API key.")
 
@@ -999,6 +1263,8 @@ def extract_work_schedule_from_image(
     optimized_bytes, optimized_mime_type = optimize_schedule_image(image_bytes, mime_type)
     encoded_image = base64.b64encode(optimized_bytes).decode("ascii")
 
+    # Attempt extraction twice: first with standard instructions, then with
+    # stricter retry instructions if the initial result fails validation.
     for retry in (False, True):
         prompt = build_schedule_image_prompt(names, now_iso, retry=retry)
         response = client.chat.completions.create(
@@ -1022,11 +1288,17 @@ def extract_work_schedule_from_image(
     return []
 
 
+# --- SCHEDULE TEXT EXTRACTION ---
 def extract_work_schedule_from_text(
     schedule_text: str,
     target_names: List[str],
     current_time: Optional[str] = None
 ) -> list:
+    """Extract work shifts from a plain-text schedule (e.g., a copied spreadsheet).
+
+    Used when the schedule is provided as text rather than an image, so the AI
+    reads structured rows and columns as characters instead of pixels.
+    """
     if not client:
         return []
 
@@ -1088,7 +1360,14 @@ def extract_work_schedule_from_text(
         tasks.append(format_for_frontend(valid))
     return tasks
 
+# --- MAIN TEXT EXTRACTION ENTRY POINT ---
 def extract_task_from_text(text: str, current_time: Optional[str] = None) -> list:
+    """Extract all tasks from a user message or uploaded document text.
+
+    Uses the AI when available, splitting large documents into parallel chunks
+    for speed. Falls back silently to local_nlp_extract_tasks if the AI client
+    is absent or any exception occurs during extraction.
+    """
     if not text or not text.strip():
         return []
 
@@ -1105,6 +1384,8 @@ def extract_task_from_text(text: str, current_time: Optional[str] = None) -> lis
         if len(chunks) == 1:
             raw_tasks.extend(extract_json_from_chunk(chunks[0], now_iso))
         else:
+            # Process multiple chunks in parallel using a thread pool so that
+            # long documents don't take 3× as long as a single short message.
             worker_count = max(1, min(MAX_AI_WORKERS, len(chunks)))
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 futures = [executor.submit(extract_json_from_chunk, chunk, now_iso) for chunk in chunks]
@@ -1133,13 +1414,24 @@ def extract_task_from_text(text: str, current_time: Optional[str] = None) -> lis
         print(f"EXTRACTION ERROR: {e}")
         return local_nlp_extract_tasks(text, current_time)
 
+# --- CONFIDENCE SCORING ---
 def adjust_confidence(
     user_input: str,
     task: Dict[str, Any],
     current_time: Optional[str] = None,
     date_verified: bool = True
 ) -> Dict[str, Any]:
+    """Recalculate a task's confidence score using multiple evidence signals.
+
+    The AI's own confidence value is blended with regex-based checks on action
+    language, deadline words, title quality, and date proximity. This hybrid
+    approach prevents the AI from being overconfident on vague or ambiguous input.
+    The formula starts at 42 and adds/subtracts small amounts per signal so the
+    final score stays within a realistic 0–100 range.
+    """
     model_score = max(0, min(100, int(task.get("confidence", 70))))
+    # Start at a baseline of 42 + a dampened fraction of the AI's own score.
+    # Using 0.32 keeps the AI's contribution meaningful but not dominant.
     score = 42 + (model_score * 0.32)
     evidence = evidence_window(user_input, task)
     evidence_lower = evidence.lower()
@@ -1206,6 +1498,8 @@ def adjust_confidence(
         elif days_until_due > 730:
             score -= 10
 
+        # A date that cannot be found anywhere in the source text is likely
+        # hallucinated by the AI, so it earns a large penalty.
         if date_verified:
             score += 8
         else:
@@ -1235,11 +1529,18 @@ def adjust_confidence(
     task["confidence"] = clamp_score(score)
     return task
 
+# --- TASK VALIDATION ---
 def validate_task(task: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalise a raw AI task dict into the standard Clerk schema.
+
+    Handles missing fields with safe defaults and collapses priority aliases
+    (e.g. 'urgent' → 'high') so the rest of the codebase only sees 'low',
+    'normal', or 'high'.
+    """
     # Ensure title exists
     title = str(task.get("title", "New Task")).strip()
     if not title or title == "null": title = "Untitled Task"
-    
+
     # Standardize Priority
     p = str(task.get("priority", "normal")).lower()
     if p in ["high", "urgent"]: p = "high"
@@ -1253,22 +1554,30 @@ def validate_task(task: Dict[str, Any]) -> Dict[str, Any]:
         "due_date": task.get("due_date"),
         "end_date": task.get("end_date"),
         "assignee": task.get("assignee") if task.get("assignee") else "me",
+        # Fall back through several field names the AI may use for the assigner.
         "assigner": task.get("assigner") or task.get("assigned_by") or task.get("teacher") or task.get("sender"),
         "is_all_day": bool(task.get("is_all_day", False)),
         "priority": p,
         "confidence": int(task.get("confidence", 70))
     }
 
+# --- FRONTEND FORMATTING ---
 def format_for_frontend(task: Dict[str, Any]) -> Dict[str, Any]:
+    """Add human-readable 'due' and 'time' display fields to a task dict.
+
+    The frontend expects these pre-formatted strings rather than computing them
+    from the raw ISO timestamp, keeping all date formatting logic in one place.
+    """
     due_dt = None
     if task.get("due_date"):
         try:
-            # Strip 'Z' or offsets to treat as "wall time" (local naive datetime).
+            # Strip timezone info to treat the timestamp as local wall-clock time,
+            # so "9:00 AM" displays correctly regardless of server timezone.
             clean_date = re.sub(r'Z$|[+-]\d{2}:\d{2}$', '', task["due_date"])
             due_dt = datetime.fromisoformat(clean_date)
         except (ValueError, AttributeError):
             pass
-            
+
     task["due"] = due_dt.strftime("%m/%d/%Y") if due_dt else "No due date"
     task["time"] = "All Day" if task.get("is_all_day") else (due_dt.strftime("%I:%M %p") if due_dt else "No time")
     return task

@@ -1,3 +1,5 @@
+# --- IMPORTS AND CONFIGURATION ---
+# Standard library and third-party imports needed by the entire app.
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +31,8 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
+# Google API permission scopes — these tell Google exactly what data Clerk can access.
+# Using the narrowest scopes possible limits risk if a token is ever compromised.
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly',
     'https://www.googleapis.com/auth/calendar.readonly',
@@ -40,6 +44,8 @@ SCOPES = [
 # Calendar event types that are not meaningful tasks/reminders
 _SKIP_CALENDAR_EVENT_TYPES = {"focusTime", "outOfOffice", "workingLocation"}
 
+# Sync throttle and auto-sync settings can be overridden via environment variables,
+# making it easy to tune behavior without touching code.
 SYNC_THROTTLE_SECONDS = int(os.environ.get("SYNC_THROTTLE_SECONDS", "30"))
 AUTO_SYNC_ENABLED = os.environ.get("AUTO_SYNC_ENABLED", "1") == "1"
 AUTO_SYNC_INTERVAL_SECONDS = int(os.environ.get("AUTO_SYNC_INTERVAL_SECONDS", "900"))
@@ -53,6 +59,7 @@ DEFAULT_GOOGLE_REDIRECT_URI = "http://localhost:8000/auth/google/callback"
 DEFAULT_FRONTEND_URL = "http://127.0.0.1:8000"
 
 # In-memory store for transient OAuth states (survives the round-trip; no disk needed).
+# Using a dict keyed by a SHA-256 hash of the state string keeps the actual state value secret.
 _oauth_states: dict = {}
 
 
@@ -80,11 +87,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- MIDDLEWARE ---
 @app.middleware("http")
 async def throttle_expensive_sync_routes(request: Request, call_next):
+    """Rate-limit sync endpoints so a user can't hammer the Google API repeatedly.
+    Returns HTTP 429 with a Retry-After header if the user syncs too frequently."""
     if request.url.path not in {"/sync-gmail", "/sync-classroom", "/sync-all"}:
         return await call_next(request)
 
+    # Use user_id from query string when available; fall back to IP so unauthenticated
+    # requests are still throttled.
     user_id = request.query_params.get("user_id") or request.client.host
     key = (request.url.path, user_id)
     now = time.monotonic()
@@ -107,23 +119,31 @@ async def throttle_expensive_sync_routes(request: Request, call_next):
             sync_request_log.pop(k, None)
     return await call_next(request)
 
+# --- DATABASE HELPERS ---
 def get_db():
+    """FastAPI dependency that opens a DB session and guarantees it is closed after the request."""
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
+
+# --- UTILITY / SECURITY HELPERS ---
 def is_valid_email(value: Optional[str]) -> bool:
+    """Return True only if value looks like a real email address (basic regex check)."""
     return bool(value and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", value.strip()))
 
 def hash_two_factor_code(code: str) -> str:
+    """Store a hashed version of the 6-digit code so the plaintext never lives in the DB."""
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 def hash_reset_token(token: str) -> str:
+    """Hash the password-reset token before storing it, so a DB leak can't be used to reset accounts."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 def send_email_message(to_email: str, subject: str, body: str):
+    """Send a plain-text email via SMTP. Falls back to a console print if SMTP is unconfigured."""
     smtp_host = os.environ.get("SMTP_HOST")
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
     smtp_timeout = float(os.environ.get("SMTP_TIMEOUT_SECONDS", "15"))
@@ -161,9 +181,11 @@ def send_email_message(to_email: str, subject: str, body: str):
     return {"sent": True}
 
 def send_two_factor_code(user: User):
+    """Generate a cryptographically random 6-digit code, hash it for storage, and email it to the user."""
     if not is_valid_email(user.email):
         raise HTTPException(status_code=400, detail="Add a valid email address before enabling 2FA.")
 
+    # secrets.randbelow is cryptographically secure unlike random.randint.
     code = f"{secrets.randbelow(1000000):06d}"
     user.two_factor_code_hash = hash_two_factor_code(code)
     user.two_factor_expires_at = (datetime.utcnow() + timedelta(minutes=10)).isoformat()
@@ -179,6 +201,7 @@ def send_two_factor_code(user: User):
     return result
 
 def verify_two_factor_code(user: User, code: Optional[str]) -> bool:
+    """Return True if the submitted code matches the stored hash and hasn't expired yet."""
     if not code or not user.two_factor_code_hash or not user.two_factor_expires_at:
         return False
     try:
@@ -190,6 +213,7 @@ def verify_two_factor_code(user: User, code: Optional[str]) -> bool:
     return hash_two_factor_code(code.strip()) == user.two_factor_code_hash
 
 def has_google_token(user_id: int) -> bool:
+    """Open a short-lived DB session to check whether the user has a stored Google token."""
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.user_id == user_id).first()
@@ -198,6 +222,7 @@ def has_google_token(user_id: int) -> bool:
         db.close()
 
 def user_settings_payload(user: User) -> dict:
+    """Serialise all user preference fields into a flat dict safe to send to the frontend."""
     return {
         "preferred_name": user.preferred_name or user.username,
         "schedule_match_name": user.schedule_match_name or "",
@@ -212,6 +237,8 @@ def user_settings_payload(user: User) -> dict:
     }
 
 def split_name_candidate(value: Optional[str]) -> List[str]:
+    """Return multiple name variants for a single string (e.g. 'Jane Smith' → also 'Smith, Jane').
+    Work schedules often list names in different orders, so we try all common formats."""
     if not value:
         return []
     text = re.sub(r'[_\-.]+', ' ', str(value)).strip()
@@ -227,6 +254,8 @@ def split_name_candidate(value: Optional[str]) -> List[str]:
     return candidates
 
 def get_user_name_candidates(user: User) -> List[str]:
+    """Build a deduplicated list of name strings to match against a work schedule.
+    Tries schedule_match_name first, then falls back to preferred_name, username, and email prefix."""
     if user.schedule_match_name:
         return split_name_candidate(user.schedule_match_name)
 
@@ -248,12 +277,15 @@ def get_user_name_candidates(user: User) -> List[str]:
     return unique
 
 def ensure_user_exists(user_id: int, db: Session):
+    """Raise a 404 if the user doesn't exist; otherwise return the User object."""
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
 def get_password_rule_results(password: str, username: Optional[str] = None) -> dict:
+    """Check each password rule individually and return a dict of rule → passed/failed.
+    Returning per-rule results lets the frontend show live feedback as the user types."""
     username_text = str(username or "").lower().strip()
     password_text = password or ""
     lowered_password = password_text.lower()
@@ -268,6 +300,7 @@ def get_password_rule_results(password: str, username: Optional[str] = None) -> 
     }
 
 def validate_strong_password(password: str, username: Optional[str] = None):
+    """Raise HTTP 400 listing every failing rule if the password doesn't meet strength requirements."""
     rules = get_password_rule_results(password, username)
     missing_labels = {
         "length": "at least 12 characters",
@@ -285,7 +318,9 @@ def validate_strong_password(password: str, username: Optional[str] = None):
             detail=f"Password must include {', '.join(missing)}."
         )
 
-# --- SCHEMAS ---
+# --- PYDANTIC SCHEMAS ---
+# Pydantic models validate request bodies automatically; FastAPI rejects malformed requests
+# before they even reach the endpoint function.
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -362,6 +397,8 @@ class GoogleSetPasswordRequest(BaseModel):
 # --- FRONTEND ROUTES ---
 @app.get("/")
 async def read_index(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
+    """Serve the main SPA page, or complete a Google OAuth redirect if query params are present.
+    Google redirects back to '/' with 'code' and 'state' after the user approves access."""
     if code or error:
         return complete_google_oauth(code=code, state=state, error=error)
     return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
@@ -422,9 +459,11 @@ async def transcribe_audio(file: UploadFile = File(...)):
         print(f"[transcribe] Whisper error: {e}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
 
-# --- AUTH ROUTES ---
+# --- AUTH ENDPOINTS ---
 @app.post("/login")
 async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
+    """Log a user in, triggering a 2FA challenge first if they have it enabled.
+    Returns either a 2FA prompt or the full user object with settings on success."""
     user = db.query(User).filter(User.username == data.username).first()
     if not user or user.password_hash != data.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -451,6 +490,7 @@ async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
 
 @app.post("/register")
 async def register_user(data: LoginRequest, db: Session = Depends(get_db)):
+    """Create a new account after checking the username is unique and the password is strong."""
     existing_user = db.query(User).filter(User.username == data.username).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already taken")
@@ -463,6 +503,8 @@ async def register_user(data: LoginRequest, db: Session = Depends(get_db)):
 
 @app.post("/forgot-password")
 async def forgot_password(data: ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)):
+    """Send a time-limited password-reset link to the user's registered security email.
+    Always returns the same success message so attackers can't tell whether an account exists."""
     lookup = data.email_or_username.strip()
     if not lookup:
         raise HTTPException(status_code=400, detail="Enter your username or security email.")
@@ -499,6 +541,8 @@ async def forgot_password(data: ForgotPasswordRequest, request: Request, db: Ses
 
 @app.post("/reset-password")
 async def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Validate a password-reset token (by hash) and, if valid and unexpired, save the new password.
+    The token is stored only as a hash so that a DB read alone can't reset accounts."""
     token_hash = hash_reset_token(data.token.strip())
     user = db.query(User).filter(User.reset_password_token_hash == token_hash).first()
     if not user or not user.reset_password_expires_at:
@@ -522,6 +566,7 @@ async def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_d
 # --- TASK INGESTION (TEXT) ---
 @app.post("/ingest")
 async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
+    """Accept a block of free-form text from the user, extract tasks via AI, and save them."""
     return await process_and_save_tasks(data.content, data.user_id, data.source_type, db, data.local_time)
 
 # --- TASK INGESTION (DOCUMENTS) ---
@@ -532,6 +577,8 @@ async def ingest_doc(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
+    """Accept an uploaded file (PDF, text, image) and extract tasks from its content.
+    Image uploads use the AI vision model; PDFs and text use the standard extractor."""
     content = ""
     file_type = file.content_type
     source_info = f"file: {file.filename}"
@@ -617,9 +664,11 @@ async def ingest_doc(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"File processing error: {str(e)}")
 
-# --- GMAIL SYNC ---
+# --- GOOGLE OAUTH HELPERS ---
 
 def get_google_credentials_config():
+    """Load the Google OAuth client config from an env variable or the credentials.json file.
+    The env variable takes priority so deployments don't need a file on disk."""
     credentials_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
     if credentials_json:
         try:
@@ -634,10 +683,13 @@ def get_google_credentials_config():
         return json.load(creds_file)
 
 def get_google_client_config():
+    """Extract the inner 'web' or 'installed' key from the credentials file, whichever exists."""
     config = get_google_credentials_config()
     return config.get("web") or config.get("installed") or config
 
 def get_google_redirect_uri():
+    """Determine the OAuth callback URL, preferring explicit config over auto-detection.
+    Auto-detects the Render.com hostname so cloud deployments don't need manual config."""
     configured_uri = os.environ.get("GOOGLE_REDIRECT_URI")
     if configured_uri:
         return configured_uri
@@ -654,6 +706,8 @@ def get_google_redirect_uri():
     return DEFAULT_GOOGLE_REDIRECT_URI
 
 def build_google_flow(state: Optional[str] = None, code_verifier: Optional[str] = None):
+    """Create a google_auth_oauthlib Flow object used to generate auth URLs and exchange codes.
+    PKCE (code_verifier) is threaded through here to prevent authorization code interception attacks."""
     kwargs = {"redirect_uri": get_google_redirect_uri()}
     if state:
         kwargs["state"] = state
@@ -667,9 +721,11 @@ def build_google_flow(state: Optional[str] = None, code_verifier: Optional[str] 
     )
 
 def _state_key(state: str) -> str:
+    """Hash the OAuth state string so the dict key doesn't expose the raw token."""
     return hashlib.sha256(state.encode("utf-8")).hexdigest()
 
 def create_google_auth_url(user_id: int):
+    """Generate a Google OAuth authorization URL and save the state so the callback can verify it."""
     flow = build_google_flow()
     auth_url, state = flow.authorization_url(
         access_type='offline',
@@ -679,6 +735,7 @@ def create_google_auth_url(user_id: int):
     return auth_url
 
 def get_frontend_url():
+    """Return the base URL to redirect users to after OAuth, with environment-based overrides."""
     configured_url = os.environ.get("CLERK_FRONTEND_URL")
     if configured_url:
         return configured_url.rstrip("/")
@@ -690,6 +747,8 @@ def get_frontend_url():
     return DEFAULT_FRONTEND_URL
 
 def save_google_oauth_state(state: str, code_verifier: Optional[str], user_id: int):
+    """Store the OAuth state, PKCE verifier, and user_id in memory for the duration of the OAuth round-trip.
+    This is keyed by a hash of the state so we can look it up when Google redirects back."""
     _oauth_states[_state_key(state)] = {
         "state": state,
         "code_verifier": code_verifier,
@@ -698,16 +757,19 @@ def save_google_oauth_state(state: str, code_verifier: Optional[str], user_id: i
     }
 
 def load_google_oauth_state(state: Optional[str]):
+    """Look up a previously saved OAuth state entry by the hashed state string."""
     if not state:
         return {}
     return _oauth_states.get(_state_key(state), {})
 
 def clear_google_oauth_state(state: Optional[str]):
+    """Remove a completed OAuth state entry to keep the in-memory dict from growing indefinitely."""
     if not state:
         return
     _oauth_states.pop(_state_key(state), None)
 
 def clear_google_token(user_id: int):
+    """Delete the user's stored Google token — called when a token is revoked or invalid."""
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.user_id == user_id).first()
@@ -718,6 +780,7 @@ def clear_google_token(user_id: int):
         db.close()
 
 def _save_google_token(user_id: int, token_json: str):
+    """Persist the Google OAuth token JSON to the database so it survives server restarts."""
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.user_id == user_id).first()
@@ -728,16 +791,21 @@ def _save_google_token(user_id: int, token_json: str):
         db.close()
 
 def is_invalid_google_grant(error: Exception) -> bool:
+    """Detect whether an exception means the user's Google token has been revoked or expired."""
     message = str(error).lower()
     return "invalid_grant" in message or "expired or revoked" in message
 
 def google_auth_required_response(user_id: int, message: Optional[str] = None):
+    """Return a standard dict telling the frontend to redirect the user through Google OAuth."""
     return {
         "auth_url": create_google_auth_url(user_id),
         "message": message or "Google needs to be reconnected. Please sign in again."
     }
 
+# --- GOOGLE OAUTH CALLBACK ---
 def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
+    """Process the Google OAuth callback: exchange the code for tokens and save them.
+    Handles both the 'connect Google account' flow and the 'log in with Google' flow."""
     frontend_url = get_frontend_url()
     if error:
         return RedirectResponse(url=f"{frontend_url}?google_error={quote(error, safe='')}")
@@ -879,6 +947,8 @@ def _complete_google_login(code: str, state: Optional[str], saved_state: dict, f
         db.close()
 
 def get_google_creds(user_id: int):
+    """Load and, if needed, auto-refresh a user's Google OAuth credentials.
+    Returns None (and clears the stored token) if the token is invalid or can't be refreshed."""
     # Read token JSON from the database
     db = SessionLocal()
     try:
@@ -896,6 +966,7 @@ def get_google_creds(user_id: int):
             return None
 
     if not creds or not creds.valid:
+        # Google access tokens expire after ~1 hour; use the refresh token to get a new one silently.
         if creds and creds.expired and creds.refresh_token:
             try:
                 creds.refresh(GoogleAuthRequest())
@@ -973,6 +1044,7 @@ async def google_callback(code: Optional[str] = None, state: str = None, error: 
     """Handles the redirect from Google after the user authenticates."""
     return complete_google_oauth(code=code, state=state, error=error)
 
+# --- GMAIL SYNC ---
 def get_email_body(payload):
     """Helper to extract plain text body from Gmail payload."""
     if 'parts' in payload:
@@ -984,6 +1056,8 @@ def get_email_body(payload):
     return ""
 
 def get_email_sender(payload):
+    """Extract the sender's display name from the Gmail message headers.
+    Strips the email address portion (e.g. 'John Doe <john@example.com>' → 'John Doe')."""
     headers = payload.get("headers", [])
     sender = next((h.get("value", "") for h in headers if h.get("name", "").lower() == "from"), "")
     if not sender:
@@ -993,7 +1067,10 @@ def get_email_sender(payload):
         return name_match.group(1).strip()
     return sender.strip()
 
+# --- TASK ASSIGNER NORMALIZATION ---
 def clean_assigner_label(value: Optional[str], source_info: str) -> str:
+    """Normalise a raw assigner string into a clean display name, or 'me' if nothing useful is found.
+    Strips prefixes like 'Assigned by:' and removes class-name noise from email/doc sources."""
     if not value:
         return "me"
 
@@ -1018,6 +1095,8 @@ def clean_assigner_label(value: Optional[str], source_info: str) -> str:
     return ", ".join(cleaned_parts) if cleaned_parts else "me"
 
 def infer_assigner_from_text(text_content: str, source_info: str) -> Optional[str]:
+    """Use regex patterns (tailored per source type) to pull an assigner name from raw text.
+    Returns None if no match is found so callers can fall back to other strategies."""
     source = (source_info or "").lower()
     patterns = []
     if source.startswith("classroom"):
@@ -1042,6 +1121,8 @@ def infer_assigner_from_text(text_content: str, source_info: str) -> Optional[st
     return None
 
 def normalize_task_assigner(task_data, text_content: str, source_info: str) -> str:
+    """Pick the best available assigner field from the extracted task data, then clean it.
+    Tries multiple field names in order of reliability before falling back to text inference."""
     raw_assigner = (
         task_data.get("assigner")
         or task_data.get("assigned_by")
@@ -1052,7 +1133,9 @@ def normalize_task_assigner(task_data, text_content: str, source_info: str) -> s
     )
     return clean_assigner_label(raw_assigner, source_info)
 
+# --- TASK SERIALIZATION ---
 def task_to_dict(task: Task) -> dict:
+    """Convert a SQLAlchemy Task ORM object into a plain dict the frontend can consume as JSON."""
     return {
         "owner_id": task.owner_id,
         "task_id": task.task_id,
@@ -1071,7 +1154,10 @@ def task_to_dict(task: Task) -> dict:
         "created_at": task.created_at.isoformat() if task.created_at else None,
     }
 
+# --- DUPLICATE DETECTION ---
 def normalize_title_for_match(title: Optional[str]) -> str:
+    """Lowercase and strip punctuation/noise words from a title so different phrasings of
+    the same task (e.g. from Gmail vs Classroom) compare as equal."""
     text = re.sub(r'[^a-z0-9\s]', ' ', str(title or "").lower())
     text = re.sub(
         r'\b(google classroom|classroom|calendar|event|assignment|new|posted|assigned|due|please|reminder|notification)\b',
@@ -1081,6 +1167,8 @@ def normalize_title_for_match(title: Optional[str]) -> str:
     return re.sub(r'\s+', ' ', text).strip()
 
 def title_tokens_for_match(title: Optional[str]) -> set:
+    """Split a normalised title into meaningful tokens, dropping very common verbs and prepositions
+    so that only distinctive words drive the similarity check."""
     normalized = normalize_title_for_match(title)
     stop_words = {
         "the", "and", "for", "with", "from", "into", "onto", "task",
@@ -1093,6 +1181,8 @@ def title_tokens_for_match(title: Optional[str]) -> set:
     }
 
 def titles_are_similar(left_title: Optional[str], right_title: Optional[str]) -> bool:
+    """Return True if two task titles are similar enough to be considered the same task.
+    Uses a 75% token overlap threshold; single-token titles need a substring match to avoid false positives."""
     left_normalized = normalize_title_for_match(left_title)
     right_normalized = normalize_title_for_match(right_title)
     if not left_normalized or not right_normalized:
@@ -1107,19 +1197,23 @@ def titles_are_similar(left_title: Optional[str], right_title: Optional[str]) ->
 
     intersection = left_tokens & right_tokens
     smaller_count = min(len(left_tokens), len(right_tokens))
+    # Single-word titles are too generic for overlap alone — also require one to contain the other.
     if smaller_count == 1:
         shared = next(iter(intersection), "")
         return bool(shared and len(shared) >= 5 and (left_normalized in right_normalized or right_normalized in left_normalized))
 
+    # 75% of the smaller title's tokens must appear in the other title.
     return (len(intersection) / smaller_count) >= 0.75
 
 def due_day_key(due_date: Optional[str]) -> str:
+    """Extract just the YYYY-MM-DD portion from any datetime string for day-level comparisons."""
     if not due_date:
         return ""
     match = re.search(r'\d{4}-\d{2}-\d{2}', str(due_date))
     return match.group(0) if match else str(due_date)
 
 def task_match_key(task_data) -> Optional[tuple]:
+    """Create a (normalized_title, date) tuple used as a dict key for duplicate detection."""
     title_key = normalize_title_for_match(task_data.get("title"))
     due_key = due_day_key(task_data.get("due_date"))
     if not title_key:
@@ -1127,6 +1221,8 @@ def task_match_key(task_data) -> Optional[tuple]:
     return title_key, due_key
 
 def build_duplicate_index(db: Session, user_id: int) -> dict:
+    """Load all non-deleted tasks for a user into a lookup dict keyed by (title, date).
+    Building this index once per batch avoids N+1 database queries during import."""
     existing_tasks = db.query(Task).filter(
         Task.owner_id == user_id,
         Task.status != "deleted"
@@ -1142,6 +1238,8 @@ def build_duplicate_index(db: Session, user_id: int) -> dict:
     return duplicate_index
 
 def find_duplicate_task(duplicate_index: dict, task_data) -> Optional[Task]:
+    """Search the pre-built index for an existing task that matches the incoming one.
+    Falls back from exact key match → same-day fuzzy title → cross-date fuzzy title (for date-less originals)."""
     key = task_match_key(task_data)
     if not key:
         return None
@@ -1170,12 +1268,16 @@ def find_duplicate_task(duplicate_index: dict, task_data) -> Optional[Task]:
 
     return None
 
+# --- GOOGLE DATE/TIME HELPERS ---
 def has_google_due_time(due_time: Optional[dict]) -> bool:
+    """Return True if a Google dueTime object contains at least one non-null time component."""
     if not due_time:
         return False
     return any(due_time.get(key) is not None for key in ("hours", "minutes", "seconds", "nanos"))
 
 def google_due_to_iso(due: dict, due_time: Optional[dict] = None, utc_offset_minutes: int = 0) -> Optional[str]:
+    """Convert Google Classroom's separate dueDate/dueTime objects into a single ISO 8601 string.
+    Converts from UTC to the user's local time using their browser-supplied UTC offset."""
     if not due:
         return None
 
@@ -1199,6 +1301,7 @@ def google_due_to_iso(due: dict, due_time: Optional[dict] = None, utc_offset_min
     return local_dt.strftime("%Y-%m-%dT%H:%M:%S")
 
 def format_due_for_frontend(due_date: Optional[str], is_all_day: bool = True) -> dict:
+    """Format a raw due_date string into a user-friendly display dict for the frontend card view."""
     if not due_date:
         return {"due": "No due date", "time": "All Day" if is_all_day else "No time"}
 
@@ -1224,6 +1327,8 @@ def make_structured_task(
     is_all_day: bool = True,
     confidence: int = 96
 ) -> dict:
+    """Build a consistent task dict from structured fields — used by all sync sources (Calendar, Classroom, etc.)
+    to produce a uniform shape before saving, regardless of where the data came from."""
     task = {
         "item_type": item_type,
         "title": title,
@@ -1239,10 +1344,13 @@ def make_structured_task(
     task.update(format_due_for_frontend(due_date, is_all_day))
     return task
 
+# --- SOURCE DEDUPLICATION ---
 def source_marker(user_id: int, source_info: str) -> str:
+    """Create a unique per-user key for a given source (e.g. 'gmail: abc123'), stored in RawInput.source_id."""
     return f"{user_id}:{source_info}"
 
 def source_already_scanned(db: Session, user_id: int, source_info: str) -> bool:
+    """Check if this exact source has been imported before so we don't create duplicate tasks on re-sync."""
     marker = source_marker(user_id, source_info)
     if db.query(RawInput).filter(RawInput.source_id == marker).first():
         return True
@@ -1254,6 +1362,7 @@ def source_already_scanned(db: Session, user_id: int, source_info: str) -> bool:
     ).first() is not None
 
 def mark_source_scanned(db: Session, user_id: int, source_info: str, content: str = ""):
+    """Record that a source has been seen so future syncs skip it even if no tasks were extracted."""
     if source_already_scanned(db, user_id, source_info):
         return
 
@@ -1265,7 +1374,10 @@ def mark_source_scanned(db: Session, user_id: int, source_info: str, content: st
     ))
     db.commit()
 
+# --- WORK SCHEDULE DETECTION ---
 def looks_like_work_schedule(text: str) -> bool:
+    """Heuristically detect whether uploaded text is an employee work schedule.
+    Requires at least a week-header keyword, multiple day names, and shift time ranges."""
     lowered = text.lower()
     has_week_header = any(kw in lowered for kw in ("wkly hrs", "weekly", "schedule", "week of", "week ending"))
     has_day_headers = len(re.findall(r'\b(sun|mon|tue|wed|thu|fri|sat)\b', lowered)) >= 2
@@ -1278,6 +1390,8 @@ def looks_like_work_schedule(text: str) -> bool:
     return has_week_header and has_day_headers and has_shift_times
 
 async def save_work_schedule_entries(structured_tasks, user: User, source_info: str, db: Session):
+    """Replace any previously saved shifts from this file with the newly parsed ones.
+    Clears old entries first so re-uploading a corrected schedule doesn't leave stale shifts."""
     clear_existing_work_schedule_entries(user.user_id, source_info, db)
     entries = []
     for index, task_data in enumerate(structured_tasks):
@@ -1288,6 +1402,8 @@ async def save_work_schedule_entries(structured_tasks, user: User, source_info: 
     return await save_structured_task_entries(entries, user.user_id, db)
 
 def clear_existing_work_schedule_entries(user_id: int, source_info: str, db: Session):
+    """Delete all RawInput rows (and their linked Tasks) for shifts from a specific source file.
+    The LIKE query matches the source_id pattern used when saving work shifts."""
     raw_rows = db.query(RawInput).filter(
         RawInput.source_id.like(source_marker(user_id, f"{source_info}:work-shift:%"))
     ).all()
@@ -1302,17 +1418,23 @@ def clear_existing_work_schedule_entries(user_id: int, source_info: str, db: Ses
     db.query(RawInput).filter(RawInput.raw_id.in_(raw_ids)).delete(synchronize_session=False)
     db.commit()
 
+# --- GOOGLE CALENDAR SYNC ---
 def google_calendar_event_to_entry(event: dict, cal_name: str = ""):
+    """Convert a raw Google Calendar event dict into the standard (task, content, source_info) tuple.
+    An all-day event is identified by a 10-character date string (YYYY-MM-DD) without a time component."""
     start = event.get('start', {}).get('dateTime') or event.get('start', {}).get('date')
     end = event.get('end', {}).get('dateTime') or event.get('end', {}).get('date')
     if not start:
         return None
 
+    # Google all-day events use date strings (len=10); timed events use datetime strings (len>10).
     is_all_day = len(str(start)) == 10
     due_date = f"{start}T12:00:00Z" if is_all_day else start
     end_date = end
     if is_all_day and end and len(str(end)) == 10:
         try:
+            # Google's all-day event end date is exclusive (e.g. a 1-day event on Mon has end=Tue).
+            # Subtract one day to get the actual last day the event spans.
             exclusive_end = datetime.fromisoformat(end)
             inclusive_end = exclusive_end - timedelta(days=1)
             end_date = f"{inclusive_end.strftime('%Y-%m-%d')}T13:00:00Z"
@@ -1346,6 +1468,8 @@ def google_calendar_event_to_entry(event: dict, cal_name: str = ""):
     return task, content, f"calendar: {event['id']}"
 
 def collect_google_calendar_entries(calendar, db: Session, user_id: int, max_results: int = 2500):
+    """Fetch events from every Google Calendar the user has (primary, birthdays, shared, etc.)
+    and return them as a list of task entries ready to save. Skips already-seen events."""
     summary = {"calendar": 0, "calendar_already_scanned": 0, "calendar_skipped": 0}
     sync_entries = []
     past_days = int(os.environ.get("GOOGLE_CALENDAR_SYNC_PAST_DAYS", "30"))
@@ -1488,6 +1612,8 @@ def collect_google_tasks_entries(tasks_service, db: Session, user_id: int):
 
     return sync_entries, summary
 
+# --- GOOGLE CLASSROOM FILTERING ---
+# Pre-compiled regex patterns are faster than compiling on every function call.
 CLASSROOM_TASK_WORD_RE = re.compile(
     r'\b(submit|turn\s+in|complete|finish|answer|write|draft|create|make|'
     r'prepare|read|study|review|upload|attach|respond|do|assignment|homework|'
@@ -1521,6 +1647,8 @@ ACTIONABLE_CLASSROOM_WORK_TYPES = {
 }
 
 def is_actionable_classroom_item(item: dict) -> bool:
+    """Decide whether a Classroom post represents a real student task worth adding to Clerk.
+    Filters out draft posts, resource-only material, and date-header agenda posts."""
     if item.get("state") and item.get("state") != "PUBLISHED":
         return False
 
@@ -1550,6 +1678,8 @@ def is_actionable_classroom_item(item: dict) -> bool:
     return True
 
 def cleanup_classroom_noise_tasks(db: Session, user_id: int) -> int:
+    """Soft-delete any previously imported Classroom tasks whose title is just a date/day header.
+    These posts are class-period agendas, not student assignments, and should be cleaned up."""
     tasks = db.query(Task).filter(
         Task.owner_id == user_id,
         Task.status != "deleted"
@@ -1578,6 +1708,8 @@ def cleanup_classroom_noise_tasks(db: Session, user_id: int) -> int:
     return cleaned
 
 def classroom_item_to_entry(classroom, course: dict, item: dict, utc_offset_minutes: int = 0):
+    """Convert a single Google Classroom coursework item into the standard (task, content, source_info) tuple.
+    Looks up the teacher's profile by their Google user ID so we can show a name instead of an ID."""
     due = item.get('dueDate', {})
     due_str = f"{due.get('month')}/{due.get('day')}/{due.get('year')}" if due else "No date"
     teacher_name = None
@@ -1603,7 +1735,10 @@ def classroom_item_to_entry(classroom, course: dict, item: dict, utc_offset_minu
     )
     return task, content, f"classroom: {item['id']}"
 
+# --- GOOGLE CLASSROOM SYNC ---
 def collect_classroom_entries(classroom, db: Session, user_id: int, utc_offset_minutes: int = 0):
+    """Fetch coursework from every enrolled Google Classroom course and return actionable assignments.
+    Runs a noise-cleanup pass first to remove previously imported date-only titles."""
     summary = {"classroom": 0, "skipped": 0, "already_scanned": 0, "cleaned": cleanup_classroom_noise_tasks(db, user_id)}
     sync_entries = []
 
@@ -1632,9 +1767,12 @@ def collect_classroom_entries(classroom, db: Session, user_id: int, utc_offset_m
 
 @app.get("/sync-gmail")
 async def sync_gmail(user_id: int):
+    """API endpoint to trigger a Gmail sync for the user. Runs in a thread to avoid blocking async."""
     return await asyncio.to_thread(sync_gmail_blocking, user_id)
 
 def sync_gmail_blocking(user_id: int):
+    """Scan the 5 most recent Gmail messages, extract tasks, and save any not yet seen.
+    Uses asyncio.run() to call the async save function from within this synchronous thread."""
     db = SessionLocal()
     try:
         ensure_user_exists(user_id, db)
@@ -1676,9 +1814,11 @@ def sync_gmail_blocking(user_id: int):
 
 @app.get("/sync-classroom")
 async def sync_classroom(user_id: int, tz_offset: int = 0):
+    """API endpoint to trigger a Google Classroom sync. tz_offset converts UTC due times to local time."""
     return await asyncio.to_thread(sync_classroom_blocking, user_id, tz_offset)
 
 def sync_classroom_blocking(user_id: int, tz_offset: int = 0):
+    """Fetch and save all actionable Classroom coursework not yet in the database."""
     db = SessionLocal()
     try:
         ensure_user_exists(user_id, db)
@@ -1730,9 +1870,12 @@ def cleanup_duplicate_calendar_events(db: Session, user_id: int) -> int:
 
 @app.get("/sync-all")
 async def sync_all(user_id: int, tz_offset: int = 0):
+    """Trigger a full sync across Gmail, Classroom, Calendar, and Google Tasks in one call."""
     return await asyncio.to_thread(sync_all_blocking, user_id, tz_offset)
 
 def sync_all_blocking(user_id: int, tz_offset: int = 0):
+    """Collect entries from all Google sources and save them in one batch.
+    Runs sequentially (Classroom → Calendar → Tasks) so errors in one source don't block others."""
     db = SessionLocal()
     try:
         ensure_user_exists(user_id, db)
@@ -1784,7 +1927,10 @@ def sync_all_blocking(user_id: int, tz_offset: int = 0):
     finally:
         db.close()
 
+# --- AUTO-SYNC BACKGROUND LOOP ---
 async def auto_sync_user(user_id: int, db: Session):
+    """Run a full sync for a single user asynchronously — called by the background loop.
+    Errors in any one source are caught and logged without stopping the other sources."""
     creds = get_google_creds(user_id)
     if not creds:
         return {"gmail": 0, "classroom": 0, "calendar": 0}
@@ -1849,6 +1995,7 @@ async def auto_sync_user(user_id: int, db: Session):
     return {"gmail": gmail_count, "classroom": classroom_count, "calendar": calendar_count, "gtasks": gtasks_count}
 
 def get_auto_sync_user_ids(db: Session) -> List[int]:
+    """Return the IDs of every user who has a connected Google account, so we know who to auto-sync."""
     # Find all users who have a stored Google token in the database.
     return [
         u.user_id for u in
@@ -1856,6 +2003,8 @@ def get_auto_sync_user_ids(db: Session) -> List[int]:
     ]
 
 def run_auto_sync_once_blocking():
+    """Synchronously iterate all Google-connected users and run their sync.
+    Uses asyncio.run() because this function is called from a thread (not an async context)."""
     db = SessionLocal()
     try:
         for user_id in get_auto_sync_user_ids(db):
@@ -1864,9 +2013,12 @@ def run_auto_sync_once_blocking():
         db.close()
 
 async def run_auto_sync_once():
+    """Async wrapper that offloads the blocking sync loop to a thread so it doesn't stall the event loop."""
     await asyncio.to_thread(run_auto_sync_once_blocking)
 
 async def auto_sync_loop():
+    """Background task that wakes up every AUTO_SYNC_INTERVAL_SECONDS and syncs all users.
+    The initial 10-second delay lets the server finish starting up before the first sync."""
     await asyncio.sleep(10)
     while True:
         try:
@@ -1875,12 +2027,15 @@ async def auto_sync_loop():
             print(f"Auto sync loop error: {exc}")
         await asyncio.sleep(AUTO_SYNC_INTERVAL_SECONDS)
 
-# --- REUSABLE PROCESSING LOGIC ---
+# --- TASK EXTRACTION AND SAVING ---
 async def process_and_save_tasks(text_content, user_id, source_info, db, current_time=None):
+    """Run AI task extraction on raw text, then save results. Offloads the extraction to a thread
+    because the AI call is CPU/IO-bound and would block the async event loop."""
     structured_tasks = await asyncio.to_thread(extract_task_from_text, text_content, current_time)
     return await save_structured_tasks(structured_tasks, text_content, user_id, source_info, db)
 
 async def save_structured_tasks(structured_tasks, text_content, user_id, source_info, db):
+    """Convert a list of extracted task dicts into (task, content, source) tuples and save them."""
     if not structured_tasks:
         # Return a success with 0 tasks instead of a 500 error
         return {"status": "success", "task_ids": [], "message": "No actionable tasks found in input."}
@@ -1889,6 +2044,8 @@ async def save_structured_tasks(structured_tasks, text_content, user_id, source_
     return await save_structured_task_entries(entries, user_id, db)
 
 async def save_structured_task_entries(entries, user_id, db):
+    """Core save function: iterate entries, skip already-seen sources, detect duplicates,
+    and either create new Task rows or update the matching existing ones with authoritative data."""
     if not entries:
         return {"status": "success", "task_ids": [], "message": "No actionable tasks found in input."}
 
@@ -1896,7 +2053,7 @@ async def save_structured_task_entries(entries, user_id, db):
         task_ids = []
         duplicate_index = build_duplicate_index(db, user_id)
 
-        # Pre-load all source markers for this batch in a single query
+        # Pre-load all source markers for this batch in a single query rather than one per entry.
         all_markers = {source_marker(user_id, src) for _, _, src in entries}
         scanned_markers = set(
             row[0] for row in db.query(RawInput.source_id).filter(
@@ -1980,8 +2137,11 @@ async def deduplicate_tasks(user_id: int, db: Session = Depends(get_db)):
 
 @app.get("/tasks")
 async def get_tasks(user_id: int, db: Session = Depends(get_db)):
+    """Return all tasks for a user. Opportunistically backfills missing assignee values from the raw
+    source text so older tasks gradually get proper labels without a migration script."""
     tasks = db.query(Task).filter(Task.owner_id == user_id).all()
 
+    # Only fetch RawInput rows for tasks that are still missing an assignee label.
     needs_raw = [t for t in tasks if t.raw_id and (not t.assignee or t.assignee == "me")]
     raw_map = {}
     if needs_raw:
@@ -2003,8 +2163,10 @@ async def get_tasks(user_id: int, db: Session = Depends(get_db)):
 
     return {"tasks": [task_to_dict(task) for task in tasks]}
 
+# --- USER SETTINGS ENDPOINTS ---
 @app.get("/users/{user_id}/settings")
 async def get_user_settings(user_id: int, db: Session = Depends(get_db)):
+    """Return the current settings/preferences for a user as a flat JSON object."""
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2014,6 +2176,8 @@ async def get_user_settings(user_id: int, db: Session = Depends(get_db)):
 
 @app.patch("/users/{user_id}/settings")
 async def update_user_settings(user_id: int, settings: UserSettingsUpdate, db: Session = Depends(get_db)):
+    """Apply only the fields provided in the PATCH body — None fields are left unchanged.
+    Validates hours, email format, and prevents enabling 2FA without a verified code."""
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2056,8 +2220,11 @@ async def update_user_settings(user_id: int, settings: UserSettingsUpdate, db: S
     db.commit()
     return {"message": "Settings updated"}
 
+# --- 2FA SETUP ENDPOINTS ---
 @app.post("/users/{user_id}/2fa/send-test")
 async def send_two_factor_test(user_id: int, request: TwoFactorSendRequest, db: Session = Depends(get_db)):
+    """Send a 6-digit test code to the user's email before they fully enable 2FA.
+    Returns the code in the response body when SMTP is unavailable, for dev/testing convenience."""
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2084,6 +2251,8 @@ async def send_two_factor_test(user_id: int, request: TwoFactorSendRequest, db: 
 
 @app.post("/users/{user_id}/2fa/verify")
 async def verify_two_factor_setup(user_id: int, request: TwoFactorVerifyRequest, db: Session = Depends(get_db)):
+    """Verify the test code and, if correct, officially enable 2FA on the account.
+    Clears the code hash after success so the same code can't be replayed."""
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2123,6 +2292,8 @@ async def get_task_history(user_id: int, db: Session = Depends(get_db), limit: i
 
 @app.patch("/tasks/{task_id}")
 async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depends(get_db)):
+    """Partially update a task's fields. Date-only strings are padded to full ISO datetimes
+    so the database stores a consistent format regardless of how the frontend sends the value."""
     task = db.query(Task).filter(Task.task_id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -2147,6 +2318,7 @@ async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depen
 
 @app.patch("/tasks/bulk/update")
 async def bulk_update_tasks(action: BulkTaskAction, status: str = "deleted", db: Session = Depends(get_db)):
+    """Set the status of multiple tasks in one DB query. Uses dict.fromkeys to deduplicate IDs."""
     if status not in {"deleted", "completed", "pending"}:
         raise HTTPException(status_code=400, detail="Unsupported bulk status.")
 
@@ -2163,6 +2335,7 @@ async def bulk_update_tasks(action: BulkTaskAction, status: str = "deleted", db:
 
 @app.delete("/tasks/bulk/permanent")
 async def bulk_permanent_delete_tasks(action: BulkTaskAction, db: Session = Depends(get_db)):
+    """Permanently remove multiple tasks from the database (not just soft-delete). Irreversible."""
     task_ids = list(dict.fromkeys(action.task_ids or []))
     if not task_ids:
         raise HTTPException(status_code=400, detail="No tasks selected.")
@@ -2173,6 +2346,7 @@ async def bulk_permanent_delete_tasks(action: BulkTaskAction, db: Session = Depe
 
 @app.delete("/tasks/{task_id}/permanent")
 async def permanent_delete_task(task_id: int, db: Session = Depends(get_db)):
+    """Permanently delete a single task row. Distinct from PATCH status='deleted' (soft-delete)."""
     task = db.query(Task).filter(Task.task_id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")

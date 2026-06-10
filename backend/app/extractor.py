@@ -474,13 +474,14 @@ def parse_schedule_day_label(label: str, current_time: Optional[str]) -> Optiona
     now = parse_current_time(current_time)
     weekday_match = re.fullmatch(r'\s*(sun|mon|tue|wed|thu|fri|sat)(?:day)?\s*', str(label or ""), re.IGNORECASE)
     if weekday_match:
-        desired = {"sun": 6, "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5}[weekday_match.group(1).lower()[:3]]
-        days_delta = desired - now.weekday()
-        if days_delta > 3:
-            days_delta -= 7
-        if days_delta < -3:
-            days_delta += 7
-        return (now + timedelta(days=days_delta)).replace(hour=0, minute=0, second=0, microsecond=0)
+        # Map to Python weekday(): Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6
+        py_weekday = {"sun": 6, "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5}[weekday_match.group(1).lower()[:3]]
+        # Find the corresponding day in the Sun-Sat calendar week that contains `now`.
+        # The ±3-day heuristic breaks for Saturday when current_time is Mon-Tue.
+        now_offset_from_sun = (now.weekday() + 1) % 7  # Sun=0, Mon=1, ..., Sat=6
+        week_sunday = (now - timedelta(days=now_offset_from_sun)).replace(hour=0, minute=0, second=0, microsecond=0)
+        target_offset = (py_weekday + 1) % 7            # Sun=0, Mon=1, ..., Sat=6
+        return week_sunday + timedelta(days=target_offset)
 
     match = re.search(
         r'\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\D+(\d{1,2})\b',
@@ -606,6 +607,18 @@ def validate_schedule_extraction(tasks: List[Dict[str, Any]], target_names: List
     if any(schedule_shift_hours(task) >= 16 for task in tasks):
         print("[schedule] rejected: shift >= 16 hours detected")
         return []
+
+    # Drop shifts that fall outside the 7-day window anchored on the earliest valid shift.
+    # This removes stray dates from the previous/next week caused by grid-reading errors.
+    valid_starts = sorted(
+        dt for dt in (parse_schedule_datetime(t.get("due_date")) for t in tasks) if dt
+    )
+    if valid_starts:
+        week_anchor = valid_starts[0]
+        tasks = [
+            t for t in tasks
+            if (dt := parse_schedule_datetime(t.get("due_date"))) and abs((dt - week_anchor).days) <= 6
+        ]
 
     unique = {}
     for task in tasks:
@@ -796,9 +809,12 @@ def extract_schedule_from_detected_row(image, row_info: Dict[str, Any], day_line
         These are individual day cells from one employee row.
         Employee row: {row_info.get("matched_row_name") or "matched user"}
         Weekly hours: {row_info.get("row_weekly_hours") or "unknown"}
-        Use the header strip to map the seven day cells left-to-right to their printed day/date labels.
-        Read each labeled cell independently. Empty cell means no shift. Do not move text between labels.
-        Return ONLY JSON object with matched_row_name, row_weekly_hours, row_cells, and shifts.
+        Look at the date header strip first. Use the FULL printed date label for each column
+        (e.g. "Mon Jun 8", "Tue Jun 9") — not just the weekday abbreviation.
+        Read each cell image independently; empty cell means no shift.
+        Do NOT copy text between cells or reuse a time from a different cell.
+        Return ONLY a JSON object with matched_row_name, row_weekly_hours, row_cells (keys = full date
+        label from header, values = exact cell text or ""), and shifts.
         """
     }]
 
@@ -874,13 +890,15 @@ def build_schedule_image_prompt(target_names: List[str], now_iso: str, retry: bo
     IMPORTANT MATCHING RULES:
     - Schedules may write names as "Last, First" while the user profile may be "First Last".
     - Use the best matching employee row only. Do not extract shifts for rows directly above or below it.
-    - Read across the same horizontal row as the matched name. Do not jump to a lower row because the time text is clearer there.
-    - If the row includes a weekly-hours total, verify that the extracted shift durations roughly add up to that total.
-    - If a visible shift total conflicts with the row's weekly-hours total, re-check the row and prefer the cells aligned with the matched name.
+    - Read across the SAME horizontal row as the matched name. Never take a cell from a neighboring row.
+    - Each column maps to exactly one date. Use the printed day+date header (e.g. "Mon Jun 8") for that column.
+    - Verify that the extracted shift durations roughly add up to the row's weekly-hours total.
+    - If the totals conflict by more than 2 hours, re-read the row and correct the wrong cells.
     - Treat "3:00 PM - 10:30 PM" as an afternoon/evening shift, never as 8:00 AM.
+    - An "x", checkmark, or blank means no shift for that day — do not inherit a time from another column.
     - If no row confidently matches the user, return [].
-    - Use the week/date headers in the image for each shift date.
-    - Ignore handwritten notes unless they are clearly part of the matched user's row.
+    - Use the week/date headers in the image for each shift date. Only output shifts within the printed week range.
+    - Ignore handwritten annotations unless they are clearly in the matched user's row.
 
     OUTPUT:
     Return ONLY a valid JSON object. Do not include markdown.
@@ -888,8 +906,10 @@ def build_schedule_image_prompt(target_names: List[str], now_iso: str, retry: bo
     {{
       "matched_row_name": "Name exactly as shown on the schedule",
       "row_weekly_hours": "Weekly-hours total if visible",
+      "schedule_week_start": "YYYY-MM-DD (first date of the schedule week)",
+      "schedule_week_end": "YYYY-MM-DD (last date of the schedule week)",
       "row_cells": {{
-        "Day/date header exactly as printed": "raw visible cell text from that matched-row cell or empty"
+        "Full printed header (e.g. Mon Jun 8)": "raw visible cell text or empty string"
       }},
       "shifts": [
         {{

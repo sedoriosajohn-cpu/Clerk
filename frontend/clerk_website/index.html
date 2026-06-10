@@ -2964,7 +2964,18 @@ const LOCAL_API_BASES = [
 // Determine the API base URL at startup: prefer an explicit override, then localStorage, then a default.
 // This order lets developers override without changing code (e.g., via URL query param or config.js).
 const queryApiBase = getQueryApiBase();
-const explicitApiBase = normalizeApiBase(window.CLERK_API_BASE || queryApiBase || getStoredApiBase());
+let explicitApiBase = normalizeApiBase(window.CLERK_API_BASE || queryApiBase || getStoredApiBase());
+// If the page is served from a public host (e.g. Render) but localStorage still holds a
+// localhost address from a previous local dev session, discard it. Without this, every
+// API call would target 127.0.0.1 and fail (or be blocked as mixed content on HTTPS).
+if (explicitApiBase && !isLocalApiHost(window.location.hostname) && window.location.protocol !== "file:") {
+    try {
+        if (isLocalApiHost(new URL(explicitApiBase).hostname)) {
+            explicitApiBase = "";
+            localStorage.removeItem(API_BASE_STORAGE_KEY);
+        }
+    } catch (_) {}
+}
 let API_BASE = explicitApiBase || (isStaticFrontend ? "http://127.0.0.1:8000" : window.location.origin);
 if (explicitApiBase) persistApiBase(explicitApiBase);
 
@@ -2982,6 +2993,9 @@ function getFriendlyApiError(error) {
         }
         if (explicitApiBase && !isLocalApiHost(new URL(explicitApiBase).hostname)) {
             return `Could not reach the Clerk backend at ${explicitApiBase}. Check that the Render service is deployed and awake.`;
+        }
+        if (!isLocalApiHost(window.location.hostname) && window.location.protocol !== "file:") {
+            return "Could not reach the Clerk backend. The service may be waking up — wait a moment and try again.";
         }
         return "Could not reach the Clerk backend. Start Clerk, then open the URL shown in the terminal.";
     }

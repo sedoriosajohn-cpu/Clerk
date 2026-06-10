@@ -160,9 +160,11 @@ def build_prompt(user_input: str, current_time: str) -> str:
     - Extract the assigner separately from the assignee. The assignee is who should do the work; the assigner is who gave/sent the task.
     - For Google Classroom content, format assigner as "Class/Course Name: Teacher Name" when both are available.
     - For emails or uploaded documents, if an assigner appears as "Label: Person", remove the label and keep only "Person". If multiple assigners appear, join their names with commas.
-    - If a time range or date range is provided (e.g. "3pm to 10pm", "Monday to Wednesday"), use the start for due_date and end for end_date.
+    - IMPORTANT: 'due_date' must be the SUBMISSION DEADLINE — the date/time by which the task must be completed. NEVER use the time the message was sent, posted, received, or created as the due_date. If the text says "Posted 5:59 PM" or "Sent at 3:42 PM", that is the post/send time, NOT the deadline.
+    - Only set 'end_date' for genuine events with a meaningful duration (e.g. a class from 10am–11:30am, a meeting from 2pm–3pm). Do NOT set end_date for assignments, homework, or deadlines — leave it null. Never fabricate an end_date by adding 1 minute to the due_date.
+    - If a time range is explicitly stated (e.g. "3pm to 10pm"), use the start for due_date and end for end_date.
     - IMPORTANT: Resolve relative dates (e.g., "tomorrow", "this Friday", "next Saturday") into absolute ISO 8601 dates using the provided Current Local Timestamp.
-    - If no specific time is mentioned (e.g., "Buy groceries on Friday"), set "is_all_day" to true.
+    - If no specific deadline time is mentioned (e.g., "Buy groceries on Friday"), set "is_all_day" to true.
     
     INPUT TEXT:
     {user_input}
@@ -1597,12 +1599,27 @@ def validate_task(task: Dict[str, Any]) -> Dict[str, Any]:
     elif p in ["low", "minor"]: p = "low"
     else: p = "normal"
 
+    due_date = task.get("due_date")
+    end_date = task.get("end_date")
+
+    # Drop end_dates that are ≤ 15 minutes from due_date — these are fabricated
+    # 1-minute artifacts where the AI used a "posted at" timestamp instead of a
+    # real deadline and then invented an end time.
+    if due_date and end_date:
+        try:
+            due_dt = datetime.fromisoformat(re.sub(r'Z$|[+-]\d{2}:\d{2}$', '', str(due_date)))
+            end_dt = datetime.fromisoformat(re.sub(r'Z$|[+-]\d{2}:\d{2}$', '', str(end_date)))
+            if abs((end_dt - due_dt).total_seconds()) <= 900:  # 15 minutes
+                end_date = None
+        except (ValueError, AttributeError):
+            pass
+
     return {
         "item_type": str(task.get("item_type", "task")).lower(),
         "title": title,
         "description": str(task.get("description", "")),
-        "due_date": task.get("due_date"),
-        "end_date": task.get("end_date"),
+        "due_date": due_date,
+        "end_date": end_date,
         "assignee": task.get("assignee") if task.get("assignee") else "me",
         # Fall back through several field names the AI may use for the assigner.
         "assigner": task.get("assigner") or task.get("assigned_by") or task.get("teacher") or task.get("sender"),

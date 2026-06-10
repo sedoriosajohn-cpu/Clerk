@@ -95,6 +95,7 @@ class Task(Base):
     is_all_day = Column(Integer, default=0)
     confidence = Column(Float)
     status = Column(String, default="pending")
+    user_feedback = Column(Integer, nullable=True)  # +1 correct, -1 incorrect, None = no feedback
     created_at = Column(DateTime, default=datetime.utcnow)
 
 def ensure_database_schema():
@@ -108,9 +109,14 @@ def ensure_database_schema():
         inspector = inspect(engine)
 
     existing_columns = {column["name"] for column in inspector.get_columns("tasks")}
-    if "description" not in existing_columns:
-        with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE tasks ADD COLUMN description TEXT"))
+    task_columns_to_add = {
+        "description": "TEXT",
+        "user_feedback": "INTEGER",
+    }
+    with engine.begin() as connection:
+        for col_name, col_type in task_columns_to_add.items():
+            if col_name not in existing_columns:
+                connection.execute(text(f"ALTER TABLE tasks ADD COLUMN {col_name} {col_type}"))
 
     existing_user_columns = {column["name"] for column in inspector.get_columns("users")}
     user_columns = {
@@ -137,34 +143,11 @@ def initialize_database():
         print("Missing DATABASE_URL!")
         return
 
-    print(f"Connecting to database...")
-    
+    print("Connecting to database...")
     try:
-        # 1. Create the tables based on your Classes (User, Task, etc.)
         Base.metadata.create_all(bind=engine)
         ensure_database_schema()
         print("✅ Tables verified/created.")
-
-        # 2. Open a temporary session to add the admin user
-        db = SessionLocal()
-        try:
-            # Check if 'admin' already exists so we don't create duplicates
-            existing_user = db.query(User).filter(User.username == "admin").first()
-            
-            if not existing_user:
-                print("Seeding database with admin user...")
-                admin_user = User(
-                    username="admin", 
-                    password_hash="MTLIKESRACHEL"  # In production, use a proper password hashing function!
-                )
-                db.add(admin_user)
-                db.commit()
-                print("✅ Admin user created successfully!")
-            else:
-                print("ℹ️ Admin user already exists, skipping seed.")
-        finally:
-            db.close()
-
     except Exception as e:
         print(f"Failed to initialize database: {e}")
 

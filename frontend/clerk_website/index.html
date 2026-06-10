@@ -2679,7 +2679,7 @@ button {
                         <label style="font-size: 14px; color: var(--text); margin-bottom: 8px; display: block;">What should Clerk call you?</label>
                         <input type="text" id="preferred-name-input" placeholder="Enter your name..." onchange="updateDisplayName(this.value); saveUserSettings()" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text); outline: none;">
                         <label style="font-size: 14px; color: var(--text); margin: 16px 0 8px; display: block;">Name on work schedules</label>
-                        <input type="text" id="schedule-name-input" placeholder="Example: John Sedoriosa" onchange="saveUserSettings()" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text); outline: none;">
+                        <input type="text" id="schedule-name-input" placeholder="Example: John Doe" onchange="saveUserSettings()" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text); outline: none;">
                         <p style="margin: 8px 0 0; font-size: 13px; color: var(--muted);">Used only to match your row on uploaded weekly work schedules.</p>
                     </div>
 
@@ -3177,7 +3177,8 @@ window.USER_SETTINGS = {
     dark_mode: false,
     notifications_enabled: true,
     two_factor_enabled: false,
-    google_connected: false
+    google_connected: false,
+    google_login: false
 };
 
 const notifiedTasks = new Set(); // To prevent duplicate alerts
@@ -3659,13 +3660,22 @@ function updateGoogleSyncStatus() {
     const googleText = document.getElementById('google-status');
     if (!status) return;
     const connected = Boolean(window.USER_SETTINGS.google_connected);
-    status.textContent = connected ? 'Auto-sync on' : 'Not connected';
-    status.className = `status-pill ${connected ? 'connected' : 'warning'}`;
-    if (connectBtn) connectBtn.textContent = connected ? 'Reconnect' : 'Connect';
-    if (googleText) {
-        googleText.textContent = connected
-            ? 'Gmail, Google Classroom, and Google Calendar sync automatically after connection.'
-            : 'Connect once to automatically sync Gmail, Google Classroom, and Google Calendar events.';
+    const googleLogin = Boolean(window.USER_SETTINGS.google_login);
+    if (connected) {
+        status.textContent = 'Auto-sync on';
+        status.className = 'status-pill connected';
+        if (connectBtn) connectBtn.textContent = 'Reconnect';
+        if (googleText) googleText.textContent = 'Gmail, Google Classroom, and Google Calendar sync automatically after connection.';
+    } else if (googleLogin) {
+        status.textContent = 'Sign-in linked';
+        status.className = 'status-pill';
+        if (connectBtn) connectBtn.textContent = 'Connect';
+        if (googleText) googleText.textContent = 'Your Google account is linked for sign-in. Connect to also sync Gmail, Google Classroom, and Google Calendar events.';
+    } else {
+        status.textContent = 'Not connected';
+        status.className = 'status-pill warning';
+        if (connectBtn) connectBtn.textContent = 'Connect';
+        if (googleText) googleText.textContent = 'Connect once to automatically sync Gmail, Google Classroom, and Google Calendar events.';
     }
 }
 

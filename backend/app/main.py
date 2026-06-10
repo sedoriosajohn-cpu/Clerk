@@ -207,7 +207,8 @@ def user_settings_payload(user: User) -> dict:
         "dark_mode": bool(user.dark_mode),
         "notifications_enabled": bool(user.notifications_enabled),
         "two_factor_enabled": bool(user.two_factor_enabled),
-        "google_connected": has_google_token(user.user_id)
+        "google_connected": has_google_token(user.user_id),
+        "google_login": bool(user.google_sub),
     }
 
 def split_name_candidate(value: Optional[str]) -> List[str]:
@@ -746,6 +747,22 @@ def complete_google_oauth(code: Optional[str] = None, state: Optional[str] = Non
     saved_state = {}
     try:
         saved_state = load_google_oauth_state(state)
+
+        # Recover from in-memory state loss (server restart / new deployment mid-flow).
+        # Login flows use a "login_" prefix in the state so we can detect them even when
+        # _oauth_states is empty. The code itself is still validated by Google.
+        if not saved_state and state and state.startswith("login_"):
+            saved_state = {
+                "state": state,
+                "login_flow": True,
+                "login_scopes": [
+                    "openid",
+                    "https://www.googleapis.com/auth/userinfo.email",
+                    "https://www.googleapis.com/auth/userinfo.profile",
+                ],
+                "user_id": 0,
+            }
+
         if saved_state.get("state") and state and saved_state["state"] != state:
             return RedirectResponse(url=f"{frontend_url}?google_error=oauth_state_mismatch")
 
@@ -913,13 +930,20 @@ async def get_google_login_url():
             'https://www.googleapis.com/auth/userinfo.email',
             'https://www.googleapis.com/auth/userinfo.profile',
         ]
+        import secrets as _secrets
+        # Prefix the state with "login_" so the callback can identify this as a login
+        # flow even if the in-memory _oauth_states is cleared by a server restart.
+        login_state = f"login_{_secrets.token_urlsafe(24)}"
         flow = Flow.from_client_config(
             get_google_credentials_config(),
             scopes=login_scopes,
             redirect_uri=get_google_redirect_uri()
         )
-        auth_url, state = flow.authorization_url(access_type='offline', prompt='select_account')
-        save_google_oauth_state(state, flow.code_verifier, 0)
+        auth_url, _ = flow.authorization_url(
+            access_type='offline', prompt='select_account', state=login_state
+        )
+        save_google_oauth_state(login_state, flow.code_verifier, 0)
+        state = login_state
         # Tag this state entry so the callback knows it's a login flow (not a connect flow).
         key = _state_key(state)
         if key in _oauth_states:

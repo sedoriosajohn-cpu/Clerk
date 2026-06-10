@@ -688,7 +688,7 @@ def get_frontend_url():
 
     return DEFAULT_FRONTEND_URL
 
-def save_google_oauth_state(state: str, code_verifier: str, user_id: int):
+def save_google_oauth_state(state: str, code_verifier: Optional[str], user_id: int):
     _oauth_states[_state_key(state)] = {
         "state": state,
         "code_verifier": code_verifier,
@@ -781,16 +781,22 @@ def _complete_google_login(code: str, state: Optional[str], saved_state: dict, f
     client_config = get_google_client_config()
 
     # Exchange authorization code for access token directly via HTTP (avoids Flow state issues).
+    # The PKCE code_verifier must be included if the library generated one when building the
+    # authorization URL — without it Google returns invalid_grant.
     try:
+        post_data = {
+            "code": code,
+            "client_id": client_config["client_id"],
+            "client_secret": client_config["client_secret"],
+            "redirect_uri": get_google_redirect_uri(),
+            "grant_type": "authorization_code",
+        }
+        code_verifier = saved_state.get("code_verifier")
+        if code_verifier:
+            post_data["code_verifier"] = code_verifier
         token_resp = _requests.post(
             "https://oauth2.googleapis.com/token",
-            data={
-                "code": code,
-                "client_id": client_config["client_id"],
-                "client_secret": client_config["client_secret"],
-                "redirect_uri": get_google_redirect_uri(),
-                "grant_type": "authorization_code",
-            },
+            data=post_data,
             timeout=10,
         )
         token_data = token_resp.json()
@@ -913,7 +919,7 @@ async def get_google_login_url():
             redirect_uri=get_google_redirect_uri()
         )
         auth_url, state = flow.authorization_url(access_type='offline', prompt='select_account')
-        save_google_oauth_state(state, flow.code_verifier or "", 0)
+        save_google_oauth_state(state, flow.code_verifier, 0)
         # Tag this state entry so the callback knows it's a login flow (not a connect flow).
         key = _state_key(state)
         if key in _oauth_states:

@@ -1948,6 +1948,22 @@ def is_noise_calendar(cal_id: str, cal_name: str) -> bool:
 # Holiday-calendar events carry a standard description ("Observance - To hide
 # observances, go to Google Calendar Settings > Holidays in United States").
 _OBSERVANCE_DESC_RE = re.compile(r"to hide observances|public holiday", re.IGNORECASE)
+DEFAULT_GOOGLE_CALENDAR_SYNC_FUTURE_DAYS = 180
+
+def google_calendar_sync_future_days() -> int:
+    """Read the Calendar future-sync horizon, falling back safely on blank/bad env values."""
+    raw_value = os.environ.get("GOOGLE_CALENDAR_SYNC_FUTURE_DAYS", "").strip()
+    if not raw_value:
+        return DEFAULT_GOOGLE_CALENDAR_SYNC_FUTURE_DAYS
+    try:
+        return max(0, int(raw_value))
+    except ValueError:
+        _log.warning(
+            "Invalid GOOGLE_CALENDAR_SYNC_FUTURE_DAYS=%r; using default %s",
+            raw_value,
+            DEFAULT_GOOGLE_CALENDAR_SYNC_FUTURE_DAYS,
+        )
+        return DEFAULT_GOOGLE_CALENDAR_SYNC_FUTURE_DAYS
 
 def is_holiday_calendar_event(event: dict, cal_id: str = "", cal_name: str = "") -> bool:
     """Return True for Google holiday/observance events that should not become tasks."""
@@ -1999,7 +2015,7 @@ def collect_google_calendar_entries(calendar, db: Session, user_id: int, max_res
     time_min = (datetime.utcnow() - timedelta(days=past_days)).isoformat() + 'Z'
     # Bound the future too; singleEvents=True expands recurring events, so an
     # unbounded query can return weekly-class instances stretching years ahead.
-    future_days = int(os.environ.get("GOOGLE_CALENDAR_SYNC_FUTURE_DAYS", "180"))
+    future_days = google_calendar_sync_future_days()
     time_max = (datetime.utcnow() + timedelta(days=future_days)).isoformat() + 'Z'
 
     # Discover every calendar the user has (primary, birthdays, shared, etc.)
@@ -2469,7 +2485,7 @@ def cleanup_stale_synced_tasks(db: Session, user_id: int) -> int:
         db.commit()
     return removed
 
-def cleanup_unwanted_calendar_imports(db: Session, user_id: int) -> int:
+def cleanup_unwanted_calendar_imports(db: Session, user_id: int, prune_far_future: bool = True) -> int:
     """Remove calendar noise imported by earlier syncs.
 
     1. Holiday-calendar observances ("St. Patrick's Day", "Tax Day") are soft-deleted -
@@ -2493,7 +2509,12 @@ def cleanup_unwanted_calendar_imports(db: Session, user_id: int) -> int:
             task.status = "deleted"
             removed += 1
 
-    future_days = int(os.environ.get("GOOGLE_CALENDAR_SYNC_FUTURE_DAYS", "180"))
+    if not prune_far_future:
+        if removed:
+            db.commit()
+        return removed
+
+    future_days = google_calendar_sync_future_days()
     horizon = datetime.now() + timedelta(days=future_days)
     candidates = db.query(Task).filter(
         Task.owner_id == user_id,
@@ -2518,6 +2539,15 @@ def cleanup_unwanted_calendar_imports(db: Session, user_id: int) -> int:
     if removed:
         db.commit()
     return removed
+
+def cleanup_unwanted_calendar_imports_safely(db: Session, user_id: int, prune_far_future: bool = True) -> int:
+    """Best-effort cleanup that must never break task loading or Google sync."""
+    try:
+        return cleanup_unwanted_calendar_imports(db, user_id, prune_far_future=prune_far_future)
+    except Exception:
+        db.rollback()
+        _log.exception("Calendar cleanup failed for user_id=%s", user_id)
+        return 0
 
 def cleanup_duplicate_calendar_events(db: Session, user_id: int) -> int:
     """Soft-delete exact-duplicate Google Calendar events (same title+date). Returns count removed."""
@@ -2566,7 +2596,7 @@ def sync_all_blocking(user_id: int, tz_offset: int = 0, tz_name: Optional[str] =
 
         cleanup_duplicate_calendar_events(db, user_id)
         stale_cleaned = cleanup_stale_synced_tasks(db, user_id)
-        stale_cleaned += cleanup_unwanted_calendar_imports(db, user_id)
+        stale_cleaned += cleanup_unwanted_calendar_imports_safely(db, user_id)
 
         classroom = build('classroom', 'v1', credentials=creds)
         calendar = build('calendar', 'v3', credentials=creds)
@@ -2623,7 +2653,7 @@ async def auto_sync_user(user_id: int, db: Session):
 
     cleanup_duplicate_calendar_events(db, user_id)
     cleanup_stale_synced_tasks(db, user_id)
-    cleanup_unwanted_calendar_imports(db, user_id)
+    cleanup_unwanted_calendar_imports_safely(db, user_id)
 
     gmail_count = 0
     try:
@@ -2861,7 +2891,7 @@ async def get_tasks(user_id: int, db: Session = Depends(get_db), current_user: U
     """Return all tasks for a user. Opportunistically backfills missing assignee values from the raw
     source text so older tasks gradually get proper labels without a migration script."""
     require_same_user(current_user, user_id)
-    cleanup_unwanted_calendar_imports(db, user_id)
+    cleanup_unwanted_calendar_imports_safely(db, user_id, prune_far_future=False)
     tasks = db.query(Task).filter(Task.owner_id == user_id).all()
 
     # Only fetch RawInput rows for tasks that are still missing an assignee label.

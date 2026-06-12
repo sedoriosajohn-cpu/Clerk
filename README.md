@@ -58,6 +58,7 @@ Clerk works out of the box with no configuration: tasks are stored in a local SQ
 | `GOOGLE_CREDENTIALS_JSON` | Google OAuth client JSON (or place `credentials.json` in the project root) — required for Google sync and Google sign-in. |
 | `GOOGLE_REDIRECT_URI` / `CLERK_FRONTEND_URL` | OAuth callback and redirect base URLs for hosted deployments. |
 | `GOOGLE_SYNC_PAST_DAYS` | How far back Google sync looks (default `14`). Older items are skipped, and previously imported stale ones are moved to History. |
+| `GOOGLE_CALENDAR_SYNC_FUTURE_DAYS` | How far ahead Calendar sync imports events (default `180`). Subscribed holiday/observance calendars are never imported. |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` | Outgoing email for 2FA codes and password-reset links. |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated allowed origins — tighten this in production. |
 | `AUTO_SYNC_ENABLED` / `AUTO_SYNC_INTERVAL_SECONDS` / `SYNC_THROTTLE_SECONDS` | Background sync tuning. |

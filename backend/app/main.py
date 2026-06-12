@@ -1930,15 +1930,79 @@ def google_calendar_event_to_entry(event: dict, cal_name: str = ""):
     )
     return task, content, f"calendar: {event['id']}"
 
+def is_noise_calendar(cal_id: str, cal_name: str) -> bool:
+    """True for Google's subscribed informational calendars (Holidays in United States,
+    week numbers, etc.) whose events are observances, not personal commitments -
+    importing them floods the task list with entries like 'Tax Day 2030'."""
+    cid = (cal_id or "").lower()
+    name = (cal_name or "").lower()
+    return (
+        "#holiday@group.v.calendar.google.com" in cid
+        or "%23holiday@group.v.calendar.google.com" in cid
+        or "#weeknum@group.v.calendar.google.com" in cid
+        or "%23weeknum@group.v.calendar.google.com" in cid
+        or "holiday" in name
+        or "week number" in name
+    )
+
+# Holiday-calendar events carry a standard description ("Observance - To hide
+# observances, go to Google Calendar Settings > Holidays in United States").
+_OBSERVANCE_DESC_RE = re.compile(r"to hide observances|public holiday", re.IGNORECASE)
+
+def is_holiday_calendar_event(event: dict, cal_id: str = "", cal_name: str = "") -> bool:
+    """Return True for Google holiday/observance events that should not become tasks."""
+    if is_noise_calendar(cal_id, cal_name):
+        return True
+
+    fields = [
+        event.get("description", ""),
+        event.get("location", ""),
+    ]
+    for actor_key in ("creator", "organizer"):
+        actor = event.get(actor_key) or {}
+        if isinstance(actor, dict):
+            fields.extend([actor.get("displayName", ""), actor.get("email", "")])
+
+    return bool(_OBSERVANCE_DESC_RE.search(" ".join(str(value or "") for value in fields)))
+
+def is_holiday_calendar_task(task: Task, raw: Optional[RawInput] = None) -> bool:
+    """Return True for previously imported Google holiday events that should be hidden."""
+    if task.item_type != "event":
+        return False
+
+    source_type = str(getattr(raw, "source_type", "") or "")
+    source_id = str(getattr(raw, "source_id", "") or "")
+    came_from_google_calendar = (
+        task.assignee == "Google Calendar"
+        or source_type.startswith("calendar:")
+        or ":calendar:" in source_id
+    )
+    if not came_from_google_calendar:
+        return False
+
+    searchable_text = " ".join(
+        str(value or "")
+        for value in (
+            task.description,
+            getattr(raw, "content", "") if raw else "",
+        )
+    )
+    return bool(_OBSERVANCE_DESC_RE.search(searchable_text))
+
 def collect_google_calendar_entries(calendar, db: Session, user_id: int, max_results: int = 2500):
     """Fetch events from every Google Calendar the user has (primary, birthdays, shared, etc.)
-    and return them as a list of task entries ready to save. Skips already-seen events."""
+    and return them as a list of task entries ready to save. Skips already-seen events,
+    holiday/observance calendars, and anything beyond the future sync horizon."""
     summary = {"calendar": 0, "calendar_already_scanned": 0, "calendar_skipped": 0}
     sync_entries = []
     past_days = int(os.environ.get("GOOGLE_CALENDAR_SYNC_PAST_DAYS", str(GOOGLE_SYNC_PAST_DAYS)))
     time_min = (datetime.utcnow() - timedelta(days=past_days)).isoformat() + 'Z'
+    # Bound the future too; singleEvents=True expands recurring events, so an
+    # unbounded query can return weekly-class instances stretching years ahead.
+    future_days = int(os.environ.get("GOOGLE_CALENDAR_SYNC_FUTURE_DAYS", "180"))
+    time_max = (datetime.utcnow() + timedelta(days=future_days)).isoformat() + 'Z'
 
-    # Discover every calendar the user has (primary, birthdays, holidays, shared, etc.)
+    # Discover every calendar the user has (primary, birthdays, shared, etc.)
     # Requires calendar.readonly scope; falls back to primary-only if scope is missing.
     # Build list of (calendar_id, calendar_name) tuples so we can tag birthday events.
     calendar_list: list[tuple[str, str]] = []
@@ -1947,6 +2011,9 @@ def collect_google_calendar_entries(calendar, db: Session, user_id: int, max_res
         while True:
             cal_list_result = calendar.calendarList().list(pageToken=page_token).execute()
             for cal in cal_list_result.get('items', []):
+                if is_noise_calendar(cal.get('id', ''), cal.get('summary', '')):
+                    summary["calendars_skipped"] = summary.get("calendars_skipped", 0) + 1
+                    continue
                 calendar_list.append((cal['id'], cal.get('summary', '')))
             page_token = cal_list_result.get('nextPageToken')
             if not page_token:
@@ -1966,6 +2033,7 @@ def collect_google_calendar_entries(calendar, db: Session, user_id: int, max_res
                 cal_result = calendar.events().list(
                     calendarId=cal_id,
                     timeMin=time_min,
+                    timeMax=time_max,
                     maxResults=min(max_results, 2500),
                     singleEvents=True,
                     orderBy='startTime',
@@ -1992,6 +2060,13 @@ def collect_google_calendar_entries(calendar, db: Session, user_id: int, max_res
                 source_info = f"calendar: {event_id}"
                 if source_already_scanned(db, user_id, source_info):
                     summary["calendar_already_scanned"] += 1
+                    continue
+
+                # Holiday observances carry a standard boilerplate description even
+                # when they reach us through a renamed or shared calendar.
+                if is_holiday_calendar_event(event, cal_id, cal_name):
+                    summary["calendar_skipped"] += 1
+                    mark_source_scanned(db, user_id, source_info, f"Skipped holiday observance: {event.get('summary', '')}")
                     continue
 
                 entry = google_calendar_event_to_entry(event, cal_name)
@@ -2394,6 +2469,56 @@ def cleanup_stale_synced_tasks(db: Session, user_id: int) -> int:
         db.commit()
     return removed
 
+def cleanup_unwanted_calendar_imports(db: Session, user_id: int) -> int:
+    """Remove calendar noise imported by earlier syncs.
+
+    1. Holiday-calendar observances ("St. Patrick's Day", "Tax Day") are soft-deleted -
+       identified by the boilerplate description Google attaches to holiday events.
+       Their scanned markers are kept so they are never re-imported.
+    2. Far-future event instances beyond the sync horizon are hard-deleted together
+       with their scanned markers, so each one re-imports naturally once its date
+       comes within the horizon.
+    """
+    holiday_rows = db.query(Task, RawInput).outerjoin(
+        RawInput, Task.raw_id == RawInput.raw_id
+    ).filter(
+        Task.owner_id == user_id,
+        Task.status == "pending",
+        Task.item_type == "event"
+    ).all()
+
+    removed = 0
+    for task, raw in holiday_rows:
+        if is_holiday_calendar_task(task, raw):
+            task.status = "deleted"
+            removed += 1
+
+    future_days = int(os.environ.get("GOOGLE_CALENDAR_SYNC_FUTURE_DAYS", "180"))
+    horizon = datetime.now() + timedelta(days=future_days)
+    candidates = db.query(Task).filter(
+        Task.owner_id == user_id,
+        Task.status == "pending",
+        Task.item_type == "event",
+        Task.assignee == "Google Calendar",
+        Task.due_date.isnot(None)
+    ).all()
+    far_future = []
+    for task in candidates:
+        due = _parse_wall_datetime(task.due_date)
+        if due and due > horizon:
+            far_future.append(task)
+    if far_future:
+        task_ids = [t.task_id for t in far_future]
+        raw_ids = [t.raw_id for t in far_future if t.raw_id]
+        db.query(Task).filter(Task.task_id.in_(task_ids)).delete(synchronize_session=False)
+        if raw_ids:
+            db.query(RawInput).filter(RawInput.raw_id.in_(raw_ids)).delete(synchronize_session=False)
+        removed += len(task_ids)
+
+    if removed:
+        db.commit()
+    return removed
+
 def cleanup_duplicate_calendar_events(db: Session, user_id: int) -> int:
     """Soft-delete exact-duplicate Google Calendar events (same title+date). Returns count removed."""
     events = db.query(Task).filter(
@@ -2441,6 +2566,7 @@ def sync_all_blocking(user_id: int, tz_offset: int = 0, tz_name: Optional[str] =
 
         cleanup_duplicate_calendar_events(db, user_id)
         stale_cleaned = cleanup_stale_synced_tasks(db, user_id)
+        stale_cleaned += cleanup_unwanted_calendar_imports(db, user_id)
 
         classroom = build('classroom', 'v1', credentials=creds)
         calendar = build('calendar', 'v3', credentials=creds)
@@ -2497,6 +2623,7 @@ async def auto_sync_user(user_id: int, db: Session):
 
     cleanup_duplicate_calendar_events(db, user_id)
     cleanup_stale_synced_tasks(db, user_id)
+    cleanup_unwanted_calendar_imports(db, user_id)
 
     gmail_count = 0
     try:
@@ -2734,6 +2861,7 @@ async def get_tasks(user_id: int, db: Session = Depends(get_db), current_user: U
     """Return all tasks for a user. Opportunistically backfills missing assignee values from the raw
     source text so older tasks gradually get proper labels without a migration script."""
     require_same_user(current_user, user_id)
+    cleanup_unwanted_calendar_imports(db, user_id)
     tasks = db.query(Task).filter(Task.owner_id == user_id).all()
 
     # Only fetch RawInput rows for tasks that are still missing an assignee label.

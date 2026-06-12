@@ -51,6 +51,10 @@ _SKIP_CALENDAR_EVENT_TYPES = {"focusTime", "outOfOffice", "workingLocation"}
 SYNC_THROTTLE_SECONDS = int(os.environ.get("SYNC_THROTTLE_SECONDS", "30"))
 AUTO_SYNC_ENABLED = os.environ.get("AUTO_SYNC_ENABLED", "1") == "1"
 AUTO_SYNC_INTERVAL_SECONDS = int(os.environ.get("AUTO_SYNC_INTERVAL_SECONDS", "900"))
+# How far back Google sync looks, in days. Applies to Classroom coursework,
+# Gmail messages, Google Tasks due dates, and Calendar events, so a first sync
+# doesn't flood the task list with months-old assignments.
+GOOGLE_SYNC_PAST_DAYS = int(os.environ.get("GOOGLE_SYNC_PAST_DAYS", "14"))
 sync_request_log: dict = {}
 auto_sync_task = None
 
@@ -1715,9 +1719,19 @@ def has_google_due_time(due_time: Optional[dict]) -> bool:
         return False
     return any(due_time.get(key) is not None for key in ("hours", "minutes", "seconds", "nanos"))
 
-def google_due_to_iso(due: dict, due_time: Optional[dict] = None, utc_offset_minutes: int = 0) -> Optional[str]:
+def google_due_to_iso(
+    due: dict,
+    due_time: Optional[dict] = None,
+    utc_offset_minutes: int = 0,
+    tz_name: Optional[str] = None,
+) -> Optional[str]:
     """Convert Google Classroom's separate dueDate/dueTime objects into a single ISO 8601 string.
-    Converts from UTC to the user's local time using their browser-supplied UTC offset."""
+
+    Classroom stores due times in UTC. Preferred conversion uses the user's IANA
+    timezone name so the offset is correct *for that date* — converting a January
+    deadline with June's DST offset turned "11:59 PM" into "12:59 AM". Falls back
+    to the browser-supplied fixed offset when no timezone name is available.
+    """
     if not due:
         return None
 
@@ -1734,9 +1748,18 @@ def google_due_to_iso(due: dict, due_time: Optional[dict] = None, utc_offset_min
     minute = due_time.get("minutes", 0)
     second = due_time.get("seconds", 0)
 
-    # Google Classroom dueTime is UTC. Convert to local wall-clock time using the
-    # client's UTC offset (JS getTimezoneOffset convention: positive = west of UTC).
     utc_dt = datetime(int(year), int(month), int(day), int(hour), int(minute), int(second))
+
+    if tz_name:
+        try:
+            from zoneinfo import ZoneInfo
+            from datetime import timezone as _tz
+            local_dt = utc_dt.replace(tzinfo=_tz.utc).astimezone(ZoneInfo(tz_name)).replace(tzinfo=None)
+            return local_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        except Exception:
+            pass  # Unknown tz name or missing tz database — use the fixed offset below.
+
+    # JS getTimezoneOffset convention: positive = west of UTC.
     local_dt = utc_dt - timedelta(minutes=utc_offset_minutes)
     return local_dt.strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -1912,7 +1935,7 @@ def collect_google_calendar_entries(calendar, db: Session, user_id: int, max_res
     and return them as a list of task entries ready to save. Skips already-seen events."""
     summary = {"calendar": 0, "calendar_already_scanned": 0, "calendar_skipped": 0}
     sync_entries = []
-    past_days = int(os.environ.get("GOOGLE_CALENDAR_SYNC_PAST_DAYS", "30"))
+    past_days = int(os.environ.get("GOOGLE_CALENDAR_SYNC_PAST_DAYS", str(GOOGLE_SYNC_PAST_DAYS)))
     time_min = (datetime.utcnow() - timedelta(days=past_days)).isoformat() + 'Z'
 
     # Discover every calendar the user has (primary, birthdays, holidays, shared, etc.)
@@ -2029,6 +2052,15 @@ def collect_google_tasks_entries(tasks_service, db: Session, user_id: int):
                     if due_raw:
                         date_only = re.sub(r'T.*', '', due_raw)  # YYYY-MM-DD
                         due_date = f"{date_only}T12:00:00"
+                        # Skip long-overdue Google Tasks — outside the sync window
+                        # they're stale clutter. Undated tasks are always kept.
+                        try:
+                            if datetime.fromisoformat(date_only) < datetime.utcnow() - timedelta(days=GOOGLE_SYNC_PAST_DAYS):
+                                summary["gtasks_skipped"] += 1
+                                mark_source_scanned(db, user_id, source_info, f"Skipped old Google Task: {title}")
+                                continue
+                        except ValueError:
+                            pass
 
                     entry_task = make_structured_task(
                         title=title,
@@ -2117,6 +2149,27 @@ def is_actionable_classroom_item(item: dict) -> bool:
 
     return True
 
+def classroom_item_is_too_old(item: dict, utc_offset_minutes: int = 0) -> bool:
+    """True when a Classroom post falls outside the sync window and shouldn't be imported.
+
+    Items with a due date are judged by that date — an old post whose deadline is
+    still in the future (or recent) stays relevant. Items without a due date are
+    judged by their creation time instead.
+    """
+    cutoff = datetime.utcnow() - timedelta(days=GOOGLE_SYNC_PAST_DAYS)
+    due_iso = google_due_to_iso(item.get("dueDate", {}), item.get("dueTime"), utc_offset_minutes)
+    if due_iso:
+        due_dt = _parse_wall_datetime(due_iso)
+        return bool(due_dt and due_dt < cutoff)
+    creation = item.get("creationTime") or item.get("updateTime")
+    if creation:
+        try:
+            created_dt = datetime.fromisoformat(str(creation).replace("Z", "+00:00")).replace(tzinfo=None)
+            return created_dt < cutoff
+        except ValueError:
+            return False
+    return False
+
 def cleanup_classroom_noise_tasks(db: Session, user_id: int) -> int:
     """Soft-delete any previously imported Classroom tasks whose title is just a date/day header.
     These posts are class-period agendas, not student assignments, and should be cleaned up."""
@@ -2147,7 +2200,7 @@ def cleanup_classroom_noise_tasks(db: Session, user_id: int) -> int:
         db.commit()
     return cleaned
 
-def classroom_item_to_entry(classroom, course: dict, item: dict, utc_offset_minutes: int = 0):
+def classroom_item_to_entry(classroom, course: dict, item: dict, utc_offset_minutes: int = 0, tz_name: Optional[str] = None):
     """Convert a single Google Classroom coursework item into the standard (task, content, source_info) tuple.
     Looks up the teacher's profile by their Google user ID so we can show a name instead of an ID."""
     due = item.get('dueDate', {})
@@ -2163,7 +2216,7 @@ def classroom_item_to_entry(classroom, course: dict, item: dict, utc_offset_minu
 
     assigner = f"{course['name']}: {teacher_name}" if teacher_name else course["name"]
     content = f"Classroom Assignment: {item['title']} for {course['name']}. Assigned By: {assigner}. Due: {due_str}. Instructions: {item.get('description', '')}"
-    due_date = google_due_to_iso(item.get("dueDate", {}), item.get("dueTime"), utc_offset_minutes)
+    due_date = google_due_to_iso(item.get("dueDate", {}), item.get("dueTime"), utc_offset_minutes, tz_name)
     is_all_day = not has_google_due_time(item.get("dueTime"))
     task = make_structured_task(
         title=item.get("title", "Classroom Assignment"),
@@ -2176,7 +2229,7 @@ def classroom_item_to_entry(classroom, course: dict, item: dict, utc_offset_minu
     return task, content, f"classroom: {item['id']}"
 
 # --- GOOGLE CLASSROOM SYNC ---
-def collect_classroom_entries(classroom, db: Session, user_id: int, utc_offset_minutes: int = 0):
+def collect_classroom_entries(classroom, db: Session, user_id: int, utc_offset_minutes: int = 0, tz_name: Optional[str] = None):
     """Fetch coursework from every enrolled Google Classroom course and return actionable assignments.
     Runs a noise-cleanup pass first to remove previously imported date-only titles."""
     summary = {"classroom": 0, "skipped": 0, "already_scanned": 0, "cleaned": cleanup_classroom_noise_tasks(db, user_id)}
@@ -2191,13 +2244,19 @@ def collect_classroom_entries(classroom, db: Session, user_id: int, utc_offset_m
                 summary["already_scanned"] += 1
                 continue
 
+            # Don't import months-old coursework — only the recent sync window.
+            if classroom_item_is_too_old(item, utc_offset_minutes):
+                summary["skipped"] += 1
+                mark_source_scanned(db, user_id, source_info, f"Skipped old Classroom post: {item.get('title', '')}")
+                continue
+
             if not is_actionable_classroom_item(item):
                 summary["skipped"] += 1
                 mark_source_scanned(db, user_id, source_info, f"Skipped Classroom post: {item.get('title', '')}")
                 continue
 
             try:
-                sync_entries.append(classroom_item_to_entry(classroom, course, item, utc_offset_minutes))
+                sync_entries.append(classroom_item_to_entry(classroom, course, item, utc_offset_minutes, tz_name))
                 summary["classroom"] += 1
             except Exception:
                 summary["skipped"] += 1
@@ -2222,7 +2281,11 @@ def sync_gmail_blocking(user_id: int):
             return google_auth_required_response(user_id)
         service = build('gmail', 'v1', credentials=creds)
         # Fetch the 5 most recent emails
-        results = service.users().messages().list(userId='me', maxResults=15).execute()
+        results = service.users().messages().list(
+            userId='me',
+            maxResults=15,
+            q=f"newer_than:{GOOGLE_SYNC_PAST_DAYS}d"
+        ).execute()
         messages = results.get('messages', [])
 
         processed_count = 0
@@ -2253,23 +2316,32 @@ def sync_gmail_blocking(user_id: int):
     finally:
         db.close()
 
-@app.get("/sync-classroom")
-async def sync_classroom(user_id: int, tz_offset: int = 0, current_user: User = Depends(get_current_user)):
-    """API endpoint to trigger a Google Classroom sync. tz_offset converts UTC due times to local time."""
-    require_same_user(current_user, user_id)
-    return await asyncio.to_thread(sync_classroom_blocking, user_id, tz_offset)
+def remember_user_timezone(db: Session, user: User, tz_name: Optional[str]):
+    """Persist the browser-reported IANA timezone so background auto-sync can
+    convert Classroom due times correctly even without a live request."""
+    if tz_name and re.fullmatch(r"[A-Za-z0-9_+\-/]{1,64}", tz_name) and user.timezone_name != tz_name:
+        user.timezone_name = tz_name
+        db.commit()
 
-def sync_classroom_blocking(user_id: int, tz_offset: int = 0):
+@app.get("/sync-classroom")
+async def sync_classroom(user_id: int, tz_offset: int = 0, tz_name: Optional[str] = None, current_user: User = Depends(get_current_user)):
+    """API endpoint to trigger a Google Classroom sync. tz_name (IANA) gives DST-correct
+    due-time conversion; tz_offset is the legacy fixed-offset fallback."""
+    require_same_user(current_user, user_id)
+    return await asyncio.to_thread(sync_classroom_blocking, user_id, tz_offset, tz_name)
+
+def sync_classroom_blocking(user_id: int, tz_offset: int = 0, tz_name: Optional[str] = None):
     """Fetch and save all actionable Classroom coursework not yet in the database."""
     db = SessionLocal()
     try:
-        ensure_user_exists(user_id, db)
+        user = ensure_user_exists(user_id, db)
+        remember_user_timezone(db, user, tz_name)
         creds = get_google_creds(user_id)
         if not creds:
             return google_auth_required_response(user_id)
 
         classroom = build('classroom', 'v1', credentials=creds)
-        sync_entries, summary = collect_classroom_entries(classroom, db, user_id, tz_offset)
+        sync_entries, summary = collect_classroom_entries(classroom, db, user_id, tz_offset, tz_name or user.timezone_name)
         if sync_entries:
             asyncio.run(save_structured_task_entries(sync_entries, user_id, db))
 
@@ -2282,6 +2354,45 @@ def sync_classroom_blocking(user_id: int, tz_offset: int = 0):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
+
+def cleanup_stale_synced_tasks(db: Session, user_id: int) -> int:
+    """Soft-delete previously imported Google-synced tasks that fall outside the sync window.
+
+    Earlier versions imported the entire Classroom/Tasks history, so long-time users
+    have months-old assignments cluttering their dashboard. Only touches still-pending
+    tasks whose raw source is a Google sync (classroom/calendar/gtask/gmail) and whose
+    schedule ended before the window — soft-deleted, so they remain restorable in History.
+    """
+    cutoff = datetime.now() - timedelta(days=GOOGLE_SYNC_PAST_DAYS)
+    tasks = db.query(Task).filter(
+        Task.owner_id == user_id,
+        Task.status == "pending",
+        Task.due_date.isnot(None)
+    ).all()
+
+    raw_ids = [t.raw_id for t in tasks if t.raw_id]
+    raw_map = {}
+    if raw_ids:
+        raw_map = {r.raw_id: r for r in db.query(RawInput).filter(RawInput.raw_id.in_(raw_ids)).all()}
+
+    removed = 0
+    for task in tasks:
+        due = _parse_wall_datetime(task.due_date)
+        if not due or due >= cutoff:
+            continue
+        # Multi-day items still running (or recently ended) stay.
+        end = _parse_wall_datetime(task.end_date)
+        if end and end >= cutoff:
+            continue
+        raw = raw_map.get(task.raw_id) if task.raw_id else None
+        source = str(raw.source_type or "") if raw else ""
+        if source.startswith(("classroom:", "calendar:", "gtask:", "gmail:")):
+            task.status = "deleted"
+            removed += 1
+
+    if removed:
+        db.commit()
+    return removed
 
 def cleanup_duplicate_calendar_events(db: Session, user_id: int) -> int:
     """Soft-delete exact-duplicate Google Calendar events (same title+date). Returns count removed."""
@@ -2311,33 +2422,35 @@ def cleanup_duplicate_calendar_events(db: Session, user_id: int) -> int:
     return removed
 
 @app.get("/sync-all")
-async def sync_all(user_id: int, tz_offset: int = 0, current_user: User = Depends(get_current_user)):
+async def sync_all(user_id: int, tz_offset: int = 0, tz_name: Optional[str] = None, current_user: User = Depends(get_current_user)):
     """Trigger a full sync across Gmail, Classroom, Calendar, and Google Tasks in one call."""
     require_same_user(current_user, user_id)
-    return await asyncio.to_thread(sync_all_blocking, user_id, tz_offset)
+    return await asyncio.to_thread(sync_all_blocking, user_id, tz_offset, tz_name)
 
-def sync_all_blocking(user_id: int, tz_offset: int = 0):
+def sync_all_blocking(user_id: int, tz_offset: int = 0, tz_name: Optional[str] = None):
     """Collect entries from all Google sources and save them in one batch.
     Runs sequentially (Classroom → Calendar → Tasks) so errors in one source don't block others."""
     db = SessionLocal()
     try:
-        ensure_user_exists(user_id, db)
+        user = ensure_user_exists(user_id, db)
+        remember_user_timezone(db, user, tz_name)
         creds = get_google_creds(user_id)
         if not creds:
             # If no credentials, return the auth URL for the frontend to redirect
             return google_auth_required_response(user_id)
 
         cleanup_duplicate_calendar_events(db, user_id)
+        stale_cleaned = cleanup_stale_synced_tasks(db, user_id)
 
         classroom = build('classroom', 'v1', credentials=creds)
         calendar = build('calendar', 'v3', credentials=creds)
 
-        summary = {"classroom": 0, "calendar": 0, "gtasks": 0}
+        summary = {"classroom": 0, "calendar": 0, "gtasks": 0, "stale_cleaned": stale_cleaned}
         sync_entries = []
 
         # 1. Classroom assignments
         try:
-            classroom_entries, classroom_summary = collect_classroom_entries(classroom, db, user_id, tz_offset)
+            classroom_entries, classroom_summary = collect_classroom_entries(classroom, db, user_id, tz_offset, tz_name or user.timezone_name)
             sync_entries.extend(classroom_entries)
             summary["classroom"] = classroom_summary["classroom"]
             summary["classroom_skipped"] = classroom_summary["skipped"]
@@ -2378,12 +2491,21 @@ async def auto_sync_user(user_id: int, db: Session):
     if not creds:
         return {"gmail": 0, "classroom": 0, "calendar": 0}
 
+    # Use the timezone remembered from the user's last manual sync for due-time conversion.
+    sync_user = db.query(User).filter(User.user_id == user_id).first()
+    user_tz = sync_user.timezone_name if sync_user else None
+
     cleanup_duplicate_calendar_events(db, user_id)
+    cleanup_stale_synced_tasks(db, user_id)
 
     gmail_count = 0
     try:
         service = build('gmail', 'v1', credentials=creds)
-        results = service.users().messages().list(userId='me', maxResults=15).execute()
+        results = service.users().messages().list(
+            userId='me',
+            maxResults=15,
+            q=f"newer_than:{GOOGLE_SYNC_PAST_DAYS}d"
+        ).execute()
         for msg in results.get('messages', []):
             source_info = f"gmail: {msg['id']}"
             if source_already_scanned(db, user_id, source_info):
@@ -2408,7 +2530,7 @@ async def auto_sync_user(user_id: int, db: Session):
     classroom_count = 0
     try:
         classroom = build('classroom', 'v1', credentials=creds)
-        entries, summary = collect_classroom_entries(classroom, db, user_id)
+        entries, summary = collect_classroom_entries(classroom, db, user_id, tz_name=user_tz)
         if entries:
             await save_structured_task_entries(entries, user_id, db)
         classroom_count = summary.get("classroom", 0)

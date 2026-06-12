@@ -3325,6 +3325,16 @@ function getFriendlyGoogleError(message) {
     return text || "Google connection failed. Please try connecting again.";
 }
 
+// Returns the browser's IANA timezone name (e.g. "America/New_York") so the backend
+// can convert Google's UTC due times with the correct DST rules for each date.
+function getLocalTimezoneName() {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    } catch (_) {
+        return '';
+    }
+}
+
 // Converts a 24-hour integer (e.g. 9) to an HTML time input value (e.g. "09:00").
 function hourToTimeInput(hour) {
     const normalized = Math.max(0, Math.min(23, Number(hour ?? 0)));
@@ -4682,12 +4692,33 @@ function getTimedTaskRange(task) {
     return { start, end };
 }
 
+// Returns the {start, end} range a task occupies for CONFLICT detection, or null if it
+// can't genuinely conflict. Only items with a real duration participate: calendar events,
+// work shifts, and anything with an explicit end time. Deadline-style items ("essay due
+// 11:59 PM") are points in time, not blocks — five assignments due the same night are
+// busy work, not a scheduling clash, so they're excluded instead of being padded to 1 hour.
+function getConflictRange(task) {
+    if (!task || !task.due_date || task.is_all_day || !task.end_date) return null;
+    const start = parseWallTime(task.due_date);
+    const end = parseWallTime(task.end_date);
+    if (!start || !end || isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) return null;
+    return { start, end };
+}
+
+// Two tasks with effectively the same title are duplicate imports of one item,
+// not two commitments fighting for the same time slot.
+function isSameTitlePair(a, b) {
+    const left = String(a.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const right = String(b.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    return left && left === right;
+}
+
 // Builds a Map from task_id to the list of other tasks it overlaps with, used to highlight conflicts.
 // Uses an O(n²) pair comparison — acceptable for typical task list sizes.
 function buildConflictMap(tasks) {
     const activeTimedTasks = tasks
         .filter(task => task.status !== 'completed' && task.status !== 'deleted')
-        .map(task => ({ task, range: getTimedTaskRange(task) }))
+        .map(task => ({ task, range: getConflictRange(task) }))
         .filter(entry => entry.range)
         .sort((a, b) => a.range.start - b.range.start);
 
@@ -4698,6 +4729,7 @@ function buildConflictMap(tasks) {
             const current = activeTimedTasks[i];
             const next = activeTimedTasks[j];
             if (next.range.start >= current.range.end) break;
+            if (isSameTitlePair(current.task, next.task)) continue;
 
             if (current.range.start < next.range.end && next.range.start < current.range.end) {
                 const currentId = Number(current.task.task_id);
@@ -4718,7 +4750,7 @@ function buildConflictMap(tasks) {
 function getConflictPairs(tasks, limit = 4) {
     const activeTimedTasks = tasks
         .filter(task => task.status !== 'completed' && task.status !== 'deleted')
-        .map(task => ({ task, range: getTimedTaskRange(task) }))
+        .map(task => ({ task, range: getConflictRange(task) }))
         .filter(entry => entry.range)
         .sort((a, b) => a.range.start - b.range.start);
 
@@ -4731,6 +4763,7 @@ function getConflictPairs(tasks, limit = 4) {
             const next = activeTimedTasks[j];
             if (next.range.start >= current.range.end) break;
             if (!(current.range.start < next.range.end && next.range.start < current.range.end)) continue;
+            if (isSameTitlePair(current.task, next.task)) continue;
 
             const firstId = Number(current.task.task_id);
             const secondId = Number(next.task.task_id);
@@ -4765,22 +4798,31 @@ function formatTimeOnly(date) {
 
 // Builds the HTML for a single conflict card describing two overlapping tasks and their overlap window.
 function formatConflictCard(pair) {
-    const dateText = pair.overlapStart.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-    const overlapText = `${formatTimeOnly(pair.overlapStart)}-${formatTimeOnly(pair.overlapEnd)}`;
-    const firstRange = `${formatTimeOnly(pair.firstRange.start)}-${formatTimeOnly(pair.firstRange.end)}`;
-    const secondRange = `${formatTimeOnly(pair.secondRange.start)}-${formatTimeOnly(pair.secondRange.end)}`;
+    const dateText = pair.overlapStart.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    const overlapText = `${formatTimeOnly(pair.overlapStart)}–${formatTimeOnly(pair.overlapEnd)}`;
+    const firstRange = `${formatTimeOnly(pair.firstRange.start)}–${formatTimeOnly(pair.firstRange.end)}`;
+    const secondRange = `${formatTimeOnly(pair.secondRange.start)}–${formatTimeOnly(pair.secondRange.end)}`;
     const minutesText = pair.overlapMinutes >= 60 && pair.overlapMinutes % 60 === 0
         ? `${pair.overlapMinutes / 60} hour${pair.overlapMinutes === 60 ? '' : 's'}`
-        : `${pair.overlapMinutes} minutes`;
+        : `${pair.overlapMinutes} min`;
+
+    // A full containment (one item entirely inside the other) reads differently
+    // from a partial overlap, and the shorter item is usually the easier one to move.
+    const firstLen = pair.firstRange.end - pair.firstRange.start;
+    const secondLen = pair.secondRange.end - pair.secondRange.start;
+    const shorter = firstLen <= secondLen ? pair.first : pair.second;
+    const fullyInside =
+        (pair.firstRange.start >= pair.secondRange.start && pair.firstRange.end <= pair.secondRange.end) ||
+        (pair.secondRange.start >= pair.firstRange.start && pair.secondRange.end <= pair.firstRange.end);
+    const verb = fullyInside ? 'sits entirely inside' : 'overlaps';
 
     return `
         <article class="dashboard-conflict-card">
-            <div class="dashboard-conflict-title">${escapeHTML(pair.first.title || 'Untitled Task')} overlaps ${escapeHTML(pair.second.title || 'Untitled Task')}</div>
+            <div class="dashboard-conflict-title">${escapeHTML(pair.first.title || 'Untitled Task')} ${verb} ${escapeHTML(pair.second.title || 'Untitled Task')}</div>
             <div class="dashboard-conflict-detail">
-                They both occupy ${escapeHTML(overlapText)} on ${escapeHTML(dateText)}.
-                ${escapeHTML(pair.first.title || 'First task')} is scheduled ${escapeHTML(firstRange)}, while ${escapeHTML(pair.second.title || 'second task')} is scheduled ${escapeHTML(secondRange)}.
+                ${escapeHTML(dateText)}: ${escapeHTML(pair.first.title || 'First item')} runs ${escapeHTML(firstRange)} and ${escapeHTML(pair.second.title || 'the second item')} runs ${escapeHTML(secondRange)} — you're double-booked ${escapeHTML(overlapText)} (${escapeHTML(minutesText)}).
             </div>
-            <div class="dashboard-conflict-suggestion">Overlap length: ${escapeHTML(minutesText)}. Move one item outside that window to clear it.</div>
+            <div class="dashboard-conflict-suggestion">Suggestion: reschedule “${escapeHTML(shorter.title || 'the shorter item')}” outside ${escapeHTML(overlapText)}, or shorten one of the two.</div>
         </article>
     `;
 }
@@ -4831,8 +4873,7 @@ function renderInsightsPage(tasks, containerId = 'agendaList') {
 
     const taskRows = activeTasks.map(task => {
         const start = parseWallTime(task.due_date);
-        const timedRange = getTimedTaskRange(task);
-        const displayEnd = timedRange ? timedRange.end : (task.end_date ? parseWallTime(task.end_date) : null);
+        const displayEnd = task.end_date ? parseWallTime(task.end_date) : null;
         const score = Math.max(0, Math.min(100, Math.round(Number(task.confidence ?? 0))));
         const confidenceLevel = getConfidenceLevel(score);
         const conflicts = conflictMap.get(Number(task.task_id)) || [];
@@ -5015,8 +5056,9 @@ function renderDashboardTaskRow(task, options = {}) {
     const isHistory = Boolean(options.isHistory);
     const conflicts = options.conflictMap ? (options.conflictMap.get(Number(task.task_id)) || []) : [];
     const start = parseWallTime(task.due_date);
-    const timedRange = getTimedTaskRange(task);
-    const end = timedRange ? timedRange.end : (task.end_date ? parseWallTime(task.end_date) : null);
+    // Only show an end time when the task really has one — a deadline is a point
+    // in time, not a fabricated one-hour block.
+    const end = task.end_date ? parseWallTime(task.end_date) : null;
     const scheduleText = formatScheduleRange(start, end, Boolean(task.is_all_day));
     const confidenceScore = Number(task.confidence);
     const confidence = !isNaN(confidenceScore) ? ` · ${Math.round(confidenceScore)}%` : '';
@@ -5070,7 +5112,10 @@ function getDashboardData(tasks) {
         return d && d < todayStart && !isTaskDueToday(task);
     }));
 
-    const conflictMap = buildConflictMap(activeTasks);
+    // Conflicts are computed across EVERYTHING scheduled — including calendar
+    // events, which getActiveTasks() filters out of the list views. Overlapping
+    // calendar events are the most common real double-booking.
+    const conflictMap = buildConflictMap(tasks);
     const confidenceScores = activeTasks.map(task => Number(task.confidence)).filter(score => !isNaN(score));
     const averageConfidence = confidenceScores.length
         ? Math.round(confidenceScores.reduce((sum, score) => sum + score, 0) / confidenceScores.length)
@@ -5078,7 +5123,7 @@ function getDashboardData(tasks) {
     const conflictTaskCount = [...conflictMap.keys()].length;
     const lowConfidenceCount = activeTasks.filter(task => Number(task.confidence || 0) < 70).length;
     const lowConfidenceTasks = sortByScheduleThenTitle(activeTasks.filter(task => Number(task.confidence || 0) < 70));
-    const conflictPairs = getConflictPairs(activeTasks, 4);
+    const conflictPairs = getConflictPairs(tasks, 4);
 
     return {
         activeTasks,
@@ -5222,8 +5267,7 @@ function renderDashboardPage(tasks, containerId = 'agendaList') {
 function renderExpandedTaskRow(task, conflictMap = new Map(), allTasks = latestTasks) {
     const colorClass = getTaskColorClass(task);
     const start = parseWallTime(task.due_date);
-    const timedRange = getTimedTaskRange(task);
-    const end = timedRange ? timedRange.end : (task.end_date ? parseWallTime(task.end_date) : null);
+    const end = task.end_date ? parseWallTime(task.end_date) : null;
     const scheduleText = formatScheduleRange(start, end, Boolean(task.is_all_day));
     const confidenceScore = Number(task.confidence);
     const confidence = !isNaN(confidenceScore) ? `${Math.round(confidenceScore)}% confidence` : 'No confidence score';
@@ -6473,7 +6517,8 @@ async function syncClassroom() {
 
     try {
         const tzOffset = new Date().getTimezoneOffset();
-        const response = await apiFetch(`${API_BASE}/sync-classroom?user_id=${userId}&tz_offset=${tzOffset}`, {
+        const tzName = getLocalTimezoneName();
+        const response = await apiFetch(`${API_BASE}/sync-classroom?user_id=${userId}&tz_offset=${tzOffset}&tz_name=${encodeURIComponent(tzName)}`, {
             throttleKey: `sync-classroom:${userId}`,
             minInterval: 30000,
             timeout: 45000
@@ -6511,7 +6556,8 @@ async function syncAllGoogleSources({ silent = false, viewAfterSync = currentVie
 
     try {
         const tzOffset = new Date().getTimezoneOffset();
-        const response = await apiFetch(`${API_BASE}/sync-all?user_id=${userId}&tz_offset=${tzOffset}`, {
+        const tzName = getLocalTimezoneName();
+        const response = await apiFetch(`${API_BASE}/sync-all?user_id=${userId}&tz_offset=${tzOffset}&tz_name=${encodeURIComponent(tzName)}`, {
             throttleKey: `sync-all:${userId}`,
             minInterval: 30000,
             timeout: 60000

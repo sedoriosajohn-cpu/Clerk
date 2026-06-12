@@ -71,6 +71,7 @@ class User(Base):
     google_token_json = Column(Text)  # Stores OAuth token JSON (replaces filesystem file)
     google_sub = Column(String)
     api_token_hash = Column(String)  # SHA-256 of the current session token; null = signed out
+    timezone_name = Column(String)   # IANA tz (e.g. "America/New_York") for DST-correct sync conversions
 
 class RawInput(Base):
     __tablename__ = "raw_inputs"
@@ -132,6 +133,7 @@ def ensure_database_schema():
         "reset_password_expires_at": "VARCHAR",
         "google_token_json": "TEXT",
         "api_token_hash": "VARCHAR",
+        "timezone_name": "VARCHAR",
     }
     user_columns["google_sub"] = "VARCHAR"
     with engine.begin() as connection:

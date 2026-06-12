@@ -879,11 +879,73 @@ body.dark-mode .calendar-all-day-row {
 .calendar-event.reminder { background-color: rgba(168, 85, 247, 0.25); border-left: 3px solid #7e22ce; }/* Purple for reminders */
 
 /* ==========================================================================
+   6.7 APP FOOTER
+   ========================================================================== */
+.app-footer {
+    max-width: 1280px;
+    margin: 8px auto 28px;
+    padding: 14px 28px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    color: var(--muted);
+    font-size: 12.5px;
+}
+
+.app-footer a {
+    color: var(--teal-dark);
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.app-footer a:hover {
+    text-decoration: underline;
+}
+
+.app-footer-links {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+@media (max-width: 600px) {
+    /* Keep the footer clear of the mobile bottom nav. */
+    .app-footer { margin-bottom: 90px; justify-content: center; text-align: center; }
+}
+
+/* ==========================================================================
    6.75 INSIGHTS
    ========================================================================== */
 .insights-shell {
     display: grid;
     gap: 18px;
+}
+
+.insights-brief {
+    border: 1px solid var(--border);
+    border-left: 5px solid var(--teal);
+    border-radius: 14px;
+    padding: 16px 18px;
+    background: rgba(255, 255, 255, 0.55);
+    color: var(--text);
+    font-size: 14.5px;
+    line-height: 1.55;
+}
+
+.insights-brief-label {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--teal-dark);
+    margin-right: 8px;
+}
+
+body.dark-mode .insights-brief {
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .insights-summary {
@@ -2753,7 +2815,7 @@ button {
                         <label for="taskInput">Raw input</label>
                         <textarea id="taskInput" placeholder="Paste messy notes, emails, deadlines, or phrases like 'finish the lab by next Tuesday at 4'..."></textarea>
                     </div>
-                    <input type="file" id="fileInput" style="display: none;" accept=".pdf,.txt,.md,.jpg,.jpeg,.png,image/jpeg,image/png">
+                    <input type="file" id="fileInput" style="display: none;" accept=".pdf,.txt,.md,.csv,.docx,.jpg,.jpeg,.png,.mp3,.m4a,.wav,.ogg,.webm,.aac,.flac,image/jpeg,image/png,audio/*">
                     
                     <div class="composer-actions">
                         <div class="left-buttons">
@@ -2928,6 +2990,16 @@ button {
         </div>
     </main>
 
+    <!-- App footer with legal links -->
+    <footer class="app-footer">
+        <span>© 2026 Clerk · Your inputs are processed only to create your tasks.</span>
+        <span class="app-footer-links">
+            <a href="terms.html" target="_blank" rel="noopener">Terms of Service</a>
+            <span aria-hidden="true">·</span>
+            <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>
+        </span>
+    </footer>
+
     <!-- Mobile bottom navigation — only shown on ≤600px screens via CSS -->
     <nav class="mobile-bottom-nav" aria-label="Mobile navigation" id="mobileBottomNav">
         <a href="#" onclick="loadView('agenda'); return false;" data-mbn-view="agenda">
@@ -3034,6 +3106,12 @@ button {
                 <a href="#" onclick="showForgotPasswordMode(); return false;" style="color:var(--teal); text-decoration:none; font-weight:bold;">Forgot password?</a>
             </p>
             <p id="login-error" style="color:var(--pink); font-size:14px; margin-top:15px; display:none;"></p>
+            <p style="margin-top:18px; font-size:12px; color:#64748b; line-height:1.5;">
+                By continuing you agree to Clerk's
+                <a href="terms.html" target="_blank" rel="noopener" style="color:var(--teal); text-decoration:none;">Terms of Service</a>
+                and
+                <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--teal); text-decoration:none;">Privacy Policy</a>.
+            </p>
         </div>
     </div>
     <div id="password-reset-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.98); z-index:10000; display:none; justify-content:center; align-items:center;">
@@ -3300,6 +3378,12 @@ async function apiFetch(url, options = {}) {
     const timeout = options.timeout || REQUEST_TIMEOUT_MS;
     // Strip our custom options before passing the rest to native fetch.
     const { throttleKey: _throttleKey, minInterval: _minInterval, timeout: _timeout, ...fetchOptions } = options;
+
+    // Attach the session token so the backend can verify the request is ours.
+    const sessionToken = getSessionToken();
+    if (sessionToken) {
+        fetchOptions.headers = { ...(fetchOptions.headers || {}), 'Authorization': `Bearer ${sessionToken}` };
+    }
     const now = Date.now();
     const lastRun = requestBucket.get(throttleKey) || 0;
 
@@ -3321,6 +3405,12 @@ async function apiFetch(url, options = {}) {
             // A successful response reveals the working base URL — remember it for future calls.
             API_BASE = new URL(attemptUrl).origin;
             persistApiBase(API_BASE);
+            // A 401 on a non-auth route means our stored token is no longer valid
+            // (login 401s are just wrong credentials and must not clear the session).
+            const pathname = new URL(attemptUrl).pathname;
+            if (response.status === 401 && sessionToken && pathname !== '/login' && pathname !== '/register') {
+                handleSessionExpired();
+            }
             return response;
         } catch (error) {
             if (error && error.name === 'AbortError') {
@@ -3429,9 +3519,17 @@ const HASH_VIEWS = Object.fromEntries(Object.entries(VIEW_HASHES).map(([k, v]) =
 // localStorage key used to save the logged-in user's session so it survives page refreshes.
 const _SESSION_KEY = 'clerk_session';
 
-// Saves user ID and username to localStorage so the session is restored on the next page load.
-function saveSession(userId, username) {
-    try { localStorage.setItem(_SESSION_KEY, JSON.stringify({ user_id: userId, username })); } catch (_) {}
+// Saves user ID, username, and the API session token to localStorage so the session
+// is restored on the next page load. If no new token is provided, the existing one is kept.
+function saveSession(userId, username, token) {
+    try {
+        const existing = loadSession() || {};
+        localStorage.setItem(_SESSION_KEY, JSON.stringify({
+            user_id: userId,
+            username,
+            token: token || existing.token || null
+        }));
+    } catch (_) {}
 }
 
 // Loads the saved session from localStorage — returns null if nothing is stored or parsing fails.
@@ -3439,9 +3537,30 @@ function loadSession() {
     try { const r = localStorage.getItem(_SESSION_KEY); return r ? JSON.parse(r) : null; } catch (_) { return null; }
 }
 
+// Returns the bearer token for the current session, or null when signed out.
+function getSessionToken() {
+    const session = loadSession();
+    return session && session.token ? session.token : null;
+}
+
 // Removes the session from localStorage, effectively logging the user out on the next page load.
 function clearSession() {
     try { localStorage.removeItem(_SESSION_KEY); } catch (_) {}
+}
+
+// Called when the backend rejects our session token (401). Clears the stale session
+// and returns the user to the login screen exactly once (guards against toast spam
+// from several in-flight requests failing together).
+let _sessionExpiredHandled = false;
+function handleSessionExpired() {
+    if (_sessionExpiredHandled) return;
+    _sessionExpiredHandled = true;
+    clearSession();
+    window.CURRENT_USER_ID = null;
+    const overlay = document.getElementById('login-overlay');
+    if (overlay) overlay.style.display = 'flex';
+    showToast('Your session expired. Please sign in again.', 'info', 6000);
+    setTimeout(() => { _sessionExpiredHandled = false; }, 4000);
 }
 let selectedTaskIds = new Set(); // Tracks which task checkboxes are currently checked for bulk actions.
 let lastRenderedTaskIds = []; // Remembers the IDs of the last rendered task list for "select all" logic.
@@ -3478,10 +3597,10 @@ if (oauthParams.has('google_error')) {
     handleGoogleConnectedRedirect(oauthParams.get('user_id'));
     window.history.replaceState({}, document.title, window.location.pathname);
 } else if (oauthParams.has('google_login')) {
-    handleGoogleLoginRedirect(parseInt(oauthParams.get('user_id')), oauthParams.get('username'));
+    handleGoogleLoginRedirect(parseInt(oauthParams.get('user_id')), oauthParams.get('username'), oauthParams.get('session_token'));
     window.history.replaceState({}, document.title, window.location.pathname);
 } else if (oauthParams.has('google_new_user')) {
-    handleGoogleNewUserRedirect(parseInt(oauthParams.get('user_id')), oauthParams.get('username'));
+    handleGoogleNewUserRedirect(parseInt(oauthParams.get('user_id')), oauthParams.get('username'), oauthParams.get('session_token'));
     window.history.replaceState({}, document.title, window.location.pathname);
 } else if (oauthParams.has('google_link')) {
     handleGoogleLinkRedirect(parseInt(oauthParams.get('user_id')));
@@ -3541,9 +3660,9 @@ async function loginWithGoogle() {
 }
 
 // Called after Google redirects back with ?google_login=1 — logs the user in and restores their session.
-async function handleGoogleLoginRedirect(userId, username) {
+async function handleGoogleLoginRedirect(userId, username, sessionToken) {
     window.CURRENT_USER_ID = userId;
-    saveSession(userId, username);
+    saveSession(userId, username, sessionToken);
     document.getElementById('login-overlay').style.display = 'none';
     await fetchUserSettings();
     loadView('agenda');
@@ -3554,9 +3673,9 @@ async function handleGoogleLoginRedirect(userId, username) {
 
 // Called after Google redirects back with ?google_new_user=1 — first-time Google sign-ups.
 // The backend now saves the full sync token at registration, so google_connected will be true.
-async function handleGoogleNewUserRedirect(userId, username) {
+async function handleGoogleNewUserRedirect(userId, username, sessionToken) {
     window.CURRENT_USER_ID = userId;
-    saveSession(userId, username);
+    saveSession(userId, username, sessionToken);
     document.getElementById('login-overlay').style.display = 'none';
     await fetchUserSettings();
     loadView('agenda');
@@ -3671,9 +3790,9 @@ window.login = async function() {
                 return;
             }
 
-            // Store the ID and Name
+            // Store the ID, Name, and session token
             window.CURRENT_USER_ID = data.user_id;
-            saveSession(data.user_id, data.username);
+            saveSession(data.user_id, data.username, data.token);
             pendingTwoFactorLogin = false;
             loginBtn.textContent = "Sign In";
             applyUserSettings(data.settings || { preferred_name: data.username });
@@ -3827,7 +3946,7 @@ async function submitTwoFactorLoginCode() {
 
         const data = await response.json();
         window.CURRENT_USER_ID = data.user_id;
-        saveSession(data.user_id, data.username);
+        saveSession(data.user_id, data.username, data.token);
         closeTwoFactorLoginModal();
         applyUserSettings(data.settings || { preferred_name: data.username });
         document.getElementById('login-overlay').style.display = 'none';
@@ -4493,7 +4612,7 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
             `;
         } else {
             actionButtonsHtml = `
-                <span style="font-size: 12px; color: var(--muted); text-transform: capitalize; margin-right: 8px;">${task.status}</span>
+                <span style="font-size: 12px; color: var(--muted); text-transform: capitalize; margin-right: 8px;">${escapeHTML(String(task.status || ''))}</span>
                 <button class="done-btn" onclick="restoreTask(${task.task_id})" title="Restore">🔄</button>
                 <button class="done-btn delete" onclick="permanentlyDeleteTask(${task.task_id})" title="Delete Permanently">🗑️</button>
             `;
@@ -4515,8 +4634,8 @@ function renderTaskList(tasks, containerId, isHistoryView = false) {
                 <div style="font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--muted); margin-bottom: 2px;">
                     ${itemType === 'reminder' ? '🔔 Reminder' : itemType === 'event' ? '🗓️ Calendar Event' : '📋 Task'}
                 </div>
-                <div class="task-title">${task.title}</div>
-                <div class="task-sub">${[assignerText, task.description || ''].filter(Boolean).join(' • ')}</div>
+                <div class="task-title">${escapeHTML(task.title || 'Untitled Task')}</div>
+                <div class="task-sub">${escapeHTML([assignerText, task.description || ''].filter(Boolean).join(' • '))}</div>
                 ${datePickerHtml}
             </div>
             <div class="task-actions">
@@ -4763,6 +4882,7 @@ function renderInsightsPage(tasks, containerId = 'agendaList') {
 
     container.innerHTML = `
         <div class="insights-shell">
+            <div class="insights-brief" id="insightsBrief">Putting together your brief…</div>
             <div class="insights-summary">
                 <div class="insight-stat">
                     <div class="insight-stat-label">Active tasks</div>
@@ -4784,6 +4904,29 @@ function renderInsightsPage(tasks, containerId = 'agendaList') {
             <div class="insights-list">${taskRows}</div>
         </div>
     `;
+    loadInsightsBrief();
+}
+
+// Fetches the natural-language daily brief from the backend and fills the Insights banner.
+// AI-generated when an OpenAI key is configured; otherwise a rules-based summary.
+async function loadInsightsBrief() {
+    const el = document.getElementById('insightsBrief');
+    if (!el || !window.CURRENT_USER_ID) return;
+    try {
+        const now = new Date();
+        const localISO = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+        const response = await apiFetch(
+            `${API_BASE}/insights/summary?user_id=${window.CURRENT_USER_ID}&local_time=${encodeURIComponent(localISO)}`,
+            { throttleKey: 'insights-summary', minInterval: 3000, timeout: 30000 }
+        );
+        if (!response.ok) { el.style.display = 'none'; return; }
+        const data = await response.json();
+        if (!data.summary) { el.style.display = 'none'; return; }
+        const label = data.generated_by === 'ai' ? '✨ Clerk brief' : '📋 Daily brief';
+        el.innerHTML = `<span class="insights-brief-label">${label}</span>${escapeHTML(data.summary)}`;
+    } catch (_) {
+        if (el) el.style.display = 'none';
+    }
 }
 
 // Filters out completed, deleted, and calendar-event tasks — returning only actionable tasks and reminders.
@@ -6512,6 +6655,10 @@ function openSettings() {
 
 // Clears all session data, resets the UI to the login screen, and strips the URL hash.
 function logout() {
+    // Tell the backend to invalidate the token (fire-and-forget — local cleanup happens regardless).
+    if (getSessionToken()) {
+        apiFetch(`${API_BASE}/logout`, { method: 'POST', timeout: 5000 }).catch(() => {});
+    }
     window.CURRENT_USER_ID = null;
     clearSession();
     history.replaceState(null, '', window.location.pathname);
@@ -6537,11 +6684,22 @@ async function uploadDocument(file) {
     });
 }
 
+// Returns true when an attached file is an audio voice note (by MIME type or extension).
+function isAudioFile(file) {
+    if (!file) return false;
+    if (file.type && file.type.startsWith('audio/')) return true;
+    return /\.(mp3|m4a|wav|ogg|oga|webm|aac|flac|mpga|mpeg)$/i.test(file.name || '');
+}
+
 // Shows the selected filename below the file input so the user knows what file is queued for upload.
 document.getElementById('fileInput').addEventListener('change', function(e) {
     const fileInfo = document.getElementById('fileInfo');
     if (this.files && this.files[0]) {
-        fileInfo.innerText = "Selected intake file: " + this.files[0].name;
+        const file = this.files[0];
+        const kind = isAudioFile(file) ? "voice note"
+            : (file.type && file.type.startsWith('image/')) ? "schedule image"
+            : "document";
+        fileInfo.innerText = `Selected ${kind}: ${file.name} — click Extract`;
         fileInfo.style.display = "block";
     }
 });
@@ -6864,7 +7022,7 @@ async function _onRecordingStop() {
         const formData = new FormData();
         formData.append('file', blob, `recording.${ext}`);
 
-        const res = await fetch(`${API_BASE}/transcribe`, { method: 'POST', body: formData });
+        const res = await apiFetch(`${API_BASE}/transcribe`, { method: 'POST', body: formData, timeout: 120000 });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.detail || `Server error ${res.status}`);
@@ -6921,10 +7079,12 @@ async function checkUpcomingTasks() {
         const soonThreshold = 30 * 60 * 1000; // 30 minutes in milliseconds
 
         tasks.forEach(task => {
-            if (task.status === 'completed' || notifiedTasks.has(task.task_id)) return;
+            if (task.status === 'completed' || task.status === 'deleted' || notifiedTasks.has(task.task_id)) return;
 
-            const dueDate = new Date(task.due_date);
-            if (isNaN(dueDate.getTime())) return;
+            // parseWallTime keeps the stored wall-clock time instead of shifting
+            // "Z"-suffixed dates by the timezone offset like new Date() would.
+            const dueDate = parseWallTime(task.due_date);
+            if (!dueDate || isNaN(dueDate.getTime())) return;
 
             const diff = dueDate - now;
 
@@ -6963,8 +7123,8 @@ function showNotificationToast(task) {
     toast.innerHTML = `
         <div style="font-size: 20px;">🔔</div>
         <div>
-            <div style="font-weight: 700; font-size: 14px; color: var(--text);">Due Soon: ${task.title}</div>
-            <div style="font-size: 12px; color: var(--muted);">${task.due_text || 'Upcoming deadline'}</div>
+            <div style="font-weight: 700; font-size: 14px; color: var(--text);">Due Soon: ${escapeHTML(task.title || 'Untitled Task')}</div>
+            <div style="font-size: 12px; color: var(--muted);">${escapeHTML(task.due_text || 'Upcoming deadline')}</div>
         </div>
     `;
     container.appendChild(toast);
@@ -6994,7 +7154,8 @@ processBtn.addEventListener('click', async () => {
 
     const selectedFile = fileInput.files && fileInput.files[0];
     const isImageUpload = Boolean(selectedFile && selectedFile.type && selectedFile.type.startsWith('image/'));
-    processBtn.innerText = isImageUpload ? "Reading Schedule..." : "Extracting...";
+    const isAudioUpload = Boolean(selectedFile && isAudioFile(selectedFile));
+    processBtn.innerText = isImageUpload ? "Reading Schedule..." : isAudioUpload ? "Transcribing Voice Note..." : "Extracting...";
     processBtn.disabled = true;
 
     // Build a local ISO timestamp to send as context — the AI uses this as the reference point for "today".
@@ -7019,9 +7180,9 @@ processBtn.addEventListener('click', async () => {
                 body: formData,
                 throttleKey: `ingest-doc:${userId}`,
                 minInterval: 1000,
-                timeout: isImageUpload ? 150000 : 60000
+                timeout: (isImageUpload || isAudioUpload) ? 150000 : 60000
             });
-        } 
+        }
         // Case B: Text Input
         else if (text) {
             response = await apiFetch(`${API_BASE}/ingest`, {
@@ -7050,9 +7211,14 @@ processBtn.addEventListener('click', async () => {
                 const msg = data.message || "Nothing extracted. Try adding your full name in Settings so Clerk can match your schedule row.";
                 showToast(msg, 'info', 7000);
             } else {
-                taskInput.value = "";
-                fileInput.value = "";
-                document.getElementById('fileInfo').style.display = "none";
+                // Only clear the input that was actually processed — a file upload
+                // should not wipe out unprocessed text the user typed.
+                if (selectedFile) {
+                    fileInput.value = "";
+                    document.getElementById('fileInfo').style.display = "none";
+                } else {
+                    taskInput.value = "";
+                }
                 showToast(`Extracted ${ids.length} item${ids.length === 1 ? '' : 's'}.`, 'success');
                 loadView(currentView);
             }
@@ -7101,7 +7267,7 @@ async function submitTaskFeedback(taskId, vote, btn) {
     if (downBtn) downBtn.classList.toggle('active-down', !isToggleOff && vote === -1);
 
     try {
-        const resp = await fetch(`${window.CLERK_API_BASE || ''}/tasks/${taskId}/feedback`, {
+        const resp = await apiFetch(`${API_BASE}/tasks/${taskId}/feedback`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id: userId, vote: finalVote }),

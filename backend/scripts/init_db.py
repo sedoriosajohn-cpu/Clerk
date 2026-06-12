@@ -70,6 +70,7 @@ class User(Base):
     reset_password_expires_at = Column(String)
     google_token_json = Column(Text)  # Stores OAuth token JSON (replaces filesystem file)
     google_sub = Column(String)
+    api_token_hash = Column(String)  # SHA-256 of the current session token; null = signed out
 
 class RawInput(Base):
     __tablename__ = "raw_inputs"
@@ -130,6 +131,7 @@ def ensure_database_schema():
         "reset_password_token_hash": "VARCHAR",
         "reset_password_expires_at": "VARCHAR",
         "google_token_json": "TEXT",
+        "api_token_hash": "VARCHAR",
     }
     user_columns["google_sub"] = "VARCHAR"
     with engine.begin() as connection:

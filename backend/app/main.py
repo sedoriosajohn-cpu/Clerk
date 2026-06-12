@@ -1,7 +1,7 @@
 # --- IMPORTS AND CONFIGURATION ---
 # Standard library and third-party imports needed by the entire app.
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Request
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
@@ -98,7 +98,9 @@ _allowed_origins = (
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
-    allow_credentials=True,
+    # Credentials must never be combined with a wildcard origin — browsers reject it
+    # and it would weaken the same-origin protections if a real origin list is set.
+    allow_credentials=bool(_cors_origins_raw),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -203,6 +205,67 @@ def hash_reset_token(token: str) -> str:
     """Hash the password-reset token before storing it, so a DB leak can't be used to reset accounts."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
+# --- SESSION TOKEN AUTH ---
+# Every data endpoint requires a bearer token issued at login. Without this, anyone
+# who guessed a numeric user_id could read or delete another user's tasks.
+
+def issue_session_token(user: User) -> str:
+    """Generate a fresh session token for a user and store only its hash.
+    The raw token is returned once to the client and never persisted server-side."""
+    token = secrets.token_urlsafe(32)
+    user.api_token_hash = hash_reset_token(token)
+    return token
+
+def get_current_user(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+) -> User:
+    """FastAPI dependency: resolve the Authorization: Bearer header to a User row.
+    Raises 401 when the header is missing or the token doesn't match any user."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Not signed in. Please sign in again.")
+    token = authorization.split(" ", 1)[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Not signed in. Please sign in again.")
+    user = db.query(User).filter(User.api_token_hash == hash_reset_token(token)).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Your session expired. Please sign in again.")
+    return user
+
+def require_same_user(current_user: User, user_id: int):
+    """Reject requests where the authenticated user is acting on another user's data."""
+    if current_user.user_id != user_id:
+        raise HTTPException(status_code=403, detail="You can only access your own data.")
+
+# --- LOGIN ATTEMPT THROTTLING ---
+# In-memory failed-login tracker: 5 failures per username within 15 minutes → temporary lockout.
+_failed_logins: dict = {}
+_LOGIN_MAX_ATTEMPTS = int(os.environ.get("LOGIN_MAX_ATTEMPTS", "5"))
+_LOGIN_LOCKOUT_SECONDS = int(os.environ.get("LOGIN_LOCKOUT_SECONDS", "900"))
+
+def check_login_throttle(username: str):
+    """Raise HTTP 429 if this username has too many recent failed login attempts."""
+    now = time.monotonic()
+    attempts = [t for t in _failed_logins.get(username, []) if now - t < _LOGIN_LOCKOUT_SECONDS]
+    _failed_logins[username] = attempts
+    if len(attempts) >= _LOGIN_MAX_ATTEMPTS:
+        wait_minutes = int((_LOGIN_LOCKOUT_SECONDS - (now - attempts[0])) / 60) + 1
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many failed sign-in attempts. Try again in about {wait_minutes} minute(s)."
+        )
+
+def record_failed_login(username: str):
+    _failed_logins.setdefault(username, []).append(time.monotonic())
+    # Keep the tracker bounded.
+    if len(_failed_logins) > 1000:
+        stale = [k for k, v in _failed_logins.items() if not v or time.monotonic() - v[-1] > _LOGIN_LOCKOUT_SECONDS]
+        for k in stale:
+            _failed_logins.pop(k, None)
+
+def clear_failed_logins(username: str):
+    _failed_logins.pop(username, None)
+
 def send_email_message(to_email: str, subject: str, body: str):
     """Send a plain-text email via SMTP. Falls back to a console print if SMTP is unconfigured."""
     smtp_host = os.environ.get("SMTP_HOST")
@@ -255,9 +318,10 @@ def send_two_factor_code(user: User):
         "Your Clerk verification code",
         f"Your Clerk verification code is {code}. It expires in 10 minutes."
     )
-    # Always pass the code back when email delivery fails for any reason,
-    # so 2FA stays usable even when SMTP is misconfigured or credentials are wrong.
-    if not result.get("sent"):
+    # Only reveal the code in the API response when SMTP was never configured
+    # (local development). Echoing it on transient send failures would let an
+    # attacker with a stolen password bypass 2FA whenever email delivery hiccups.
+    if not result.get("sent") and result.get("reason") == "smtp_not_configured":
         result["dev_code"] = code
     return result
 
@@ -486,9 +550,23 @@ async def read_terms():
     return FileResponse(os.path.join(FRONTEND_DIR, "terms.html"))
 
 # --- AUDIO TRANSCRIPTION ---
-@app.post("/transcribe")
-async def transcribe_audio(file: UploadFile = File(...)):
-    """Accept an audio file and return a transcript via OpenAI Whisper."""
+# Audio formats accepted for voice-note uploads, by extension. Used when the browser
+# sends a generic content type (m4a files often arrive as application/octet-stream).
+AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".ogg", ".oga", ".webm", ".aac", ".flac", ".mp4", ".mpga", ".mpeg"}
+MAX_AUDIO_UPLOAD_BYTES = int(os.environ.get("MAX_AUDIO_UPLOAD_BYTES", str(25 * 1024 * 1024)))  # Whisper API limit
+
+def is_audio_upload(filename: Optional[str], content_type: Optional[str]) -> bool:
+    """Detect whether an uploaded file is an audio/voice note by MIME type or extension."""
+    if content_type and content_type.startswith("audio/"):
+        return True
+    ext = os.path.splitext(filename or "")[1].lower()
+    return ext in AUDIO_EXTENSIONS and (not content_type or content_type in {
+        "application/octet-stream", "video/webm", "video/mp4"
+    })
+
+def transcribe_audio_bytes(audio_bytes: bytes, filename: str, content_type: Optional[str]) -> str:
+    """Send audio bytes to OpenAI Whisper and return the transcript text.
+    Shared by the /transcribe endpoint (mic recordings) and /ingest-doc (voice-note uploads)."""
     try:
         from .extractor import client as openai_client
     except ImportError:
@@ -499,44 +577,60 @@ async def transcribe_audio(file: UploadFile = File(...)):
             status_code=503,
             detail="OpenAI API key not configured. Add OPENAI_API_KEY to your .env file."
         )
-
-    audio_bytes = await file.read()
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Empty audio file received.")
+    if len(audio_bytes) > MAX_AUDIO_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="Audio file is too large (25 MB max).")
 
     import io
     audio_buf = io.BytesIO(audio_bytes)
     # Whisper needs a filename to detect the format
-    filename = file.filename or "recording.webm"
     audio_buf.name = filename
-
     try:
         transcript = openai_client.audio.transcriptions.create(
             model="whisper-1",
-            file=(filename, audio_buf, file.content_type or "audio/webm"),
+            file=(filename, audio_buf, content_type or "audio/webm"),
         )
-        return {"text": transcript.text}
+        return transcript.text or ""
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[transcribe] Whisper error: {e}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+
+@app.post("/transcribe")
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Accept an audio file and return a transcript via OpenAI Whisper.
+    Requires a signed-in user so anonymous visitors can't spend the API budget."""
+    audio_bytes = await file.read()
+    text = await asyncio.to_thread(
+        transcribe_audio_bytes, audio_bytes, file.filename or "recording.webm", file.content_type
+    )
+    return {"text": text}
 
 # --- AUTH ENDPOINTS ---
 @app.post("/login")
 async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
     """Log a user in, triggering a 2FA challenge first if they have it enabled.
     Returns either a 2FA prompt or the full user object with settings on success."""
+    check_login_throttle(data.username)
     user = db.query(User).filter(User.username == data.username).first()
     if not user or not _verify_password(data.password, user.password_hash):
+        record_failed_login(data.username)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    # Silently upgrade plaintext passwords to salted hashes on first login after deployment.
-    if user.password_hash and ":" not in user.password_hash:
+    # Silently upgrade legacy (plaintext / SHA-256) hashes to bcrypt on first login.
+    if user.password_hash and not user.password_hash.startswith(("$2a$", "$2b$", "$2y$")):
         user.password_hash = _hash_password(data.password)
         db.commit()
 
     if user.two_factor_enabled:
         if data.two_factor_code:
             if not verify_two_factor_code(user, data.two_factor_code):
+                record_failed_login(data.username)
                 raise HTTPException(status_code=401, detail="Invalid or expired verification code")
             user.two_factor_code_hash = None
             user.two_factor_expires_at = None
@@ -552,7 +646,22 @@ async def login_user(data: LoginRequest, db: Session = Depends(get_db)):
                 response["dev_code"] = send_result["dev_code"]
             return response
 
-    return {"user_id": user.user_id, "username": user.username, "settings": user_settings_payload(user)}
+    clear_failed_logins(data.username)
+    token = issue_session_token(user)
+    db.commit()
+    return {
+        "user_id": user.user_id,
+        "username": user.username,
+        "token": token,
+        "settings": user_settings_payload(user),
+    }
+
+@app.post("/logout")
+async def logout_user(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Invalidate the current session token server-side so it can't be replayed."""
+    current_user.api_token_hash = None
+    db.commit()
+    return {"status": "success", "message": "Signed out."}
 
 @app.post("/register")
 async def register_user(data: LoginRequest, db: Session = Depends(get_db)):
@@ -563,9 +672,11 @@ async def register_user(data: LoginRequest, db: Session = Depends(get_db)):
     validate_strong_password(data.password, data.username)
     new_user = User(username=data.username, password_hash=_hash_password(data.password))
     db.add(new_user)
+    db.flush()
+    token = issue_session_token(new_user)
     db.commit()
     db.refresh(new_user)
-    return {"message": "User created", "user_id": new_user.user_id}
+    return {"message": "User created", "user_id": new_user.user_id, "token": token}
 
 @app.post("/forgot-password")
 async def forgot_password(data: ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)):
@@ -626,35 +737,86 @@ async def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_d
     user.reset_password_expires_at = None
     user.two_factor_code_hash = None
     user.two_factor_expires_at = None
+    # Invalidate any existing session so a stolen token dies with the old password.
+    user.api_token_hash = None
     db.commit()
     return {"status": "success", "message": "Password reset. You can sign in with your new password."}
 
 # --- TASK INGESTION (TEXT) ---
 @app.post("/ingest")
-async def ingest_task(data: UserInput, db: Session = Depends(get_db)):
+async def ingest_task(
+    data: UserInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Accept a block of free-form text from the user, extract tasks via AI, and save them."""
+    require_same_user(current_user, data.user_id)
     return await process_and_save_tasks(data.content, data.user_id, data.source_type, db, data.local_time)
 
 # --- TASK INGESTION (DOCUMENTS) ---
+TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".csv", ".log", ".text"}
+
+def extract_docx_text(docx_bytes: bytes) -> str:
+    """Pull plain text out of a .docx file using only the standard library.
+
+    A .docx is a zip archive; the document body lives in word/document.xml.
+    Paragraph tags are converted to newlines and remaining XML tags stripped,
+    which is enough for task extraction (no formatting needed).
+    """
+    import io
+    import zipfile
+    try:
+        with zipfile.ZipFile(io.BytesIO(docx_bytes)) as archive:
+            xml_text = archive.read("word/document.xml").decode("utf-8", errors="ignore")
+    except (zipfile.BadZipFile, KeyError):
+        raise HTTPException(status_code=400, detail="Could not read this Word document. Try saving it as PDF or .docx again.")
+
+    xml_text = re.sub(r"</w:p>", "\n", xml_text)
+    xml_text = re.sub(r"<w:tab[^>]*/>", "\t", xml_text)
+    text = re.sub(r"<[^>]+>", "", xml_text)
+    # Unescape the handful of XML entities Word actually emits.
+    for entity, char in (("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", '"'), ("&apos;", "'")):
+        text = text.replace(entity, char)
+    return text.strip()
+
 @app.post("/ingest-doc")
 async def ingest_doc(
     user_id: int = Form(...),
     local_time: Optional[str] = Form(None),
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Accept an uploaded file (PDF, text, image) and extract tasks from its content.
-    Image uploads use the AI vision model; PDFs and text use the standard extractor."""
+    """Accept an uploaded file (PDF, Word doc, text, image, or voice note) and extract tasks.
+    Image uploads use the AI vision model; audio is transcribed first; documents use the
+    standard extractor. The MIME type is checked first, falling back to the file extension
+    because browsers often send generic types like application/octet-stream."""
+    require_same_user(current_user, user_id)
     content = ""
-    file_type = file.content_type
-    source_info = f"file: {file.filename}"
+    file_type = file.content_type or ""
+    filename = file.filename or "upload"
+    extension = os.path.splitext(filename)[1].lower()
+    source_info = f"file: {filename}"
 
     try:
         user = db.query(User).filter(User.user_id == user_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        if file_type == "application/pdf":
+        if is_audio_upload(filename, file_type):
+            # Voice note upload: transcribe with Whisper, then run normal task extraction.
+            audio_bytes = await file.read()
+            transcript = await asyncio.to_thread(transcribe_audio_bytes, audio_bytes, filename, file_type)
+            if not transcript.strip():
+                return {
+                    "status": "success",
+                    "task_ids": [],
+                    "message": "No speech detected in this voice note."
+                }
+            result = await process_and_save_tasks(transcript, user_id, source_info, db, local_time)
+            result["transcript"] = transcript
+            return result
+        elif file_type == "application/pdf" or extension == ".pdf":
             try:
                 import fitz
             except ModuleNotFoundError:
@@ -667,10 +829,13 @@ async def ingest_doc(
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             content = "\n".join(page.get_text() for page in doc)
             doc.close()
-        elif file_type in ["text/plain", "text/markdown"]:
+        elif extension == ".docx" or file_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            docx_bytes = await file.read()
+            content = extract_docx_text(docx_bytes)
+        elif file_type in ["text/plain", "text/markdown", "text/csv"] or extension in TEXT_EXTENSIONS:
             # Read Text bytes
             text_bytes = await file.read()
-            content = text_bytes.decode("utf-8")
+            content = text_bytes.decode("utf-8", errors="replace")
         elif file_type and file_type.startswith("image/"):
             # Check for API key before even reading the bytes so we give a helpful message.
             try:
@@ -700,7 +865,11 @@ async def ingest_doc(
 
             return await save_work_schedule_entries(structured_tasks, user, source_info, db)
         else:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_type}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file_type or extension or 'unknown'}. "
+                       "Supported: PDF, Word (.docx), text (.txt/.md/.csv), images, and audio voice notes."
+            )
 
         if not content.strip():
             raise HTTPException(status_code=400, detail="The uploaded file appears to be empty.")
@@ -1001,8 +1170,12 @@ def _complete_google_login(code: str, state: Optional[str], saved_state: dict, f
             # Existing Google user — update token (scopes may have expanded) and log in.
             if token_json_to_save and token_data.get("refresh_token"):
                 user.google_token_json = token_json_to_save
-                db.commit()
-            return RedirectResponse(url=f"{frontend_url}?google_login=1&user_id={user.user_id}&username={quote(user.username, safe='')}")
+            session_token = issue_session_token(user)
+            db.commit()
+            return RedirectResponse(
+                url=f"{frontend_url}?google_login=1&user_id={user.user_id}"
+                    f"&username={quote(user.username, safe='')}&session_token={quote(session_token, safe='')}"
+            )
 
         # New user — auto-generate a username from the Google email.
         base_username = re.sub(r'[^a-z0-9_]', '', google_email.split("@")[0].lower()) or "user"
@@ -1021,10 +1194,15 @@ def _complete_google_login(code: str, state: Optional[str], saved_state: dict, f
             google_token_json=token_json_to_save,
         )
         db.add(new_user)
+        db.flush()
+        session_token = issue_session_token(new_user)
         db.commit()
         db.refresh(new_user)
         # google_new_user=1 tells the frontend this is a first-time registration.
-        return RedirectResponse(url=f"{frontend_url}?google_new_user=1&user_id={new_user.user_id}&username={quote(new_user.username, safe='')}")
+        return RedirectResponse(
+            url=f"{frontend_url}?google_new_user=1&user_id={new_user.user_id}"
+                f"&username={quote(new_user.username, safe='')}&session_token={quote(session_token, safe='')}"
+        )
     except Exception as exc:
         db.rollback()
         return RedirectResponse(url=f"{frontend_url}?google_error={quote(str(exc), safe='')}")
@@ -1170,8 +1348,9 @@ def get_google_creds(user_id: int):
     return creds
 
 @app.get("/auth/google")
-async def get_google_auth_url(user_id: int, db: Session = Depends(get_db)):
+async def get_google_auth_url(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Returns the Google OAuth URL for the frontend to redirect to."""
+    require_same_user(current_user, user_id)
     ensure_user_exists(user_id, db)
     return {"auth_url": create_google_auth_url(user_id)}
 
@@ -1214,12 +1393,13 @@ async def get_google_login_url():
 
 
 @app.get("/auth/google/link")
-async def get_google_link_url(user_id: int, db: Session = Depends(get_db)):
+async def get_google_link_url(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Generate an OAuth URL to link a Google account to an existing Clerk account.
 
     Used by password-based users who want Google sign-in and/or sync.
     The callback will update google_sub and save the full token for this user.
     """
+    require_same_user(current_user, user_id)
     ensure_user_exists(user_id, db)
     try:
         link_state = f"link_{secrets.token_urlsafe(24)}"
@@ -1243,8 +1423,15 @@ async def get_google_link_url(user_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Could not start Google link: {exc}")
 
 @app.post("/auth/google/set-password")
-async def google_set_password(data: GoogleSetPasswordRequest, db: Session = Depends(get_db)):
-    """Sets a password for a Google-authenticated user who hasn't set one yet."""
+async def google_set_password(
+    data: GoogleSetPasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Sets a password for a Google-authenticated user who hasn't set one yet.
+    Requires the session token issued during the Google sign-in redirect, so a
+    stranger can't claim a passwordless account just by guessing its user_id."""
+    require_same_user(current_user, data.user_id)
     user = db.query(User).filter(User.user_id == data.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -1454,9 +1641,30 @@ def build_duplicate_index(db: Session, user_id: int) -> dict:
 
     return duplicate_index
 
+def adjacent_day_keys(due_key: str) -> List[str]:
+    """Return the day keys for the day before and after a YYYY-MM-DD string.
+    Used to catch the same event imported with a ±1 day shift (e.g. a UTC-stored
+    calendar event vs. a local-time date read from an uploaded document)."""
+    try:
+        day = datetime.fromisoformat(due_key)
+    except ValueError:
+        return []
+    return [
+        (day - timedelta(days=1)).strftime("%Y-%m-%d"),
+        (day + timedelta(days=1)).strftime("%Y-%m-%d"),
+    ]
+
 def find_duplicate_task(duplicate_index: dict, task_data) -> Optional[Task]:
     """Search the pre-built index for an existing task that matches the incoming one.
-    Falls back from exact key match → same-day fuzzy title → cross-date fuzzy title (for date-less originals)."""
+
+    Match order (strictest first):
+      1. Exact normalized title + same day.
+      2. Fuzzy title + same day.
+      3. Fuzzy title + adjacent day (±1) — catches timezone shifts between sources,
+         e.g. 'Team meeting' from Google Calendar vs. the same meeting in a PDF.
+      4. Fuzzy title where one side has no date — an undated Gmail mention is
+         superseded by the dated Calendar/Classroom version, and vice versa.
+    """
     key = task_match_key(task_data)
     if not key:
         return None
@@ -1467,14 +1675,29 @@ def find_duplicate_task(duplicate_index: dict, task_data) -> Optional[Task]:
 
     title_key, due_key = key
     if not due_key:
+        # New task has no date: fall back to fuzzy title match against any existing task,
+        # preferring one that has a date (it's the more authoritative copy).
+        dated_match = None
+        undated_match = None
         for existing in duplicate_index.get("__items__", []):
-            if normalize_title_for_match(existing.title) == title_key:
-                return existing
-        return None
+            if titles_are_similar(existing.title, task_data.get("title")):
+                if existing.due_date and not dated_match:
+                    dated_match = existing
+                elif not existing.due_date and not undated_match:
+                    undated_match = existing
+        return dated_match or undated_match
 
     for existing in duplicate_index.get("__items__", []):
         if due_day_key(existing.due_date) == due_key and titles_are_similar(existing.title, task_data.get("title")):
             return existing
+
+    # Adjacent-day pass: same fuzzy title within ±1 day is almost certainly the
+    # same item arriving from two sources with different timezone handling.
+    neighbor_keys = set(adjacent_day_keys(due_key))
+    if neighbor_keys:
+        for existing in duplicate_index.get("__items__", []):
+            if due_day_key(existing.due_date) in neighbor_keys and titles_are_similar(existing.title, task_data.get("title")):
+                return existing
 
     # Cross-date pass: new task has a real date, existing task has none.
     # Catches Gmail/announcement tasks that were saved without a due date
@@ -1983,8 +2206,9 @@ def collect_classroom_entries(classroom, db: Session, user_id: int, utc_offset_m
     return sync_entries, summary
 
 @app.get("/sync-gmail")
-async def sync_gmail(user_id: int):
+async def sync_gmail(user_id: int, current_user: User = Depends(get_current_user)):
     """API endpoint to trigger a Gmail sync for the user. Runs in a thread to avoid blocking async."""
+    require_same_user(current_user, user_id)
     return await asyncio.to_thread(sync_gmail_blocking, user_id)
 
 def sync_gmail_blocking(user_id: int):
@@ -2030,8 +2254,9 @@ def sync_gmail_blocking(user_id: int):
         db.close()
 
 @app.get("/sync-classroom")
-async def sync_classroom(user_id: int, tz_offset: int = 0):
+async def sync_classroom(user_id: int, tz_offset: int = 0, current_user: User = Depends(get_current_user)):
     """API endpoint to trigger a Google Classroom sync. tz_offset converts UTC due times to local time."""
+    require_same_user(current_user, user_id)
     return await asyncio.to_thread(sync_classroom_blocking, user_id, tz_offset)
 
 def sync_classroom_blocking(user_id: int, tz_offset: int = 0):
@@ -2086,8 +2311,9 @@ def cleanup_duplicate_calendar_events(db: Session, user_id: int) -> int:
     return removed
 
 @app.get("/sync-all")
-async def sync_all(user_id: int, tz_offset: int = 0):
+async def sync_all(user_id: int, tz_offset: int = 0, current_user: User = Depends(get_current_user)):
     """Trigger a full sync across Gmail, Classroom, Calendar, and Google Tasks in one call."""
+    require_same_user(current_user, user_id)
     return await asyncio.to_thread(sync_all_blocking, user_id, tz_offset)
 
 def sync_all_blocking(user_id: int, tz_offset: int = 0):
@@ -2332,6 +2558,14 @@ async def save_structured_task_entries(entries, user_id, db):
                         duplicate.end_date = task_data["end_date"]
                     if task_data.get("is_all_day") is not None:
                         duplicate.is_all_day = 1 if task_data["is_all_day"] else 0
+                elif task_data.get("due_date") and not duplicate.due_date:
+                    # Non-authoritative source, but the existing copy has no date at all —
+                    # a dated duplicate (e.g. from a PDF) is still better than nothing.
+                    duplicate.due_date = task_data["due_date"]
+                    if task_data.get("end_date"):
+                        duplicate.end_date = task_data["end_date"]
+                    if task_data.get("is_all_day") is not None:
+                        duplicate.is_all_day = 1 if task_data["is_all_day"] else 0
                 task_ids.append(duplicate.task_id)
                 continue
 
@@ -2367,15 +2601,17 @@ async def save_structured_task_entries(entries, user_id, db):
 
 # --- TASK MANAGEMENT ROUTES ---
 @app.post("/tasks/deduplicate")
-async def deduplicate_tasks(user_id: int, db: Session = Depends(get_db)):
+async def deduplicate_tasks(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Remove duplicate Google Calendar events with the same title and date."""
+    require_same_user(current_user, user_id)
     removed = cleanup_duplicate_calendar_events(db, user_id)
     return {"status": "success", "removed": removed, "message": f"Removed {removed} duplicate calendar event(s)."}
 
 @app.get("/tasks")
-async def get_tasks(user_id: int, db: Session = Depends(get_db)):
+async def get_tasks(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Return all tasks for a user. Opportunistically backfills missing assignee values from the raw
     source text so older tasks gradually get proper labels without a migration script."""
+    require_same_user(current_user, user_id)
     tasks = db.query(Task).filter(Task.owner_id == user_id).all()
 
     # Only fetch RawInput rows for tasks that are still missing an assignee label.
@@ -2402,8 +2638,9 @@ async def get_tasks(user_id: int, db: Session = Depends(get_db)):
 
 # --- USER SETTINGS ENDPOINTS ---
 @app.get("/users/{user_id}/settings")
-async def get_user_settings(user_id: int, db: Session = Depends(get_db)):
+async def get_user_settings(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Return the current settings/preferences for a user as a flat JSON object."""
+    require_same_user(current_user, user_id)
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2412,9 +2649,10 @@ async def get_user_settings(user_id: int, db: Session = Depends(get_db)):
     }
 
 @app.patch("/users/{user_id}/settings")
-async def update_user_settings(user_id: int, settings: UserSettingsUpdate, db: Session = Depends(get_db)):
+async def update_user_settings(user_id: int, settings: UserSettingsUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Apply only the fields provided in the PATCH body — None fields are left unchanged.
     Validates hours, email format, and prevents enabling 2FA without a verified code."""
+    require_same_user(current_user, user_id)
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2459,9 +2697,10 @@ async def update_user_settings(user_id: int, settings: UserSettingsUpdate, db: S
 
 # --- 2FA SETUP ENDPOINTS ---
 @app.post("/users/{user_id}/2fa/send-test")
-async def send_two_factor_test(user_id: int, request: TwoFactorSendRequest, db: Session = Depends(get_db)):
+async def send_two_factor_test(user_id: int, request: TwoFactorSendRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Send a 6-digit test code to the user's email before they fully enable 2FA.
     Returns the code in the response body when SMTP is unavailable, for dev/testing convenience."""
+    require_same_user(current_user, user_id)
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2487,9 +2726,10 @@ async def send_two_factor_test(user_id: int, request: TwoFactorSendRequest, db: 
     return result
 
 @app.post("/users/{user_id}/2fa/verify")
-async def verify_two_factor_setup(user_id: int, request: TwoFactorVerifyRequest, db: Session = Depends(get_db)):
+async def verify_two_factor_setup(user_id: int, request: TwoFactorVerifyRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Verify the test code and, if correct, officially enable 2FA on the account.
     Clears the code hash after success so the same code can't be replayed."""
+    require_same_user(current_user, user_id)
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2508,10 +2748,11 @@ async def verify_two_factor_setup(user_id: int, request: TwoFactorVerifyRequest,
     return {"status": "success", "message": "Two-factor authentication is now enabled."}
 
 @app.get("/tasks/history")
-async def get_task_history(user_id: int, db: Session = Depends(get_db), limit: int = 50):
+async def get_task_history(user_id: int, db: Session = Depends(get_db), limit: int = 50, current_user: User = Depends(get_current_user)):
     """
     Fetches recently completed or deleted tasks for a user.
     """
+    require_same_user(current_user, user_id)
     # Auto-delete tasks older than 7 days from history
     cutoff = datetime.utcnow() - timedelta(days=7)
     db.query(Task).filter(
@@ -2528,10 +2769,10 @@ async def get_task_history(user_id: int, db: Session = Depends(get_db), limit: i
     return {"tasks": [task_to_dict(task) for task in history_tasks]}
 
 @app.patch("/tasks/{task_id}")
-async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depends(get_db)):
+async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Partially update a task's fields. Date-only strings are padded to full ISO datetimes
     so the database stores a consistent format regardless of how the frontend sends the value."""
-    task = db.query(Task).filter(Task.task_id == task_id).first()
+    task = db.query(Task).filter(Task.task_id == task_id, Task.owner_id == current_user.user_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
@@ -2554,7 +2795,7 @@ async def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depen
     return {"message": "Updated successfully"}
 
 @app.patch("/tasks/bulk/update")
-async def bulk_update_tasks(action: BulkTaskAction, status: str = "deleted", db: Session = Depends(get_db)):
+async def bulk_update_tasks(action: BulkTaskAction, status: str = "deleted", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Set the status of multiple tasks in one DB query. Uses dict.fromkeys to deduplicate IDs."""
     if status not in {"deleted", "completed", "pending"}:
         raise HTTPException(status_code=400, detail="Unsupported bulk status.")
@@ -2563,7 +2804,10 @@ async def bulk_update_tasks(action: BulkTaskAction, status: str = "deleted", db:
     if not task_ids:
         raise HTTPException(status_code=400, detail="No tasks selected.")
 
-    updated = db.query(Task).filter(Task.task_id.in_(task_ids)).update(
+    updated = db.query(Task).filter(
+        Task.task_id.in_(task_ids),
+        Task.owner_id == current_user.user_id
+    ).update(
         {Task.status: status},
         synchronize_session=False
     )
@@ -2571,20 +2815,23 @@ async def bulk_update_tasks(action: BulkTaskAction, status: str = "deleted", db:
     return {"message": f"Updated {updated} tasks.", "updated": updated}
 
 @app.delete("/tasks/bulk/permanent")
-async def bulk_permanent_delete_tasks(action: BulkTaskAction, db: Session = Depends(get_db)):
+async def bulk_permanent_delete_tasks(action: BulkTaskAction, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Permanently remove multiple tasks from the database (not just soft-delete). Irreversible."""
     task_ids = list(dict.fromkeys(action.task_ids or []))
     if not task_ids:
         raise HTTPException(status_code=400, detail="No tasks selected.")
 
-    deleted = db.query(Task).filter(Task.task_id.in_(task_ids)).delete(synchronize_session=False)
+    deleted = db.query(Task).filter(
+        Task.task_id.in_(task_ids),
+        Task.owner_id == current_user.user_id
+    ).delete(synchronize_session=False)
     db.commit()
     return {"message": f"Permanently deleted {deleted} tasks.", "deleted": deleted}
 
 @app.delete("/tasks/{task_id}/permanent")
-async def permanent_delete_task(task_id: int, db: Session = Depends(get_db)):
+async def permanent_delete_task(task_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Permanently delete a single task row. Distinct from PATCH status='deleted' (soft-delete)."""
-    task = db.query(Task).filter(Task.task_id == task_id).first()
+    task = db.query(Task).filter(Task.task_id == task_id, Task.owner_id == current_user.user_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     db.delete(task)
@@ -2600,7 +2847,7 @@ class FeedbackRequest(BaseModel):
 
 
 @app.post("/tasks/{task_id}/feedback")
-async def submit_task_feedback(task_id: int, data: FeedbackRequest, db: Session = Depends(get_db)):
+async def submit_task_feedback(task_id: int, data: FeedbackRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Record whether the user thinks a task was extracted correctly.
 
     A +1 vote means the extraction was accurate; -1 means it was wrong.
@@ -2608,6 +2855,7 @@ async def submit_task_feedback(task_id: int, data: FeedbackRequest, db: Session 
     so Clerk can learn that this user's texts tend to produce reliable or
     unreliable extractions.
     """
+    require_same_user(current_user, data.user_id)
     task = db.query(Task).filter(Task.task_id == task_id, Task.owner_id == data.user_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -2632,24 +2880,193 @@ async def submit_task_feedback(task_id: int, data: FeedbackRequest, db: Session 
 
 
 @app.get("/tasks/{task_id}/feedback")
-async def get_task_feedback(task_id: int, user_id: int, db: Session = Depends(get_db)):
+async def get_task_feedback(task_id: int, user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Return the current feedback vote for a task."""
+    require_same_user(current_user, user_id)
     task = db.query(Task).filter(Task.task_id == task_id, Task.owner_id == user_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"task_id": task_id, "vote": task.user_feedback}
 
 
+# --- INSIGHTS SUMMARY ---
+
+# Cache AI-generated briefs per user so repeat visits to the Insights page don't
+# re-spend tokens. Invalidated when the user's task state changes (hash mismatch).
+_insights_cache: dict = {}
+INSIGHTS_CACHE_SECONDS = int(os.environ.get("INSIGHTS_CACHE_SECONDS", "600"))
+
+def _parse_wall_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse an ISO-ish date string as naive wall-clock time (drops Z / offsets)."""
+    if not value:
+        return None
+    try:
+        cleaned = re.sub(r'Z$|[+-]\d{2}:\d{2}$', '', str(value))
+        return datetime.fromisoformat(cleaned)
+    except ValueError:
+        return None
+
+def _build_insights_stats(tasks: List[Task], now: datetime) -> dict:
+    """Aggregate the numbers the Insights page shows and the summary text references."""
+    today = now.date()
+    week_end = today + timedelta(days=7)
+    stats = {
+        "active": 0, "due_today": 0, "overdue": 0, "due_this_week": 0,
+        "high_priority": 0, "low_confidence": 0, "no_due_date": 0,
+        "reminders": 0, "events": 0,
+    }
+    day_load: dict = {}
+    next_up = None
+    for task in tasks:
+        stats["active"] += 1
+        if task.item_type == "reminder":
+            stats["reminders"] += 1
+        elif task.item_type == "event":
+            stats["events"] += 1
+        if task.priority == "high":
+            stats["high_priority"] += 1
+        if task.confidence is not None and task.confidence < 70:
+            stats["low_confidence"] += 1
+        due = _parse_wall_datetime(task.due_date)
+        if not due:
+            stats["no_due_date"] += 1
+            continue
+        due_day = due.date()
+        if due_day == today:
+            stats["due_today"] += 1
+        elif due_day < today:
+            stats["overdue"] += 1
+        elif due_day <= week_end:
+            stats["due_this_week"] += 1
+        if today <= due_day <= week_end:
+            day_load[due_day] = day_load.get(due_day, 0) + 1
+        if due >= now and (next_up is None or due < next_up[0]):
+            next_up = (due, task.title)
+
+    if day_load:
+        busiest_day, busiest_count = max(day_load.items(), key=lambda item: item[1])
+        stats["busiest_day"] = busiest_day.strftime("%A")
+        stats["busiest_day_count"] = busiest_count
+    if next_up:
+        stats["next_up_title"] = next_up[1]
+        stats["next_up_at"] = next_up[0].strftime("%Y-%m-%dT%H:%M:%S")
+    return stats
+
+def _rules_based_summary(stats: dict, preferred_name: str) -> str:
+    """Build a readable daily brief without any AI call — always available."""
+    parts = []
+    if stats["active"] == 0:
+        return "You're all caught up — no active tasks right now. Add notes, upload a file, or sync Google to fill your queue."
+    opening = f"You have {stats['active']} active item{'s' if stats['active'] != 1 else ''}"
+    middles = []
+    if stats["due_today"]:
+        middles.append(f"{stats['due_today']} due today")
+    if stats["overdue"]:
+        middles.append(f"{stats['overdue']} overdue")
+    if stats["due_this_week"]:
+        middles.append(f"{stats['due_this_week']} more due this week")
+    parts.append(opening + (" — " + ", ".join(middles) if middles else "") + ".")
+    if stats.get("next_up_title"):
+        when = _parse_wall_datetime(stats.get("next_up_at"))
+        when_text = when.strftime("%a %b %d at %I:%M %p").replace(" 0", " ") if when else "soon"
+        parts.append(f"Next up: “{stats['next_up_title']}” on {when_text}.")
+    if stats.get("busiest_day") and stats.get("busiest_day_count", 0) > 1:
+        parts.append(f"{stats['busiest_day']} is your busiest day with {stats['busiest_day_count']} items.")
+    if stats["low_confidence"]:
+        parts.append(f"{stats['low_confidence']} extraction{'s' if stats['low_confidence'] != 1 else ''} below 70% confidence could use a quick review.")
+    if stats["no_due_date"]:
+        parts.append(f"{stats['no_due_date']} item{'s' if stats['no_due_date'] != 1 else ''} still have no due date.")
+    return " ".join(parts)
+
+def _ai_insights_summary(stats: dict, task_lines: List[str], preferred_name: str) -> Optional[str]:
+    """Ask the AI for a 2–3 sentence brief. Returns None on any failure so the
+    caller can fall back to the rules-based summary."""
+    try:
+        from .extractor import client as _ai_client
+    except ImportError:
+        from extractor import client as _ai_client
+    if not _ai_client:
+        return None
+    try:
+        prompt = (
+            "You are Clerk, a friendly task assistant. Write a 2-3 sentence daily brief "
+            f"for {preferred_name or 'the user'} based on these stats and upcoming tasks. "
+            "Be specific and practical (what to do first, what's at risk). Plain text only, no lists.\n\n"
+            f"Stats: {json.dumps(stats)}\n"
+            "Upcoming tasks:\n" + "\n".join(task_lines[:15])
+        )
+        response = _ai_client.chat.completions.create(
+            model=os.environ.get("OPENAI_MODEL", "gpt-5.4"),
+            messages=[{"role": "user", "content": prompt}],
+            max_completion_tokens=220,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        return text or None
+    except Exception as exc:
+        print(f"[insights] AI summary failed, using rules-based text: {exc}")
+        return None
+
+@app.get("/insights/summary")
+async def get_insights_summary(
+    user_id: int,
+    local_time: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return a short natural-language brief plus aggregate stats for the Insights page.
+    Uses the AI model when configured (cached per task-state), otherwise a rules-based text."""
+    require_same_user(current_user, user_id)
+    now = _parse_wall_datetime(local_time) or datetime.now()
+    tasks = db.query(Task).filter(
+        Task.owner_id == user_id,
+        Task.status.notin_(["deleted", "completed"])
+    ).all()
+
+    stats = _build_insights_stats(tasks, now)
+    rules_summary = _rules_based_summary(stats, current_user.preferred_name or current_user.username)
+
+    # The cache key covers every field that could change the brief.
+    state_fingerprint = hashlib.sha256(json.dumps({
+        "stats": stats,
+        "day": now.strftime("%Y-%m-%d"),
+    }, sort_keys=True, default=str).encode()).hexdigest()
+
+    cached = _insights_cache.get(user_id)
+    if cached and cached["hash"] == state_fingerprint and time.monotonic() - cached["at"] < INSIGHTS_CACHE_SECONDS:
+        return {"summary": cached["summary"], "stats": stats, "generated_by": cached["generated_by"]}
+
+    upcoming_lines = []
+    for task in sorted(tasks, key=lambda t: t.due_date or "9999"):
+        due = _parse_wall_datetime(task.due_date)
+        upcoming_lines.append(f"- {task.title} (due {due.strftime('%Y-%m-%d %H:%M') if due else 'no date'}, priority {task.priority})")
+
+    ai_summary = await asyncio.to_thread(
+        _ai_insights_summary, stats, upcoming_lines, current_user.preferred_name or current_user.username
+    )
+    summary = ai_summary or rules_summary
+    generated_by = "ai" if ai_summary else "rules"
+    _insights_cache[user_id] = {
+        "hash": state_fingerprint, "summary": summary,
+        "generated_by": generated_by, "at": time.monotonic(),
+    }
+    # Keep the cache bounded.
+    if len(_insights_cache) > 500:
+        oldest = sorted(_insights_cache.items(), key=lambda item: item[1]["at"])[:100]
+        for key, _ in oldest:
+            _insights_cache.pop(key, None)
+    return {"summary": summary, "stats": stats, "generated_by": generated_by}
+
 # --- ACCOUNT DELETION ---
 
 @app.delete("/users/{user_id}")
-async def delete_account(user_id: int, db: Session = Depends(get_db)):
+async def delete_account(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Permanently delete a user account and all associated data.
 
     Removes every Task, RawInput, and User row for this user.
     This action is irreversible — the frontend must show a second confirmation
     before calling this endpoint.
     """
+    require_same_user(current_user, user_id)
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

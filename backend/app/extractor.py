@@ -14,7 +14,11 @@ load_dotenv()
 # Build the OpenAI client once at startup using environment variables.
 # The client is set to None if no API key is found, so callers can check
 # `if not client` to decide whether to fall back to local (regex) extraction.
-api_key = os.getenv("OPENAI_API_KEY")
+# Setting OPENAI_API_KEY to "disabled"/"none"/"off" forces the local fallback,
+# which is useful for testing without spending API credits.
+api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+if api_key.lower() in {"none", "disabled", "off"}:
+    api_key = ""
 client = OpenAI(
     api_key=api_key,
     timeout=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "45")),
@@ -100,6 +104,16 @@ DATE_REFERENCE_RE = re.compile(
     r'saturday|sunday|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|'
     r'jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|'
     r'nov(?:ember)?|dec(?:ember)?|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\b',
+    re.IGNORECASE
+)
+
+# Relative date phrases ("tomorrow", "next week") resolve to an absolute date that
+# will never appear verbatim in the source text, so date verification must treat
+# them as legitimate grounding rather than a hallucinated date.
+RELATIVE_DATE_PHRASE_RE = re.compile(
+    r'\b(today|tonight|tomorrow|this\s+(?:morning|afternoon|evening|week|weekend)|'
+    r'next\s+(?:week|weekend|month)|end\s+of\s+(?:day|the\s+day|week|the\s+week|month|the\s+month)|'
+    r'in\s+\d+\s+(?:hour|hours|day|days|week|weeks)|eod|eow|asap)\b',
     re.IGNORECASE
 )
 
@@ -200,6 +214,10 @@ def verify_with_regex(raw_text: str, extracted_date: str) -> bool:
             return True
         # Check weekday name ("Saturday", "Sat")
         if dt.strftime('%A').lower() in lowered or dt.strftime('%a').lower() in lowered:
+            return True
+        # Relative phrases ("tomorrow", "next week", "in 3 days") resolve to dates
+        # that never appear verbatim in the text — accept them as grounded.
+        if RELATIVE_DATE_PHRASE_RE.search(raw_text):
             return True
     except (ValueError, AttributeError):
         pass
@@ -415,12 +433,23 @@ def parse_due_date(text: str, now: datetime):
 
     if re.search(r'\btoday\b', lowered):
         target = now
+    elif re.search(r'\btonight\b|\bthis\s+evening\b', lowered):
+        target = now
+        # "tonight" implies an evening time even when no clock time is given.
+        if is_all_day:
+            hour, minute, is_all_day = 20, 0, False
     elif re.search(r'\btomorrow\b', lowered):
         target = now + timedelta(days=1)
+    elif re.search(r'\bnext\s+week\b', lowered):
+        target = now + timedelta(days=7)
     else:
+        in_n = re.search(r'\bin\s+(\d+)\s+(day|days|week|weeks)\b', lowered)
         next_weekday = re.search(r'\bnext\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', lowered)
         weekday = next_weekday or re.search(r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', lowered)
-        if weekday:
+        if in_n:
+            count = int(in_n.group(1))
+            target = now + timedelta(days=count * (7 if in_n.group(2).startswith("week") else 1))
+        elif weekday:
             desired = WEEKDAYS[weekday.group(1)]
             days_ahead = desired - now.weekday()
             # If the day has already passed this week (or "next X" was explicit),
@@ -429,25 +458,42 @@ def parse_due_date(text: str, now: datetime):
                 days_ahead += 7
             target = now + timedelta(days=days_ahead)
 
-    numeric = re.search(r'\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b', lowered)
+    # Slash dates ("7/15", "07/15/2026") are reliable date syntax. Dash pairs are
+    # only treated as a date when a year is included ("7-15-26"), because bare
+    # "9-5" is far more likely to be a time range than September 5th.
+    numeric = (
+        re.search(r'\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b', lowered)
+        or re.search(r'\b(\d{1,2})-(\d{1,2})-(\d{2,4})\b', lowered)
+    )
     if numeric:
         month = int(numeric.group(1))
         day = int(numeric.group(2))
         year = int(numeric.group(3) or now.year)
         if year < 100:
             year += 2000
-        target = datetime(year, month, day)
+        # Tolerate D/M order ("25/12") and ignore values that are not real dates
+        # instead of crashing the whole extraction.
+        if month > 12 and day <= 12:
+            month, day = day, month
+        try:
+            target = datetime(year, month, day)
+        except ValueError:
+            pass
 
     month_name = re.search(
         r'\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:,\s*(\d{4}))?\b',
         lowered
     )
     if month_name:
-        target = datetime(
-            int(month_name.group(3) or now.year),
-            MONTHS[month_name.group(1)],
-            int(month_name.group(2))
-        )
+        try:
+            target = datetime(
+                int(month_name.group(3) or now.year),
+                MONTHS[month_name.group(1)],
+                int(month_name.group(2))
+            )
+        except ValueError:
+            # Impossible dates like "June 31" should not crash extraction.
+            pass
 
     if not target:
         return None, None, True
@@ -521,11 +567,13 @@ def local_nlp_extract_tasks(text: str, current_time: Optional[str] = None) -> Li
             "priority": priority,
             "confidence": 68
         }
-        tasks.append(format_for_frontend(
-            adjust_confidence(candidate, task, current_time=current_time, date_verified=True)
-        ))
+        scored = adjust_confidence(candidate, task, current_time=current_time, date_verified=True)
+        # Regex-only parsing can't truly reach near-certainty — cap below the AI path
+        # so reviewers can tell locally parsed tasks from model-verified ones.
+        scored["confidence"] = min(scored["confidence"], 88)
+        tasks.append(format_for_frontend(scored))
 
-    return tasks
+    return dedupe_extracted_tasks(tasks)
 
 # --- AI CHUNK EXTRACTION ---
 def extract_json_from_chunk(chunk: str, now_iso: str) -> list:
@@ -1387,6 +1435,36 @@ def extract_work_schedule_from_text(
         tasks.append(format_for_frontend(valid))
     return tasks
 
+# --- IN-BATCH DEDUPLICATION ---
+def _task_dedupe_key(task: Dict[str, Any]) -> tuple:
+    """Build a comparison key for spotting the same task extracted twice in one batch.
+
+    Chunk overlap (and occasional AI repetition) can produce the same task more
+    than once. Title words are normalised and sorted so small phrasing changes
+    still collide, and the due day keeps distinct same-named tasks apart.
+    """
+    title_words = sorted(title_terms(task.get("title"))) or [str(task.get("title") or "").lower().strip()]
+    return (" ".join(title_words), due_day_key_from_iso(task.get("due_date")))
+
+def dedupe_extracted_tasks(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Collapse duplicate tasks within a single extraction batch, keeping the
+    highest-confidence (and most complete) copy of each."""
+    best: Dict[tuple, Dict[str, Any]] = {}
+    order: List[tuple] = []
+    for task in tasks:
+        key = _task_dedupe_key(task)
+        existing = best.get(key)
+        if existing is None:
+            best[key] = task
+            order.append(key)
+            continue
+        # Prefer the copy with a due date; tie-break on confidence.
+        existing_rank = (bool(existing.get("due_date")), existing.get("confidence") or 0)
+        candidate_rank = (bool(task.get("due_date")), task.get("confidence") or 0)
+        if candidate_rank > existing_rank:
+            best[key] = task
+    return [best[key] for key in order]
+
 # --- MAIN TEXT EXTRACTION ENTRY POINT ---
 def extract_task_from_text(text: str, current_time: Optional[str] = None) -> list:
     """Extract all tasks from a user message or uploaded document text.
@@ -1432,10 +1510,10 @@ def extract_task_from_text(text: str, current_time: Optional[str] = None) -> lis
             )
             if valid.get("due_date") and not is_verified:
                 with_conf["description"] += " (Warning: Date not explicitly found in source)"
-                
+
             processed_tasks.append(format_for_frontend(with_conf))
-            
-        return processed_tasks
+
+        return dedupe_extracted_tasks(processed_tasks)
         
     except Exception as e:
         print(f"EXTRACTION ERROR: {e}")

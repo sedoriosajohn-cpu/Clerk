@@ -8,9 +8,12 @@ The goal of Clerk is simple: **reduce manual task entry and make scheduling effo
 ---
 
 ## Features
-* **Multi-Modal Ingestion:** Raw text, `.txt`/`.pdf` file uploads, image uploads (e.g. work schedules), and audio transcription via OpenAI Whisper.
+* **Multi-Modal Ingestion:** Raw text, file uploads (`.pdf`, `.docx`, `.txt`, `.md`, `.csv`), image uploads (e.g. work schedules), live mic recording, and voice-note audio uploads (`.mp3`, `.m4a`, `.wav`, `.ogg`, and more) transcribed via OpenAI Whisper.
 * **Intelligent Extraction:** Automated identification of deadlines, durations, priorities, and assigners using GPT-5. Falls back to local NLP parsing when no API key is configured.
-* **Confidence Scoring:** Each extracted task receives a confidence score. Ambiguous tasks are flagged rather than silently guessed.
+* **Confidence Scoring:** Each extracted task receives a confidence score. Ambiguous tasks are flagged rather than silently guessed, and locally parsed tasks are capped below AI-verified ones.
+* **Cross-Source Deduplication:** The same task arriving from different sources (e.g. a meeting from Google Calendar and the same meeting in an uploaded PDF) is merged instead of duplicated, including fuzzy title and ±1 day matching.
+* **Clerk Insights:** A Review page with per-task confidence, schedule-conflict detection, and a daily brief — AI-written when an OpenAI key is configured, rules-based otherwise.
+* **Secured API:** All task and settings endpoints require a per-session bearer token issued at sign-in; users can only read or modify their own data. Passwords are stored with bcrypt, login attempts are rate-limited, and sessions are invalidated on logout and password reset.
 * **Google Integration:** Sync tasks and events from Gmail, Google Calendar (all calendars, including birthdays), Google Tasks, and Google Classroom. Auto-sync runs in the background every 15 minutes.
 * **Work Schedule Extraction:** Upload a photo or PDF of an employee shift schedule — Clerk finds your row and extracts your shifts as timed reminders.
 * **User Accounts:** Register/login with username and password. Supports optional two-factor authentication via email and "Sign in with Google" (OAuth).

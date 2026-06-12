@@ -16,6 +16,7 @@ from app.extractor import (
     clamp_score,
     clean_task_title,
     compact_text_for_extraction,
+    dedupe_extracted_tasks,
     due_day_key_from_iso,
     evidence_window,
     extract_json,
@@ -154,6 +155,40 @@ def test_parse_due_date_no_date():
     due, _, all_day = parse_due_date("no date here at all", NOW)
     assert due is None and all_day
 
+def test_parse_due_date_day_month_order_swapped():
+    # "25/12" is D/M order — should be read as Dec 25, not crash on month 25.
+    due, _, _ = parse_due_date("party on 25/12", NOW)
+    assert due and "2026-12-25" in due
+
+def test_parse_due_date_invalid_numeric_does_not_crash():
+    due, _, _ = parse_due_date("ratio is 45/99 in the report", NOW)
+    assert due is None
+
+def test_parse_due_date_dash_time_range_is_not_a_date():
+    # "9-5" is a time range, not September 5th.
+    due, _, _ = parse_due_date("I work 9-5 most days", NOW)
+    assert due is None
+
+def test_parse_due_date_dash_with_year_is_a_date():
+    due, _, _ = parse_due_date("submit by 7-15-26", NOW)
+    assert due and "2026-07-15" in due
+
+def test_parse_due_date_tonight_sets_evening_time():
+    due, _, all_day = parse_due_date("take out the trash tonight", NOW)
+    assert due and "2026-06-10" in due and "20:00" in due and not all_day
+
+def test_parse_due_date_in_n_days():
+    due, _, _ = parse_due_date("follow up in 3 days", NOW)
+    assert due and "2026-06-13" in due
+
+def test_parse_due_date_next_week():
+    due, _, _ = parse_due_date("plan the trip next week", NOW)
+    assert due and "2026-06-17" in due
+
+def test_parse_due_date_invalid_month_name_day_does_not_crash():
+    due, _, _ = parse_due_date("see June 31 notes", NOW)
+    assert due is None
+
 
 # ─── extract_json ─────────────────────────────────────────────────────────────
 
@@ -214,6 +249,43 @@ def test_verify_with_regex_not_found():
 
 def test_verify_with_regex_no_extracted_date():
     assert verify_with_regex("some text", None)
+
+def test_verify_with_regex_relative_tomorrow():
+    # "tomorrow" resolves to an absolute date that never appears in the text;
+    # it must still count as grounded instead of triggering the hallucination penalty.
+    assert verify_with_regex("finish the lab tomorrow at 4", "2026-06-11T16:00:00Z")
+
+def test_verify_with_regex_relative_next_week():
+    assert verify_with_regex("schedule the review for next week", "2026-06-17T12:00:00Z")
+
+def test_verify_with_regex_relative_in_n_days():
+    assert verify_with_regex("follow up in 3 days", "2026-06-13T09:00:00Z")
+
+
+# ─── dedupe_extracted_tasks ──────────────────────────────────────────────────
+
+def test_dedupe_extracted_tasks_collapses_same_task():
+    tasks = [
+        {"title": "Submit history essay", "due_date": "2026-06-15T10:00:00", "confidence": 80},
+        {"title": "Submit the history essay", "due_date": "2026-06-15T12:00:00", "confidence": 70},
+    ]
+    assert len(dedupe_extracted_tasks(tasks)) == 1
+
+def test_dedupe_extracted_tasks_keeps_distinct_days():
+    tasks = [
+        {"title": "Team meeting", "due_date": "2026-06-15T10:00:00", "confidence": 80},
+        {"title": "Team meeting", "due_date": "2026-06-16T10:00:00", "confidence": 80},
+    ]
+    assert len(dedupe_extracted_tasks(tasks)) == 2
+
+def test_dedupe_extracted_tasks_prefers_dated_copy():
+    tasks = [
+        {"title": "Submit essay", "due_date": None, "confidence": 90},
+        {"title": "Submit essay", "due_date": None, "confidence": 95},
+    ]
+    result = dedupe_extracted_tasks(tasks)
+    assert len(result) == 1
+    assert result[0]["confidence"] == 95
 
 
 # ─── validate_task ────────────────────────────────────────────────────────────
